@@ -493,10 +493,10 @@ function stage6(state: Readonly<SkuPipelineState>): StageTrace {
       },
       {
         title: 'B3 · Chuẩn hóa sản lượng về năm và quy đổi thành tiền',
-        detail: 'Hệ số chuẩn hóa năm bằng 1 khi đủ 24 CK; bằng 24/N khi có 6–23 CK. Q_năm=ΣY×a_N và V_năm=Q_năm×P; đây là chuẩn hóa so sánh ABC, không phải dự báo.',
+        detail: 'Hệ số chuẩn hóa năm bằng 1 khi đủ 24 CK; bằng 24/N khi có 6–23 CK. Q_năm = ΣY × a_N và V_năm = Q_năm × P; đây là chuẩn hóa so sánh ABC, không phải dự báo.',
         values: [{ label: 'Hệ số chuẩn hóa năm (a_N)', value: c.annualizationFactor === null ? 'Không áp dụng' : fmt(c.annualizationFactor, 2) }, { label: 'Q_năm · Tổng SL năm', value: fmt(c.annualQuantity) }, { label: 'V_năm', value: eligible ? `${fmt(c.annualValue, 0)} ₫` : 'Không xếp tự động' }],
         substitution: eligible
-          ? `a_N = ${c.lockedCycles >= 24 ? '1 vì N ≥ 24' : `24/${c.lockedCycles} = ${fmt(c.annualizationFactor, 2)}`} · Q_năm = ${fmt(c.periodQuantity)} × ${fmt(c.annualizationFactor, 2)} = ${fmt(c.annualQuantity)} · V_năm = ${fmt(c.annualQuantity)} × ${fmt(state.definition.price, 0)} = ${fmt(c.annualValue, 0)} ₫`
+          ? `Hệ số chuẩn hóa năm = ${c.lockedCycles >= 24 ? '1 vì N ≥ 24' : `24/${c.lockedCycles} = ${fmt(c.annualizationFactor, 2)}`} | Q_năm = ${fmt(c.periodQuantity)} × ${fmt(c.annualizationFactor, 2)} = ${fmt(c.annualQuantity)} | V_năm = ${fmt(c.annualQuantity)} × ${fmt(state.definition.price, 0)} = ${fmt(c.annualValue, 0)} ₫`
           : `N = ${c.lockedCycles} < 6 → không năm hóa, không đưa V vào tổng danh mục`,
         tone: eligible ? 'info' : 'warn',
       },
@@ -838,7 +838,9 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
           ? 'Nhóm Z (thưa) → nhịp phát sinh đều thì PulseRhythm, ngược lại Croston.'
           : forecast.model === 'Holt'
             ? 'Nhóm X có tín hiệu xu hướng cục bộ → Holt.'
-            : 'Không mùa vụ, không xu hướng → SES giữ nền ổn định.';
+            : forecast.model === 'SeasonalNaive'
+              ? `Không mùa vụ năm, không xu hướng nhưng phát hiện chu kỳ lặp ngắn p = ${forecast.params['p']} (tự tương quan r = ${forecast.params['r']}) thắng SES trên backtest → seasonal-naïve [D.4-1].`
+              : 'Không mùa vụ, không xu hướng → SES giữ nền ổn định.';
   const steps: TraceStep[] = [
     {
       title: 'B1 · Chọn nhánh mô hình từ nhãn đã khóa',

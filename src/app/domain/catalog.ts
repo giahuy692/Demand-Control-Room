@@ -1,9 +1,20 @@
 import { DailyRecord, SkuDefinition } from './models';
 
-function operationalInputs(id: string, cycles: number): Pick<SkuDefinition, 'supplier' | 'inboundPlan' | 'commitments' | 'futurePromotions' | 'leadTimeHistoryDays' | 'maxStock' | 'warehouseCapacity' | 'shelfLifeDays' | 'purchasePrice' | 'moq' | 'purchaseTermsComplete' | 'actualDemand' | 'actualEndingStock' | 'actualReceiptDelayDays' | 'actualBudgetUsed'> {
+function operationalInputs(id: string, type: string, cycles: number): Pick<SkuDefinition, 'supplier' | 'inboundPlan' | 'commitments' | 'futurePromotions' | 'leadTimeHistoryDays' | 'maxStock' | 'warehouseCapacity' | 'shelfLifeDays' | 'purchasePrice' | 'moq' | 'purchaseTermsComplete' | 'actualDemand' | 'actualEndingStock' | 'actualReceiptDelayDays' | 'actualBudgetUsed'> {
   const ordinal = Number(id.slice(-3)) || 1;
   const leadMean = 105 + (ordinal % 3) * 15;
   const active = cycles > 0;
+  // "Thực tế" C19 phải TIẾP NỐI đúng mẫu nhu cầu lịch sử của chính SKU (cùng targetForCycle),
+  // cộng nhiễu nhẹ và uplift CTKM ở chu kỳ có kế hoạch KM đã xác nhận (cycleOffset 2 & 5 → index 1 & 4).
+  const futureRng = random(hashSeed(`${id}:actual`));
+  const promoUplift = 1 + (5 / 15) * 0.45; // 5 ngày KM ×1.45 trong chu kỳ 15 ngày
+  const actualDemand = active
+    ? Array.from({ length: 6 }, (_, index) => {
+        const base = targetForCycle(type, cycles + index, futureRng);
+        const noisy = base * (0.96 + futureRng() * 0.08);
+        return Math.round(index === 1 || index === 4 ? noisy * promoUplift : noisy);
+      })
+    : [];
   return {
     supplier: `NCC-${String((ordinal % 7) + 1).padStart(2, '0')}`,
     inboundPlan: active ? [
@@ -26,7 +37,7 @@ function operationalInputs(id: string, cycles: number): Pick<SkuDefinition, 'sup
     purchasePrice: 28000 + (ordinal % 17) * 12000,
     moq: [12, 24, 36, 48][ordinal % 4],
     purchaseTermsComplete: active && ordinal % 13 !== 0,
-    actualDemand: active ? Array.from({ length: 6 }, (_, index) => Math.max(0, 70 + (ordinal % 9) * 5 + ((index + ordinal) % 3 - 1) * 8)) : [],
+    actualDemand,
     actualEndingStock: active ? 25 + ordinal % 80 : 0,
     actualReceiptDelayDays: active ? [ordinal % 4, (ordinal + 1) % 5, ordinal % 3] : [],
     actualBudgetUsed: active ? (250 + ordinal % 160) * (28000 + (ordinal % 17) * 12000) : 0,
@@ -56,7 +67,7 @@ const BASE_SKUS: readonly SkuDefinition[] = [
   cycles: cycles as number,
   description: description as string,
   category: category as string,
-  ...operationalInputs(id as string, cycles as number),
+  ...operationalInputs(id as string, type as string, cycles as number),
 }));
 
 const NAMES = ['Sữa rửa mặt CeraVe', 'Kem chống nắng Biore', 'Nước ép Kagome', 'Cà phê Blendy', 'Snack Jagabee', 'Hộp thực phẩm', 'Bút gel cao cấp', 'Bình sữa', 'Tã dán trẻ em', 'Cáp sạc nhanh'];

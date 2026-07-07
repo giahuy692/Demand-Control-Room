@@ -101,8 +101,17 @@ export interface Classification {
   cv2: number | null;
 }
 
+/** Một dòng trong danh sách r(p) đã thử khi dò chu kỳ lặp ngắn [C11 §8.8, §8.12]. */
+export interface ShortCycleScanEntry {
+  p: number;
+  r: number | null;
+  status: 'candidate' | 'below-threshold' | 'insufficient-data';
+}
+
+export type ForecastModelName = 'SES' | 'Holt' | 'Holt-Winters' | 'SeasonalNaive' | 'Croston' | 'PulseRhythm' | 'PurchasePlan';
+
 export interface ForecastResult {
-  model: 'SES' | 'Holt' | 'Holt-Winters' | 'Croston' | 'PulseRhythm' | 'PurchasePlan';
+  model: ForecastModelName;
   params: Record<string, number>;
   baseForecast: number[];
   rmse: number | null;
@@ -115,6 +124,17 @@ export interface ForecastResult {
   wapePositive: number | null;
   lockStatus: LockStatus;
   reason: string;
+  /** Danh sách r(p) đã thử ở cửa chu kỳ ngắn 11XY-SN; null nếu SKU không qua cửa này [C11 §8.12]. */
+  rpScan: ShortCycleScanEntry[] | null;
+  /** Chu kỳ lặp p* đã chọn nếu SeasonalNaive được khóa [C11 §8.8]. */
+  pStar: number | null;
+  /** Mô hình đối chứng đã so ở kiểm tra ngược và WAPE của nó [C11 §8.10]. */
+  controlModel: ForecastModelName | null;
+  controlWape: number | null;
+  /** 'low' khi tập TEST < 3 chu kỳ: ĐỘ TIN CẬY THẤP — KHÔNG DÙNG ĐỂ SO MÔ HÌNH TỰ ĐỘNG [C11 §8.10]. */
+  reliability: 'ok' | 'low';
+  /** Chu kỳ nguồn (1-based) được sao chép cho từng F tương lai của SeasonalNaive [C11 §8.12]. */
+  futureSources: number[] | null;
 }
 
 export interface SupplyMilestone {

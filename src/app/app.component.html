@@ -53,32 +53,11 @@
         <button type="button" class="panel-collapse-rail" (click)="auditCollapsed.set(false)" aria-label="Mở rộng Audit Explorer" title="Mở rộng Audit Explorer"><i aria-hidden="true">»</i><b>AUDIT EXPLORER</b></button>
       }
       <div class="panel-head audit-panel-head">
-        <div><p class="eyebrow">AUDIT EXPLORER</p><h2 id="audit-explorer-title">{{ leftMode() === 'data' ? 'Dữ liệu qua từng chặng' : 'Danh mục SKU' }}</h2></div>
+        <div><p class="eyebrow">AUDIT EXPLORER</p><h2 id="audit-explorer-title">Dữ liệu qua từng chặng</h2></div>
         <div class="panel-head-actions">
-          <div class="view-switch" aria-label="Chế độ cột trái">
-            <button type="button" [class.active]="leftMode() === 'data'" (click)="leftMode.set('data')">Dữ liệu</button>
-            <button type="button" [class.active]="leftMode() === 'catalog'" (click)="leftMode.set('catalog')">Danh mục</button>
-          </div>
           <button type="button" class="panel-collapse-toggle" (click)="auditCollapsed.set(true)" aria-label="Thu gọn Audit Explorer" title="Thu gọn Audit Explorer">«</button>
         </div>
       </div>
-
-      @if (leftMode() === 'catalog') {
-        <div class="search-box">
-          <span aria-hidden="true">⌕</span>
-          <input type="search" aria-label="Tìm SKU" placeholder="Mã, tên hoặc danh mục…" [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)">
-        </div>
-        <div class="column-context"><span>Snapshot</span><b>{{ store.view().hasRun ? 'Sau chặng ' + store.activeStage() : 'Chưa thực thi' }}</b></div>
-        <div class="sku-list" role="listbox" aria-label="Danh sách SKU">
-          @for (sku of visibleCatalog(); track sku.id) {
-            <button type="button" class="sku-row" [class.selected]="sku.id === store.selectedSkuId()" (click)="selectSku(sku)" [attr.aria-selected]="sku.id === store.selectedSkuId()">
-              <span class="sku-index">{{ sku.id.slice(-3) }}</span>
-              <span class="sku-copy"><b>{{ sku.name }}</b><small>{{ sku.category }} · {{ sku.description }}</small></span>
-              <span class="sku-class" [class.pending]="!stateFor(sku.id)">{{ store.stageLabel(stateFor(sku.id)) }}</span>
-            </button>
-          }
-        </div>
-      } @else {
         <div class="audit-sku-bar">
           <div class="audit-sku-copy"><span>{{ selectedDefinition().id }}</span><b>{{ selectedDefinition().name }}</b></div>
           <select aria-label="Đổi SKU kiểm toán" [ngModel]="store.selectedSkuId()" (ngModelChange)="selectSkuId($event)">
@@ -294,8 +273,39 @@
                     @for (param of learning.params | keyvalue; track param.key) { · {{ param.key }} = <b>{{ format(param.value, 2) }}</b> }
                     · TRAIN {{ learning.trainSize }} CK / TEST {{ learning.testSize }} CK. {{ learning.note }}
                   </div>
+                  @if (fit.result.reliability === 'low') {
+                    <div class="insight-note sn-flag">⚠️ <b>ĐỘ TIN CẬY THẤP — KHÔNG DÙNG ĐỂ SO MÔ HÌNH TỰ ĐỘNG</b>: tập TEST chỉ {{ learning.testSize }} chu kỳ (&lt; 3), sai số ngoài mẫu chỉ mang tính tham khảo [C11 §8.10].</div>
+                  }
+                  @if (fit.result.rpScan; as scan) {
+                    <div class="insight-note sn-gate">
+                      <b>Cửa chu kỳ ngắn 11XY-SN</b> — danh sách r(p) đã thử trên TRAIN (tương quan Pearson dãy A/B [C11 §8.5], ngưỡng mở 0,60):
+                      @for (entry of scan; track entry.p) {
+                        <span class="rp-entry" [class.rp-candidate]="entry.status === 'candidate'">p={{ entry.p }}: {{ entry.r === null ? (entry.status === 'insufficient-data' ? 'thiếu dữ liệu' : '—') : format(entry.r, 2) }}</span>
+                      }
+                      @if (fit.result.pStar !== null) {
+                        <br>→ p* = <b>{{ fit.result.pStar }}</b>;
+                        @if (fit.result.model === 'SeasonalNaive') {
+                          seasonal-naïve <b>thắng</b> mô hình đối chứng {{ fit.result.controlModel }} trên TEST (WAPE {{ fit.result.wape === null ? '—' : format(fit.result.wape * 100, 1) + '%' }} so với {{ fit.result.controlWape === null ? '—' : format(fit.result.controlWape * 100, 1) + '%' }}) [C11 §8.10].
+                        } @else {
+                          seasonal-naïve <b>không được chọn</b> — giữ mô hình đối chứng {{ fit.result.controlModel }} (xem lý do ở thẻ tóm tắt) [C11 §8.10–8.11].
+                        }
+                      } @else {
+                        <br>→ Không có p nào đạt ngưỡng → không mở Seasonal-naïve; giữ nhánh {{ fit.result.controlModel }} [C11 §8.11].
+                      }
+                    </div>
+                  }
+                  <div class="calc-hover-hint" [class.active]="learnCellExplanation()" aria-live="polite">
+                    @if (learnCellExplanation(); as explanation) {
+                      <b>{{ explanation.title }}</b>
+                      <code>{{ explanation.formula }}</code>
+                      @if (explanation.substitution) { <code class="calc-substitution">{{ explanation.substitution }}</code> }
+                      <p>{{ explanation.meaning }}</p>
+                    } @else {
+                      <p>💡 Di chuột vào một ô L / T / S / F / Sai số: công thức của ô hiện ở đây và <span class="hint-source">các ô nguồn</span> dùng để tính ra nó sẽ sáng lên trong bảng.</p>
+                    }
+                  </div>
                   <div class="audit-table-wrap">
-                    <table class="audit-table insight-table">
+                    <table class="audit-table insight-table learning-table" (mouseleave)="clearLearnHover()">
                       <thead>
                         <tr>
                           <th>CK</th><th>Pha</th><th>Y thực</th>
@@ -310,25 +320,30 @@
                           <tr [class.learning-test]="row.phase === 'test'" [class.learning-init]="row.phase === 'init'">
                             <td class="cycle-id">{{ row.index.toString().padStart(2, '0') }}</td>
                             <td><small>{{ row.phase === 'init' ? 'KHỞI TẠO' : row.phase === 'train' ? 'TRAIN' : 'TEST' }}</small></td>
-                            <td class="value">{{ format(row.actual, 1) }}</td>
-                            @if (learning.levelLabel) { <td>{{ format(row.level, 2) }}</td> }
-                            @if (learning.trendLabel) { <td>{{ format(row.trend, 2) }}</td> }
-                            @if (learning.seasonLabel) { <td>{{ format(row.season, 2) }}</td> }
-                            <td class="base-value">{{ format(row.forecast, 2) }}</td>
-                            <td [class.err-neg]="(row.error ?? 0) < 0" [class.err-pos]="(row.error ?? 0) > 0">{{ row.error === null ? '—' : (row.error > 0 ? '+' : '') + format(row.error, 1) }}</td>
+                            <td class="value calc-cell" (mouseenter)="hoverLearnCell(row.index, 'actual')" [class.calc-target]="isLearnTarget(row.index, 'actual')" [class.calc-source]="isLearnSource(row.index, 'actual')">{{ format(row.actual, 1) }}</td>
+                            @if (learning.levelLabel) { <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'level')" [class.calc-target]="isLearnTarget(row.index, 'level')" [class.calc-source]="isLearnSource(row.index, 'level')">{{ format(row.level, 2) }}</td> }
+                            @if (learning.trendLabel) { <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'trend')" [class.calc-target]="isLearnTarget(row.index, 'trend')" [class.calc-source]="isLearnSource(row.index, 'trend')">{{ format(row.trend, 2) }}</td> }
+                            @if (learning.seasonLabel) { <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'season')" [class.calc-target]="isLearnTarget(row.index, 'season')" [class.calc-source]="isLearnSource(row.index, 'season')">{{ format(row.season, 2) }}</td> }
+                            <td class="base-value calc-cell" (mouseenter)="hoverLearnCell(row.index, 'forecast')" [class.calc-target]="isLearnTarget(row.index, 'forecast')" [class.calc-source]="isLearnSource(row.index, 'forecast')">{{ format(row.forecast, 2) }}</td>
+                            <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'error')" [class.calc-target]="isLearnTarget(row.index, 'error')" [class.calc-source]="isLearnSource(row.index, 'error')" [class.err-neg]="(row.error ?? 0) < 0" [class.err-pos]="(row.error ?? 0) > 0">{{ row.error === null ? '—' : (row.error > 0 ? '+' : '') + format(row.error, 1) }}</td>
                           </tr>
                         }
                       </tbody>
                     </table>
                   </div>
                   <div class="learning-footer">
-                    <div><span>RMSE (TEST)</span><b>{{ format(fit.result.rmse, 2) }}</b></div>
-                    <div><span>nRMSE (TEST)</span><b>{{ fit.result.nrmse === null ? '—' : format(fit.result.nrmse * 100, 1) + '%' }}</b></div>
-                    <div><span>WAPE (TEST)</span><b>{{ fit.result.wape === null ? '—' : format(fit.result.wape * 100, 1) + '%' }}</b></div>
-                    <div><span>Bias (TEST)</span><b>{{ fit.result.bias === null ? '—' : format(fit.result.bias * 100, 1) + '%' }}</b></div>
-                    <div><span>Trạng thái mô hình</span><b>{{ fit.result.lockStatus.toUpperCase() }}</b></div>
-                    <div class="learning-future"><span>Fᵦ 6 chu kỳ tới</span><b>{{ formatSeries(learning.future) }}</b></div>
+                    <div class="metric-tip" tabindex="0" (mouseenter)="showMetricTip($event, 'rmse')" (mouseleave)="hideMetricTip()" (focus)="showMetricTip($event, 'rmse')" (blur)="hideMetricTip()"><span>RMSE (TEST)</span><b>{{ format(fit.result.rmse, 2) }}</b></div>
+                    <div class="metric-tip" tabindex="0" (mouseenter)="showMetricTip($event, 'nrmse')" (mouseleave)="hideMetricTip()" (focus)="showMetricTip($event, 'nrmse')" (blur)="hideMetricTip()"><span>nRMSE (TEST)</span><b>{{ fit.result.nrmse === null ? '—' : format(fit.result.nrmse * 100, 1) + '%' }}</b></div>
+                    <div class="metric-tip" tabindex="0" (mouseenter)="showMetricTip($event, 'wape')" (mouseleave)="hideMetricTip()" (focus)="showMetricTip($event, 'wape')" (blur)="hideMetricTip()"><span>WAPE (TEST)</span><b>{{ fit.result.wape === null ? '—' : format(fit.result.wape * 100, 1) + '%' }}</b></div>
+                    <div class="metric-tip" tabindex="0" (mouseenter)="showMetricTip($event, 'bias')" (mouseleave)="hideMetricTip()" (focus)="showMetricTip($event, 'bias')" (blur)="hideMetricTip()"><span>Bias (TEST)</span><b>{{ fit.result.bias === null ? '—' : format(fit.result.bias * 100, 1) + '%' }}</b></div>
+                    <div class="metric-tip" tabindex="0" (mouseenter)="showMetricTip($event, 'lock')" (mouseleave)="hideMetricTip()" (focus)="showMetricTip($event, 'lock')" (blur)="hideMetricTip()"><span>Trạng thái mô hình</span><b>{{ fit.result.lockStatus.toUpperCase() }}</b></div>
+                    <div class="learning-future metric-tip" tabindex="0" (mouseenter)="showMetricTip($event, 'future')" (mouseleave)="hideMetricTip()" (focus)="showMetricTip($event, 'future')" (blur)="hideMetricTip()"><span>Fᵦ 6 chu kỳ tới</span><b>{{ formatSeries(learning.future) }}</b></div>
                   </div>
+                  @if (fit.result.futureSources; as sources) {
+                    <div class="insight-note sn-sources">Chu kỳ nguồn được sao chép [C11 §8.12]:
+                      @for (source of sources; track $index) { <span class="rp-entry">F₊{{ $index + 1 }} ← CK {{ source.toString().padStart(2, '0') }}</span> }
+                    </div>
+                  }
                 } @else {
                   <div class="insight-empty"><b>{{ fit.result.model }}</b><p>{{ fit.result.reason }}</p></div>
                 }
@@ -470,7 +485,6 @@
             }
           }
         }
-      }
     </section>
 
     <section class="panel process-panel collapsible-panel" [class.collapsed]="processCollapsed()" aria-labelledby="stage-title">
@@ -486,9 +500,9 @@
           <p>{{ store.view().definition.goal }}</p>
         </div>
         <div class="stage-nav-actions">
+          <button type="button" (click)="processCollapsed.set(true)" aria-label="Thu gọn process panel" title="Thu gọn process panel">«</button>
           <button type="button" aria-label="Chặng trước" (click)="store.goPrevious()" [disabled]="store.activeStage() === 1">←</button>
           <button type="button" aria-label="Chặng tiếp theo" (click)="store.goNext()" [disabled]="store.activeStage() >= 19 || store.isRunning()">→</button>
-          <button type="button" class="panel-collapse-toggle" (click)="processCollapsed.set(true)" aria-label="Thu gọn process panel" title="Thu gọn process panel">«</button>
         </div>
       </div>
 
@@ -588,16 +602,36 @@
         </button>
       } @else {
       <div class="panel-head sticky-head">
-        <div><p class="eyebrow">SKU CONTEXT</p><h2 id="sku-title">Snapshot cùng chặng</h2></div>
+        <div><p class="eyebrow">SKU CONTEXT</p><h2 id="sku-title">{{ rightMode() === 'catalog' ? 'Danh mục SKU' : 'Thông số SKU' }}</h2></div>
         <div class="context-head-actions">
-          <span class="live-chip"><i></i>{{ store.view().hasRun ? 'LOCKED' : 'WAIT' }}</span>
+          <div class="view-switch" aria-label="Chế độ cột phải">
+            <button type="button" [class.active]="rightMode() === 'catalog'" (click)="rightMode.set('catalog')">Danh mục</button>
+            <button type="button" [class.active]="rightMode() === 'context'" (click)="rightMode.set('context')">Thông số</button>
+          </div>
           <button type="button" class="context-toggle" (click)="contextCollapsed.set(true)" aria-label="Thu gọn bảng SKU context" title="Thu gọn">»</button>
         </div>
       </div>
-      <div class="sku-identity">
-        <div class="product-mark">{{ selectedDefinition().id.slice(-2) }}</div>
-        <div><span>{{ selectedDefinition().id }}</span><h3>{{ selectedDefinition().name }}</h3><p>{{ selectedDefinition().category }}</p></div>
-      </div>
+
+      @if (rightMode() === 'catalog') {
+        <div class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <input type="search" aria-label="Tìm SKU" placeholder="Mã, tên hoặc danh mục…" [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)">
+        </div>
+        <div class="column-context"><span>Snapshot</span><b>{{ store.view().hasRun ? 'Sau chặng ' + store.activeStage() : 'Chưa thực thi' }}</b></div>
+        <div class="sku-list" role="listbox" aria-label="Danh sách SKU">
+          @for (sku of visibleCatalog(); track sku.id) {
+            <button type="button" class="sku-row" [class.selected]="sku.id === store.selectedSkuId()" (click)="selectSku(sku)" [attr.aria-selected]="sku.id === store.selectedSkuId()">
+              <span class="sku-index">{{ sku.id.slice(-3) }}</span>
+              <span class="sku-copy"><b>{{ sku.name }}</b><small>{{ sku.category }} · {{ sku.description }}</small></span>
+              <span class="sku-class" [class.pending]="!stateFor(sku.id)">{{ store.stageLabel(stateFor(sku.id)) }}</span>
+            </button>
+          }
+        </div>
+      } @else {
+        <div class="sku-identity">
+          <div class="product-mark">{{ selectedDefinition().id.slice(-2) }}</div>
+          <div><span>{{ selectedDefinition().id }}</span><h3>{{ selectedDefinition().name }}</h3><p>{{ selectedDefinition().category }}</p></div>
+        </div>
 
       @if (!store.view().state) {
         <div class="drawer-wait"><span>⌁</span><h3>Không đọc trước tương lai</h3><p>Drawer sẽ nhận đúng snapshot sau khi Chặng {{ store.activeStage() }} chạy xong.</p></div>
@@ -703,10 +737,12 @@
         }
       }
       }
+      }
     </aside>
   </main>
 
   @if (journeyOpen()) { <app-journey-map (closed)="journeyOpen.set(false)" /> }
+  @if (metricTip(); as tip) { <div class="metric-tooltip" role="tooltip" [style.left.px]="tip.x" [style.top.px]="tip.y">{{ tip.text }}</div> }
 
   <footer><span>Demand Planning Simulation · Angular Signals</span><span>{{ store.policy().version }} · {{ store.catalog.length }} SKU</span></footer>
 </div>

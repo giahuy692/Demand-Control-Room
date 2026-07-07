@@ -26,6 +26,12 @@ function stage11ModelFormulas(state: Readonly<SkuPipelineState> | null): Formula
       f('Cập nhật mùa vụ', String.raw`S_t=\gamma\frac{Y_t}{L_t}+(1-\gamma)S_{t-m}`, 'C11 §7.4'),
       f('Dự báo Holt-Winters', String.raw`F_{t+k}=(L_t+kT_t)S_{t-m+k}`, 'C11 §7.5'), ...METRICS,
     ];
+    case 'SeasonalNaive': return [
+      f('Tương quan lệch p (dãy A/B trên TRAIN)', String.raw`A=Y_{p+1..T},\ B=Y_{1..T-p};\qquad r(p)=\frac{\sum_{i=1}^{T-p}(A_i-\overline{A})(B_i-\overline{B})}{\sqrt{\sum_{i=1}^{T-p}(A_i-\overline{A})^2\times\sum_{i=1}^{T-p}(B_i-\overline{B})^2}}`, 'C11 §8.5'),
+      f('Chọn chu kỳ lặp', String.raw`p^{*}=\arg\max_{2\le p\le12} r(p),\qquad r(p^{*})\ge0{,}60\ \text{(ngưỡng khởi điểm đề xuất)}`, 'C11 §8.7–8.8'),
+      f('Dự báo lặp vị trí', String.raw`F_t=Y_{t-p^{*}}\ \text{(tương lai lặp mẫu }p^{*}\text{ giá trị cuối)}`, 'C11 §8.9'),
+      f('Điều kiện chọn', String.raw`\operatorname{WAPE}_{\mathrm{SN}}^{\mathrm{TEST}}<\operatorname{WAPE}_{\text{đối chứng}}^{\mathrm{TEST}},\qquad n_{\mathrm{TEST}}\ge3`, 'C11 §8.10'), ...METRICS,
+    ];
     case 'Croston': return [
       f('Khoảng cách khởi tạo', String.raw`P_1=t_2-t_1`, 'C11 §8.5'),
       f('Cập nhật khi phát sinh', String.raw`Z_t=\alpha Y_t+(1-\alpha)Z_{t-1},\qquad P_t=\alpha I_t+(1-\alpha)P_{t-1}`, 'C11 §8.5'),

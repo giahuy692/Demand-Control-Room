@@ -128,4 +128,20 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
       expect(['future-version', 'monitor']).toContain(audit.proposalStatus);
     }
   });
+
+  it('C19 dữ liệu thực tế mô phỏng phải tiếp nối đúng mẫu nhu cầu lịch sử của từng SKU', () => {
+    const snapshot = runTo(1);
+    const definitionOf = (id: string) => snapshot.states[id].definition;
+    // Nhịp 3 chu kỳ (SKU-003, lịch sử 24 CK): chu kỳ tương lai 26 & 29 → index 2 & 5 có nhu cầu, còn lại 0.
+    const pulse = definitionOf('SKU-003').actualDemand;
+    expect(pulse.map(value => value > 0)).toEqual([false, false, true, false, false, true]);
+    expect(pulse[2]).toBeGreaterThan(75);
+    // Mùa vụ 24 vị trí (SKU-002, 72 CK lịch sử): tương lai bắt đầu lại từ vị trí 0 (mùa thấp ~20).
+    const seasonal = definitionOf('SKU-002').actualDemand;
+    expect(seasonal[0]).toBeGreaterThan(15);
+    expect(seasonal[0]).toBeLessThan(30);
+    expect(seasonal[5]).toBeGreaterThan(seasonal[0]); // vị trí 5 (≈96) cao hơn hẳn vị trí 0 (≈20)
+    // Nhóm D nhu cầu 0 (SKU-014) không được có "thực tế" dương giả tạo.
+    expect(definitionOf('SKU-014').actualDemand.every(value => value === 0)).toBe(true);
+  });
 });

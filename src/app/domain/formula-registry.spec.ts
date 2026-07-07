@@ -4,7 +4,7 @@ import { getStageFormulas } from './formula-registry';
 import { DEFAULT_POLICY } from './policy';
 import { ForecastResult, SkuPipelineState, StageNumber } from './models';
 
-const MODELS: ForecastResult['model'][] = ['SES', 'Holt', 'Holt-Winters', 'Croston', 'PulseRhythm', 'PurchasePlan'];
+const MODELS: ForecastResult['model'][] = ['SES', 'Holt', 'Holt-Winters', 'SeasonalNaive', 'Croston', 'PulseRhythm', 'PurchasePlan'];
 
 describe('Formula registry', () => {
   it('mọi công thức Chặng 1–19 render được bằng KaTeX và có nguồn tài liệu', () => {

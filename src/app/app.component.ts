@@ -8,6 +8,7 @@ import {
   buildAbcBoard, buildForecastAudit, buildFinalForecastAudit, buildPolicyMatrix, buildPromoAudit,
   buildSafetyAudit, buildSeasonalityAudit, buildSupplyAudit, buildTrendAudit, buildXyzBoard,
 } from './domain/stage-insights';
+import { explainLearningCell, LearningColumn } from './domain/forecast-models';
 import { SimulationStore, viNumberFormat } from './state/simulation.store';
 import { JourneyMapComponent } from './ui/journey-map.component';
 import { MathFormulaComponent } from './ui/math-formula.component';
@@ -25,6 +26,7 @@ export class AppComponent implements OnInit {
   readonly stages = STAGES;
   readonly searchQuery = signal('');
   readonly leftMode = signal<'data' | 'catalog'>('data');
+  readonly rightMode = signal<'catalog' | 'context'>('catalog');
   readonly auditDate = signal<string | null>(null);
   readonly journeyOpen = signal(false);
   readonly contextCollapsed = signal(false);
@@ -116,6 +118,51 @@ export class AppComponent implements OnInit {
     const state = this.store.selectedState();
     return state && this.store.activeStage() >= 11 ? buildForecastAudit(state) : null;
   });
+
+  // ── Hover giải thích cách tính từng ô của bảng học C11 ──
+  readonly hoveredLearnCell = signal<{ index: number; column: LearningColumn } | null>(null);
+  readonly learnCellExplanation = computed(() => {
+    const hover = this.hoveredLearnCell();
+    const learning = this.forecastAudit()?.learning;
+    if (!hover || !learning) return null;
+    return explainLearningCell(learning, hover.index, hover.column);
+  });
+  private readonly learnSourceSet = computed(() => new Set(
+    this.learnCellExplanation()?.sources.map(source => `${source.index}:${source.column}`) ?? [],
+  ));
+  hoverLearnCell(index: number, column: LearningColumn): void {
+    const current = this.hoveredLearnCell();
+    if (current?.index !== index || current.column !== column) this.hoveredLearnCell.set({ index, column });
+  }
+  clearLearnHover(): void { this.hoveredLearnCell.set(null); }
+  isLearnSource(index: number, column: LearningColumn): boolean { return this.learnSourceSet().has(`${index}:${column}`); }
+  isLearnTarget(index: number, column: LearningColumn): boolean {
+    const hover = this.hoveredLearnCell();
+    return !!hover && hover.index === index && hover.column === column;
+  }
+
+  /** Tooltip sai số dùng position:fixed render ở gốc app — không bị panel overflow:hidden che. */
+  readonly metricTip = signal<{ text: string; x: number; y: number } | null>(null);
+  showMetricTip(event: Event, key: string): void {
+    const text = this.metricTips[key];
+    const host = event.currentTarget as HTMLElement | null;
+    if (!text || !host) return;
+    const rect = host.getBoundingClientRect();
+    const width = 264;
+    const x = Math.max(8, Math.min(rect.left, window.innerWidth - width - 12));
+    this.metricTip.set({ text, x, y: rect.top - 8 });
+  }
+  hideMetricTip(): void { this.metricTip.set(null); }
+
+  /** Ý nghĩa các chỉ tiêu sai số backtest C11 — hiện khi hover chân bảng. */
+  readonly metricTips: Record<string, string> = {
+    rmse: 'Root Mean Squared Error — căn bậc hai của trung bình bình phương sai số trên pha TEST. Đơn vị trùng đơn vị bán; phạt rất nặng những cú trượt lớn. RMSE càng nhỏ mô hình càng bám sát.',
+    nrmse: 'RMSE chia cho sức mua thực trung bình của pha TEST — đưa về % để so sánh công bằng giữa SKU bán nhiều và SKU bán ít.',
+    wape: 'Weighted Absolute Percentage Error = Σ|Y − F| / ΣY trên pha TEST — trung bình mỗi 100 đơn vị bán thực thì dự báo lệch bao nhiêu đơn vị. Đây là thước đo chính để so hai mô hình.',
+    bias: 'Bias = (ΣF − ΣY) / ΣY trên pha TEST — đo độ lệch HỆ THỐNG. Dương: mô hình dự báo cao hơn thực (nguy cơ thừa hàng); âm: thấp hơn thực (nguy cơ thiếu hàng). Gần 0 là cân.',
+    lock: 'REVIEW: tài liệu chưa ban hành ngưỡng P25 chính thức nên không mô hình nào được tự khóa — kết quả cần người duyệt. EXCEPTION: không đo được sai số (thiếu TEST).',
+    future: 'Dự báo NỀN cho 6 chu kỳ tới, sinh từ trạng thái L/T/S cuối cùng (chưa áp hệ số CTKM — việc đó thuộc Chặng 13). Xu hướng khi dự phóng bị chặn ±15%.',
+  };
   readonly promoAudit = computed(() => {
     const state = this.store.selectedState();
     return state ? buildPromoAudit(state) : null;

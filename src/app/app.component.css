@@ -203,6 +203,10 @@ footer { display: flex; justify-content: space-between; padding: 11px 4px 0; col
 /* Stage insights — panel trái đối ứng từng chặng */
 .insight-note { padding: 8px 11px; border-bottom: 1px solid var(--line); background: rgba(110,231,231,.035); color: var(--muted); font-size: 9px; line-height: 1.5; }
 .insight-note b { color: var(--cyan); }
+.insight-note.sn-flag { background: rgba(255,171,46,.08); }
+.insight-note.sn-flag b { color: #ffab2e; }
+.rp-entry { display: inline-block; margin: 1px 3px 1px 0; padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; color: var(--faint); }
+.rp-entry.rp-candidate { border-color: rgba(110,231,231,.5); color: var(--cyan); }
 .insight-table { min-width: 0; font-size: 9px; }
 .insight-table.abc-table { min-width: 980px; }.insight-table.xyz-table { min-width: 1120px; }
 .insight-table th { min-width: 0; }
@@ -274,6 +278,27 @@ footer { display: flex; justify-content: space-between; padding: 11px 4px 0; col
 .learning-footer b { display: block; margin-top: 4px; color: var(--amber); font: 650 12px "Cascadia Code", monospace; }
 .learning-footer .learning-future { flex: 2 1 100%; }
 .learning-footer .learning-future b { color: var(--cyan); font-size: 10px; }
+
+/* C11 · hover giải thích cách tính từng ô.
+   Chiều cao CỐ ĐỊNH: nội dung đổi khi rê chuột không được làm bảng bên dưới trồi/sụt (gây vòng lặp hover giật). */
+.calc-hover-hint { flex: 0 0 108px; height: 108px; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; overflow-y: auto; border-bottom: 1px solid var(--line); background: #0c1015; scrollbar-width: thin; }
+.calc-hover-hint > :first-child { margin-top: auto; }
+.calc-hover-hint > :last-child { margin-bottom: auto; }
+.calc-hover-hint p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.calc-hover-hint b { flex-shrink: 0; color: var(--amber); font-size: 10px; }
+.calc-hover-hint code { display: block; flex-shrink: 0; width: fit-content; max-width: 100%; padding: 2px 7px; border: 1px solid #2e4a52; border-radius: 4px; background: rgba(110,231,231,.05); color: var(--cyan); font: 650 9px "Cascadia Code", monospace; overflow-wrap: anywhere; }
+.calc-hover-hint code.calc-substitution { border-color: #684a21; background: rgba(255,171,46,.06); color: #ffc56e; }
+.calc-hover-hint.active { background: rgba(110,231,231,.03); }
+.calc-hover-hint .hint-source { color: var(--cyan); font-weight: 700; }
+/* Chỉ đổi màu nền/viền — KHÔNG đổi font-weight để bề rộng cột không nhảy khi hover */
+.learning-table .calc-cell { cursor: help; }
+.learning-table .calc-cell.calc-source { background: rgba(110,231,231,.16); box-shadow: inset 0 0 0 1px rgba(110,231,231,.65); color: var(--cyan); }
+.learning-table .calc-cell.calc-target { background: rgba(255,171,46,.18); box-shadow: inset 0 0 0 1px var(--amber); color: var(--amber); }
+
+/* Tooltip ý nghĩa chỉ tiêu sai số: render position:fixed ở gốc app để không bị .panel overflow:hidden cắt */
+.metric-tip { cursor: help; }
+.metric-tip > span { border-bottom: 1px dotted #50586a; padding-bottom: 1px; }
+.metric-tooltip { position: fixed; z-index: 90; width: 264px; padding: 9px 11px; border: 1px solid #3a4352; border-radius: 7px; background: #1a1f2b; color: var(--text); font: 400 10px/1.55 "Segoe UI", sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,.5); pointer-events: none; transform: translateY(-100%); }
 
 .insight-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; flex: 1; min-height: 180px; padding: 24px; text-align: center; }
 .insight-empty b { color: var(--amber); font: 700 12px "Bahnschrift", sans-serif; letter-spacing: .1em; }

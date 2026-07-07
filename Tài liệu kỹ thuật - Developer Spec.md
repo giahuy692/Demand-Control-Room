@@ -537,3 +537,17 @@ Test: 500+90−220=370 → ceil(370/24)×24=384, dư 14.
 ## 7. Ghi chú sai lệch đã phát hiện trong tài liệu giải pháp
 
 Xem file `Báo cáo rà soát và đề xuất.md` — các điểm cần chủ sở hữu tài liệu quyết định (đánh số thiếu mục, bảng bàn giao lệch số chặng, ràng buộc α mâu thuẫn giữa C11 §5.3 và §5.5, v.v.). **Tài liệu giải pháp không được tự ý sửa.**
+
+## 8. Nhánh 11XY-SN — Seasonal-naïve chu kỳ lặp ngắn (đồng bộ theo Tài liệu giải pháp C11 mục 8, cập nhật 2026-07-06)
+
+> Lịch sử: mục này ban đầu là "Sửa đổi C11 §8.7" theo Đề xuất D.4-1 (bản vá phạm vi mô phỏng). Tài liệu giải pháp nay đã ban hành đặc tả chính thức tại **C11 mục 8 (nhánh 11XY-SN)**; nội dung dưới đây theo đúng đặc tả đó và thay thế bản vá cũ.
+
+1. **Cửa kiểm tra đặt sau MỌI nhánh X/Y** [C11 sơ đồ mục 13]: kể cả khi nhánh đang thắng là Holt hoặc Holt-Winters, không chỉ nhánh SES mặc định.
+2. **Dò chu kỳ lặp** [C11 §8.5]: trên đúng tập TRAIN, tính **tương quan Pearson giữa dãy A = Y_{p+1..T} và dãy B = Y_{1..T−p}** (hai trung bình riêng Ā/B̄, mẫu số `√(ΣA²·ΣB²)`) cho `p ∈ [2..12]`, chỉ xét p đủ 2 vòng lặp (`2p ≤ n_TRAIN`). Chọn `p* = argmax r(p)`; **gần như hòa → ưu tiên p nhỏ** (dung sai khởi điểm 0,05) [C11 §8.8]. Toàn bộ danh sách r(p) đã thử được lưu làm bằng chứng (`rpScan`) [C11 §8.12].
+3. **Điều kiện kích hoạt**: `r(p*) ≥ 0,60` (ngưỡng khởi điểm đề xuất của tài liệu, chưa phải ngưỡng phê duyệt) [C11 §8.7].
+4. **Mô hình** [C11 §8.9]: `Fₜ = Yₜ₋ₚ*`; **F = null trong p\* chu kỳ đầu** (chưa có vòng lặp trước — không dự báo khi thiếu căn cứ). Tương lai lặp mẫu p\* giá trị cuối; **chu kỳ nguồn được sao chép** của từng F tương lai được lưu (`futureSources`) [C11 §8.12].
+5. **Điều kiện chọn** [C11 §8.10]: WAPE TEST của Seasonal-naïve phải **nhỏ hơn CHẶT** WAPE TEST của **mô hình đối chứng đang thắng** của nhánh (SES/Holt/Holt-Winters tùy bối cảnh); hòa hoặc thua → giữ mô hình đối chứng [SN-08]. Nếu **TEST < 3 chu kỳ** → gắn cờ `ĐỘ TIN CẬY THẤP — KHÔNG DÙNG ĐỂ SO MÔ HÌNH TỰ ĐỘNG`, SN chỉ tính sai số tham khảo, giữ đối chứng [C11 §8.10, mục 12, SN-04].
+6. **Quy tắc thắng chung đi kèm** [C11 §4.3 bước 7, §4.5]: Holt phải thắng SES (cả nhánh Y-xu hướng); Holt-Winters phải thắng Holt/SES; thua → fallback đúng thứ tự HW → Holt → SES. SES tối ưu α trong miền `0,05 ≤ α ≤ 0,5` [C11 §5.5]; Holt/HW ràng buộc `β ≤ α`, HW thêm `γ ≤ 1−α` [C11 §4.2].
+7. Trạng thái khóa vẫn tuân P25 (REVIEW cho đến khi ngưỡng chính thức được ban hành). Không áp dụng cho nhóm Z (mục 9 nhóm Z) và nhóm D.
+
+Ca kiểm thử bắt buộc: SN-01..SN-10 [C11 §8.13] cài tại `forecast-models.spec.ts` (SN-06/SN-07 ngoài phạm vi mô phỏng — chuỗi vào C11 là chu kỳ locked liền mạch từ C5, có ghi chú skip kèm lý do). Số liệu kiểm chứng tại `Báo cáo rà soát và đề xuất.md` Phần D.

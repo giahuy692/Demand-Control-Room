@@ -82,7 +82,13 @@ function createCalculations(stage: StageNumber, state: Readonly<SkuPipelineState
     ];
     case 9: return [{ label: 'Cấu trúc mùa vụ', value: state.seasonality }, { label: 'Chu kỳ dùng', value: formatNumber(locked.length) }];
     case 10: return [{ label: 'g₁', value: formatPercent(state.trendRates[0]) }, { label: 'g₂', value: formatPercent(state.trendRates[1]) }];
-    case 11: return [{ label: 'WAPE', value: formatPercent(state.forecast?.wape) }, { label: 'Bias', value: formatPercent(state.forecast?.bias) }];
+    case 11: return [
+      { label: 'WAPE', value: formatPercent(state.forecast?.wape) },
+      { label: 'Bias', value: formatPercent(state.forecast?.bias) },
+      ...(state.forecast?.pStar != null ? [{ label: 'p* chu kỳ ngắn', value: `${state.forecast.pStar} CK` }] : []),
+      ...(state.forecast?.controlModel ? [{ label: 'Đối chứng [C11 §8.10]', value: `${state.forecast.controlModel} · WAPE ${formatPercent(state.forecast.controlWape)}` }] : []),
+      ...(state.forecast?.reliability === 'low' ? [{ label: 'Độ tin cậy', value: 'THẤP — TEST < 3 CK' }] : []),
+    ];
     case 12: return [{ label: 'K khóa', value: formatNumber(state.promoFactor, 2) }, { label: 'Độ tin cậy', value: state.promoConfidence }];
     case 13: return state.finalForecast.map((value, index) => ({ label: `CK +${index + 1}`, value: formatNumber(value, 1) }));
     case 14: return [{ label: 'I_free(t)', value: formatNumber(state.freeStock) }, { label: 'Mốc bảo vệ', value: 'Hàng về kho' }];

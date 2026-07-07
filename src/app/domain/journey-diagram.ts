@@ -43,9 +43,11 @@ SKU − nơi bán − ngày − số bán ghi nhận trong ngày − mã/vùng C
         Q11_Y_TREND{"Nhóm Y có xu hướng đủ căn cứ?"}
 
         S11_X["11X. Nhóm X: SES hoặc Holt"]
-        S11_Y_HW["11Y. Nhóm Y có mùa vụ: Holt-Winters"]
-        S11_Y_HOLT["11Y. Nhóm Y không mùa vụ nhưng có xu hướng: Holt"]
-        S11_Y_SES["11Y. Nhóm Y không mùa vụ, không xu hướng: SES hoặc nền ổn định"]
+        S11_Y_HW["11Y-1. Nhóm Y có mùa vụ: Holt-Winters"]
+        S11_Y_HOLT["11Y-2. Nhóm Y không mùa vụ nhưng có xu hướng: Holt"]
+        S11_Y_SES["11Y-3. Nhóm Y không mùa vụ, không xu hướng: SES hoặc nền ổn định"]
+        Q11_SN{"Chuỗi X/Y có ứng viên chu kỳ ngắn 2-12?"}
+        S11_SN["11XY-SN. Thêm Seasonal-naïve vào danh sách ứng viên"]
         S11_Z["11Z. Nhóm Z: Croston hoặc nhịp phát sinh"]
         S11_D["11D. Nhóm D: kế hoạch MD hoặc mượn mã tương tự"]
         S11_BACKTEST["11. Kiểm tra ngược và khóa dự báo nền"]
@@ -54,12 +56,14 @@ SKU − nơi bán − ngày − số bán ghi nhận trong ngày − mã/vùng C
         S13_PROMO_APPLY["13. Áp kế hoạch CTKM tương lai bằng hệ số KM"]
 
         S11_ROUTER --> Q11_GROUP
-        Q11_GROUP -- "Nhóm X" --> S11_X --> S11_BACKTEST
+        Q11_GROUP -- "Nhóm X" --> S11_X --> Q11_SN
         Q11_GROUP -- "Nhóm Y" --> S9_Y --> S10_Y --> Q11_Y_SEASON
-        Q11_Y_SEASON -- "Có" --> S11_Y_HW --> S11_BACKTEST
+        Q11_Y_SEASON -- "Có" --> S11_Y_HW --> Q11_SN
         Q11_Y_SEASON -- "Không" --> Q11_Y_TREND
-        Q11_Y_TREND -- "Có" --> S11_Y_HOLT --> S11_BACKTEST
-        Q11_Y_TREND -- "Không" --> S11_Y_SES --> S11_BACKTEST
+        Q11_Y_TREND -- "Có" --> S11_Y_HOLT --> Q11_SN
+        Q11_Y_TREND -- "Không" --> S11_Y_SES --> Q11_SN
+        Q11_SN -- "Có" --> S11_SN --> S11_BACKTEST
+        Q11_SN -- "Không" --> S11_BACKTEST
         Q11_GROUP -- "Nhóm Z" --> S11_Z --> S11_BACKTEST
         Q11_GROUP -- "Nhóm D" --> S11_D --> S11_BACKTEST
         S11_BACKTEST --> S13_PROMO_APPLY

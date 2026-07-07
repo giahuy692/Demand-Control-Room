@@ -1,4 +1,4 @@
-import { DailyRecord } from './models';
+import { DailyRecord, ShortCycleScanEntry } from './models';
 
 export function mean(values: readonly number[]): number {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
@@ -134,6 +134,70 @@ export function croston(values: readonly number[], alpha = 0.2): { ready: boolea
     previousIndex = event.index;
   }
   return { ready: true, forecast: size / interval, firstInterval: events[1].index - events[0].index };
+}
+
+export interface ShortCycleDetection {
+  ready: boolean;
+  period: number | null;
+  correlation: number | null;
+  scan: ShortCycleScanEntry[];
+}
+
+/**
+ * Dò chu kỳ lặp NGẮN (p = 2..12 CK) theo đúng công thức chuẩn [C11 §8.5]:
+ * r(p) = tương quan Pearson giữa dãy A = Y_{p+1..T} và dãy B = Y_{1..T−p}
+ * (hai trung bình riêng Ā, B̄; mẫu số √(ΣA²·ΣB²)). Đây là "một công thức chuẩn
+ * duy nhất" tài liệu yêu cầu — không dùng ACF một trung bình chung.
+ * Khác mùa vụ năm C9 (cố định 24 vị trí): đây là dao động lặp trong vài chu kỳ.
+ * Chỉ dò trên TRAIN. Toàn bộ danh sách r(p) đã thử được trả về làm bằng chứng
+ * chọn/loại từng p [C11 §8.8 bước 5, §8.12].
+ *
+ * "Gần như hòa" [C11 §8.8]: bội số của chu kỳ thật cũng cho r cao (p=4 thật thì
+ * r(8), r(12) cũng cao); nhiễu có thể làm bội số nhỉnh hơn vài phần trăm. p lớn hơn
+ * chỉ được thay p nhỏ khi r vượt quá dung sai hòa — ưu tiên p nhỏ vì cần ít lịch sử
+ * hơn và dễ kiểm chứng hơn. Dung sai 0,05 là khởi điểm đề xuất, chưa phải ngưỡng
+ * đã phê duyệt; danh sách scan lưu đủ mọi ứng viên để người duyệt đối chiếu.
+ */
+const NEAR_TIE_TOLERANCE = 0.05;
+
+export function detectShortCycle(values: readonly number[], minCorrelation = 0.6, maxPeriod = 12): ShortCycleDetection {
+  const scan: ShortCycleScanEntry[] = [];
+  let best: { period: number; correlation: number } | null = null;
+  for (let period = 2; period <= maxPeriod; period++) {
+    // Cần tối thiểu 2 vòng lặp trong TRAIN để dãy A/B phủ trọn một vòng.
+    if (period * 2 > values.length) {
+      scan.push({ p: period, r: null, status: 'insufficient-data' });
+      continue;
+    }
+    const seriesA = values.slice(period);
+    const seriesB = values.slice(0, values.length - period);
+    const meanA = mean(seriesA);
+    const meanB = mean(seriesB);
+    let numerator = 0;
+    let sumSqA = 0;
+    let sumSqB = 0;
+    for (let i = 0; i < seriesA.length; i++) {
+      numerator += (seriesA[i] - meanA) * (seriesB[i] - meanB);
+      sumSqA += (seriesA[i] - meanA) ** 2;
+      sumSqB += (seriesB[i] - meanB) ** 2;
+    }
+    const denominator = Math.sqrt(sumSqA * sumSqB);
+    if (denominator <= 0) {
+      // Một trong hai dãy là hằng số → tương quan không xác định, không mở p này.
+      scan.push({ p: period, r: null, status: 'insufficient-data' });
+      continue;
+    }
+    const correlation = numerator / denominator;
+    const passes = correlation >= minCorrelation;
+    scan.push({ p: period, r: correlation, status: passes ? 'candidate' : 'below-threshold' });
+    // Duyệt p tăng dần: p lớn chỉ thay p nhỏ khi vượt dung sai hòa [C11 §8.8: gần như hòa → ưu tiên p nhỏ].
+    if (passes && (!best || correlation > best.correlation + NEAR_TIE_TOLERANCE)) best = { period, correlation };
+  }
+  if (!best) {
+    const bestSeen = scan.reduce<ShortCycleScanEntry | null>((acc, entry) => entry.r !== null && (acc === null || entry.r > (acc.r ?? -Infinity)) ? entry : acc, null);
+    return { ready: false, period: null, correlation: bestSeen?.r ?? null, scan };
+  }
+  return { ready: true, period: best.period, correlation: best.correlation, scan };
 }
 
 export function detectPulse(values: readonly number[]): { ready: boolean; interval: number | null; quantity: number | null } {

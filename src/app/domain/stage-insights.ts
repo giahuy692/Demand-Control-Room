@@ -151,10 +151,13 @@ export interface TrendAudit {
 export function buildTrendAudit(state: Readonly<SkuPipelineState>): TrendAudit {
   const base = { status: state.trend, segments: [], bars: [], g1: state.trendRates[0], g2: state.trendRates[1] };
   if (state.classification.xyz !== 'Y') {
-    return { ...base, applicable: false, reason: `SKU thuộc nhóm ${state.classification.xyz} — công tắc xu hướng chỉ dành cho nhóm Y chưa có mùa vụ.` };
+    const handoff = state.classification.xyz === 'X'
+      ? ' Với nhóm X, Chặng 11 sẽ tự kiểm tra xu hướng bằng đúng thuật toán này (12 CK / 3 đoạn / ±5%) và chỉ chọn Holt nếu backtest thắng SES [C11 §3].'
+      : '';
+    return { ...base, applicable: false, reason: `SKU thuộc nhóm ${state.classification.xyz} — công tắc xu hướng của Chặng 10 chỉ dành cho nhóm Y chưa có mùa vụ.${handoff}` };
   }
   if (state.seasonality === 'confirmed') {
-    return { ...base, applicable: false, reason: 'Đã xác nhận mùa vụ ở Chặng 9 → đi thẳng Holt-Winters, không xét xu hướng.' };
+    return { ...base, applicable: false, reason: 'Đã xác nhận mùa vụ ở Chặng 9 → Chặng 11 ưu tiên Holt-Winters (chỉ khóa khi thắng Holt/SES trên backtest [C11 §4.3]), không xét xu hướng.' };
   }
   const values = state.cycles.filter(cycle => cycle.locked).slice(-24).map(cycle => cycle.baseDemand);
   if (values.length < 12) {
