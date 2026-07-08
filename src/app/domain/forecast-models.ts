@@ -15,7 +15,7 @@ import { ForecastResult, SkuPipelineState, XyzClass } from './models';
  */
 
 export const FORECAST_HORIZON = 6;
-const SEASON_LENGTH = 24;
+export const SEASON_LENGTH = 24;
 const TREND_CAP = 0.15; // C10 §6: giới hạn an toàn xu hướng khi dự phóng
 
 export type LearningPhase = 'init' | 'train' | 'test';
@@ -63,7 +63,7 @@ interface ModelRun {
   trainSse: number;
 }
 
-function splitSizes(n: number): { trainSize: number; testSize: number } {
+export function splitSizes(n: number): { trainSize: number; testSize: number } {
   const testSize = Math.max(1, Math.floor(n * 0.2));
   return { trainSize: n - testSize, testSize };
 }
@@ -76,7 +76,7 @@ function clampNonNegative(value: number): number {
   return Math.max(0, value);
 }
 
-function testMetrics(rows: LearningRow[], trainSize: number): Pick<ModelLearning, 'rmse' | 'nrmse' | 'wape' | 'bias' | 'hitRate' | 'missedPulses' | 'falsePulses' | 'wapePositive'> {
+export function testMetrics(rows: LearningRow[], trainSize: number): Pick<ModelLearning, 'rmse' | 'nrmse' | 'wape' | 'bias' | 'hitRate' | 'missedPulses' | 'falsePulses' | 'wapePositive'> {
   const testRows = rows.filter(row => row.phase === 'test');
   // Chỉ tiêu nhịp đếm trên MỌI chu kỳ TEST: có nhu cầu mà mô hình không có dự báo dương vẫn là missed.
   const actualPulseCount = testRows.filter(row => row.actual > 0).length;
@@ -134,7 +134,7 @@ function runSes(values: readonly number[], alpha: number, trainSize: number): Mo
   return { rows, future: Array(FORECAST_HORIZON).fill(clampNonNegative(level)), trainSse };
 }
 
-function fitSes(values: readonly number[], trainSize: number): { run: ModelRun; params: Record<string, number> } {
+export function fitSes(values: readonly number[], trainSize: number): { run: ModelRun; params: Record<string, number> } {
   // Ràng buộc riêng của SES: 0,05 ≤ α ≤ 0,5 [C11 §5.5] — hẹp hơn miền vận hành chung 0,1→0,9 của §4.8.
   const alpha = gridSearch(a => runSes(values, a, trainSize).trainSse, 0.1, 0.5, 0.05, 0.5);
   return { run: runSes(values, alpha, trainSize), params: { alpha } };
@@ -162,7 +162,7 @@ function runHolt(values: readonly number[], alpha: number, beta: number, trainSi
   return { rows, future, trainSse };
 }
 
-function fitHolt(values: readonly number[], trainSize: number): { run: ModelRun; params: Record<string, number> } {
+export function fitHolt(values: readonly number[], trainSize: number): { run: ModelRun; params: Record<string, number> } {
   let best = { alpha: 0.1, beta: 0.1 };
   let bestSse = Infinity;
   const consider = (alpha: number, beta: number) => {
@@ -214,7 +214,7 @@ function runHoltWinters(values: readonly number[], alpha: number, beta: number, 
   return { rows, future, trainSse };
 }
 
-function fitHoltWinters(values: readonly number[], trainSize: number): { run: ModelRun; params: Record<string, number> } | null {
+export function fitHoltWinters(values: readonly number[], trainSize: number): { run: ModelRun; params: Record<string, number> } | null {
   let best: { alpha: number; beta: number; gamma: number } | null = null;
   let bestSse = Infinity;
   for (let alpha = 0.1; alpha <= 0.91; alpha += 0.1) {
@@ -266,13 +266,13 @@ function runCroston(values: readonly number[], alpha: number, trainSize: number)
   return { rows, future: Array(FORECAST_HORIZON).fill(clampNonNegative(forecast ?? 0)), trainSse };
 }
 
-function fitCroston(values: readonly number[], trainSize: number): { run: ModelRun; params: Record<string, number> } {
+export function fitCroston(values: readonly number[], trainSize: number): { run: ModelRun; params: Record<string, number> } {
   const alpha = gridSearch(a => runCroston(values, a, trainSize).trainSse);
   return { run: runCroston(values, alpha, trainSize), params: { alpha } };
 }
 
 // ── Nhịp phát sinh [C11 §8.6]: D=khoảng cách đều; Q=Median quy mô; F=Q khi (t−t_r) mod D = 0 ──
-function runPulse(values: readonly number[], intervalD: number, quantityQ: number, trainSize: number): ModelRun {
+export function runPulse(values: readonly number[], intervalD: number, quantityQ: number, trainSize: number): ModelRun {
   const firstEvent = values.findIndex(value => value > 0);
   const rows: LearningRow[] = [];
   for (let t = 0; t < values.length; t++) {
@@ -292,7 +292,7 @@ function runPulse(values: readonly number[], intervalD: number, quantityQ: numbe
 }
 
 // ── Seasonal-naïve [C11 §8]: Fₜ = Yₜ₋ₚ; p* dò bằng tương quan Pearson trên TRAIN [§8.5]; tương lai lặp mẫu p* giá trị cuối [§8.9] ──
-function runSeasonalNaive(values: readonly number[], period: number, trainSize: number): ModelRun {
+export function runSeasonalNaive(values: readonly number[], period: number, trainSize: number): ModelRun {
   const rows: LearningRow[] = [];
   let trainSse = 0;
   for (let t = 0; t < values.length; t++) {
@@ -300,8 +300,10 @@ function runSeasonalNaive(values: readonly number[], period: number, trainSize: 
     const error = forecast === null ? null : values[t] - forecast;
     if (error !== null && t < trainSize) trainSse += error ** 2;
     rows.push({
+      // "season" bị tái dùng để lưu số thứ tự chu kỳ NGUỒN (1-based) mà F sao chép sang —
+      // hiển thị thẳng trong bảng học thay vì chỉ lộ ra khi hover ô F [C11 §8.9/§8.12].
       index: t + 1, actual: values[t], phase: forecast === null ? 'init' : phaseOf(t, trainSize),
-      level: null, trend: null, season: null, forecast, error,
+      level: null, trend: null, season: forecast === null ? null : t + 1 - period, forecast, error,
     });
   }
   const future: number[] = [];
@@ -337,7 +339,7 @@ function buildLearning(
     Holt: ['L · mức nền', 'T · xu hướng', null],
     'Holt-Winters': ['L · mức nền', 'T · xu hướng', 'S · mùa vụ'],
     Croston: ['Z · quy mô', 'P · khoảng cách', null],
-    SeasonalNaive: [null, null, null],
+    SeasonalNaive: [null, null, 'Nguồn F · CK'],
     PulseRhythm: [null, null, null],
     PurchasePlan: [null, null, null],
   };
@@ -839,6 +841,25 @@ export function explainLearningCell(learning: ModelLearning, index: number, colu
       substitution: `F = Y tại ${ck(index - period)} = ${fmtCell(row.forecast, 1)}`,
       meaning: `Chuỗi lặp lại sau mỗi p* = ${fmtCell(period, 0)} chu kỳ (tương quan Pearson dãy A/B lệch p* trên TRAIN: r = ${fmtCell(params['r'])} [C11 §8.5]), nên dự báo lấy đúng giá trị của cùng vị trí ở vòng lặp trước — ${ck(index - period)} là "chu kỳ nguồn được sao chép" [C11 §8.12].`,
       sources: [{ index: index - period, column: 'actual' }],
+    };
+  }
+  if (model === 'SeasonalNaive' && column === 'season') {
+    const period = params['p'];
+    if (row.season === null) {
+      return {
+        title: `Nguồn F tại ${ck(index)}`,
+        formula: 'Chưa có vòng lặp trước để soi',
+        substitution: null,
+        meaning: `${ck(index)} nằm trong p* = ${fmtCell(period, 0)} chu kỳ đầu nên chưa có chu kỳ nguồn nào cách đó ${fmtCell(period, 0)} kỳ về trước — F để trống.`,
+        sources: [],
+      };
+    }
+    return {
+      title: `Nguồn F tại ${ck(index)}`,
+      formula: 'Fₜ sao chép nguyên giá trị Y của chu kỳ cách đó đúng p* kỳ',
+      substitution: `Nguồn = ${ck(row.season)} (= ${ck(index)} − p* ${fmtCell(period, 0)})`,
+      meaning: `Cột này chỉ thẳng ra chu kỳ nguồn mà ô "F dự báo" bên cạnh sao chép — không cần hover mới thấy. Di chuột vào đây hoặc vào ô F đều sáng cùng một ô Y nguồn.`,
+      sources: [{ index: row.season, column: 'actual' }],
     };
   }
 

@@ -58,13 +58,6 @@
           <button type="button" class="panel-collapse-toggle" (click)="auditCollapsed.set(true)" aria-label="Thu gọn Audit Explorer" title="Thu gọn Audit Explorer">«</button>
         </div>
       </div>
-        <div class="audit-sku-bar">
-          <div class="audit-sku-copy"><span>{{ selectedDefinition().id }}</span><b>{{ selectedDefinition().name }}</b></div>
-          <select aria-label="Đổi SKU kiểm toán" [ngModel]="store.selectedSkuId()" (ngModelChange)="selectSkuId($event)">
-            @for (sku of store.catalog; track sku.id) { <option [value]="sku.id">{{ sku.id }} · {{ sku.name }}</option> }
-          </select>
-        </div>
-
         @if (store.activeStage() <= 4) {
           <div class="audit-toolbar">
             <button type="button" (click)="jumpToAnomaly('stockout')"><i class="dot stockout"></i>Stockout</button>
@@ -75,19 +68,7 @@
             <span><i class="focus"></i>Ngày méo</span><span><i class="before"></i>Nền trước</span><span><i class="after"></i>Nền sau</span>
             <b>{{ anomalyText() }}</b>
           </div>
-        }
 
-        <section class="lineage-strip" aria-label="Dữ liệu thay đổi qua các chặng">
-          <div class="lineage-title"><span>HÀNH TRÌNH BẢN GHI</span><b>{{ auditDate() || 'Snapshot SKU' }}</b></div>
-          <div class="lineage-track">
-            @for (item of lineage(); track item.stage) {
-              <div class="lineage-node"><span>C{{ item.stage }}</span><b>{{ item.value }}</b><small>{{ item.label }} · {{ item.detail }}</small></div>
-              @if (!$last) { <i>→</i> }
-            } @empty { <p>Đang chuẩn bị dữ liệu cho chặng này.</p> }
-          </div>
-        </section>
-
-        @if (store.activeStage() <= 4) {
           @if (selectedAuditRow()) {
             <div class="audit-context">
               <div><span>{{ selectedAuditRow()!.date }}</span><b>{{ statusLabel(selectedAuditRow()!) }}</b></div>
@@ -268,31 +249,14 @@
             @case (11) {
               @if (forecastAudit(); as fit) {
                 @if (fit.learning; as learning) {
-                  <div class="insight-note">
-                    Mô hình <b>{{ learning.model }}</b>
-                    @for (param of learning.params | keyvalue; track param.key) { · {{ param.key }} = <b>{{ format(param.value, 2) }}</b> }
-                    · TRAIN {{ learning.trainSize }} CK / TEST {{ learning.testSize }} CK. {{ learning.note }}
+                  <div class="learning-status" title="{{ learning.note }}">
+                    <span>Mô hình</span>
+                    <b>{{ learning.model }}</b>
+                    @for (param of learning.params | keyvalue; track param.key) { <code>{{ param.key }}={{ format(param.value, 2) }}</code> }
+                    <i>TRAIN {{ learning.trainSize }} · TEST {{ learning.testSize }}</i>
                   </div>
                   @if (fit.result.reliability === 'low') {
-                    <div class="insight-note sn-flag">⚠️ <b>ĐỘ TIN CẬY THẤP — KHÔNG DÙNG ĐỂ SO MÔ HÌNH TỰ ĐỘNG</b>: tập TEST chỉ {{ learning.testSize }} chu kỳ (&lt; 3), sai số ngoài mẫu chỉ mang tính tham khảo [C11 §8.10].</div>
-                  }
-                  @if (fit.result.rpScan; as scan) {
-                    <div class="insight-note sn-gate">
-                      <b>Cửa chu kỳ ngắn 11XY-SN</b> — danh sách r(p) đã thử trên TRAIN (tương quan Pearson dãy A/B [C11 §8.5], ngưỡng mở 0,60):
-                      @for (entry of scan; track entry.p) {
-                        <span class="rp-entry" [class.rp-candidate]="entry.status === 'candidate'">p={{ entry.p }}: {{ entry.r === null ? (entry.status === 'insufficient-data' ? 'thiếu dữ liệu' : '—') : format(entry.r, 2) }}</span>
-                      }
-                      @if (fit.result.pStar !== null) {
-                        <br>→ p* = <b>{{ fit.result.pStar }}</b>;
-                        @if (fit.result.model === 'SeasonalNaive') {
-                          seasonal-naïve <b>thắng</b> mô hình đối chứng {{ fit.result.controlModel }} trên TEST (WAPE {{ fit.result.wape === null ? '—' : format(fit.result.wape * 100, 1) + '%' }} so với {{ fit.result.controlWape === null ? '—' : format(fit.result.controlWape * 100, 1) + '%' }}) [C11 §8.10].
-                        } @else {
-                          seasonal-naïve <b>không được chọn</b> — giữ mô hình đối chứng {{ fit.result.controlModel }} (xem lý do ở thẻ tóm tắt) [C11 §8.10–8.11].
-                        }
-                      } @else {
-                        <br>→ Không có p nào đạt ngưỡng → không mở Seasonal-naïve; giữ nhánh {{ fit.result.controlModel }} [C11 §8.11].
-                      }
-                    </div>
+                    <div class="learning-alert">⚠ Độ tin cậy thấp · TEST {{ learning.testSize }} CK · sai số chỉ để tham khảo</div>
                   }
                   <div class="calc-hover-hint" [class.active]="learnCellExplanation()" aria-live="polite">
                     @if (learnCellExplanation(); as explanation) {
@@ -301,10 +265,10 @@
                       @if (explanation.substitution) { <code class="calc-substitution">{{ explanation.substitution }}</code> }
                       <p>{{ explanation.meaning }}</p>
                     } @else {
-                      <p>💡 Di chuột vào một ô L / T / S / F / Sai số: công thức của ô hiện ở đây và <span class="hint-source">các ô nguồn</span> dùng để tính ra nó sẽ sáng lên trong bảng.</p>
+                      <p>Rê vào ô L / T / S / F / Sai số để xem công thức và tô sáng <span class="hint-source">các ô nguồn</span>.</p>
                     }
                   </div>
-                  <div class="audit-table-wrap">
+                  <div class="audit-table-wrap learning-table-wrap">
                     <table class="audit-table insight-table learning-table" (mouseleave)="clearLearnHover()">
                       <thead>
                         <tr>
@@ -323,7 +287,15 @@
                             <td class="value calc-cell" (mouseenter)="hoverLearnCell(row.index, 'actual')" [class.calc-target]="isLearnTarget(row.index, 'actual')" [class.calc-source]="isLearnSource(row.index, 'actual')">{{ format(row.actual, 1) }}</td>
                             @if (learning.levelLabel) { <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'level')" [class.calc-target]="isLearnTarget(row.index, 'level')" [class.calc-source]="isLearnSource(row.index, 'level')">{{ format(row.level, 2) }}</td> }
                             @if (learning.trendLabel) { <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'trend')" [class.calc-target]="isLearnTarget(row.index, 'trend')" [class.calc-source]="isLearnSource(row.index, 'trend')">{{ format(row.trend, 2) }}</td> }
-                            @if (learning.seasonLabel) { <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'season')" [class.calc-target]="isLearnTarget(row.index, 'season')" [class.calc-source]="isLearnSource(row.index, 'season')">{{ format(row.season, 2) }}</td> }
+                            @if (learning.seasonLabel) {
+                              <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'season')" [class.calc-target]="isLearnTarget(row.index, 'season')" [class.calc-source]="isLearnSource(row.index, 'season')">
+                                @if (learning.model === 'SeasonalNaive') {
+                                  {{ row.season === null ? '—' : 'CK ' + row.season.toString().padStart(2, '0') }}
+                                } @else {
+                                  {{ format(row.season, 2) }}
+                                }
+                              </td>
+                            }
                             <td class="base-value calc-cell" (mouseenter)="hoverLearnCell(row.index, 'forecast')" [class.calc-target]="isLearnTarget(row.index, 'forecast')" [class.calc-source]="isLearnSource(row.index, 'forecast')">{{ format(row.forecast, 2) }}</td>
                             <td class="calc-cell" (mouseenter)="hoverLearnCell(row.index, 'error')" [class.calc-target]="isLearnTarget(row.index, 'error')" [class.calc-source]="isLearnSource(row.index, 'error')" [class.err-neg]="(row.error ?? 0) < 0" [class.err-pos]="(row.error ?? 0) > 0">{{ row.error === null ? '—' : (row.error > 0 ? '+' : '') + format(row.error, 1) }}</td>
                           </tr>
@@ -340,9 +312,10 @@
                     <div class="learning-future metric-tip" tabindex="0" (mouseenter)="showMetricTip($event, 'future')" (mouseleave)="hideMetricTip()" (focus)="showMetricTip($event, 'future')" (blur)="hideMetricTip()"><span>Fᵦ 6 chu kỳ tới</span><b>{{ formatSeries(learning.future) }}</b></div>
                   </div>
                   @if (fit.result.futureSources; as sources) {
-                    <div class="insight-note sn-sources">Chu kỳ nguồn được sao chép [C11 §8.12]:
-                      @for (source of sources; track $index) { <span class="rp-entry">F₊{{ $index + 1 }} ← CK {{ source.toString().padStart(2, '0') }}</span> }
-                    </div>
+                    <details class="learning-sources">
+                      <summary>Chu kỳ nguồn của 6 dự báo tới</summary>
+                      <div>@for (source of sources; track $index) { <span class="rp-entry">F₊{{ $index + 1 }} ← CK {{ source.toString().padStart(2, '0') }}</span> }</div>
+                    </details>
                   }
                 } @else {
                   <div class="insight-empty"><b>{{ fit.result.model }}</b><p>{{ fit.result.reason }}</p></div>
@@ -351,7 +324,7 @@
             }
             @case (12) {
               @if (promoAudit(); as audit) {
-                <div class="insight-note">Mỗi mẫu là <b>một vùng CTKM</b>: Kᵣ = ΣQ/ΣN (C4) · K khóa = max(1; Median) · {{ audit.rows.length }}/{{ audit.totalRegions }} vùng hợp lệ, {{ audit.rejected }} vùng bị loại (tổng {{ audit.totalPromoDays }} ngày KM).</div>
+                <div class="insight-note">Mỗi mẫu là <b>một vùng CTKM</b>: Kᵣ = ΣQ/ΣN (C4) · K đề xuất = Median(Kᵣ) · K&lt;1 chuyển REVIEW, không tự nâng lên 1,00 · {{ audit.rows.length }}/{{ audit.totalRegions }} vùng hợp lệ, {{ audit.rejected }} vùng bị loại.</div>
                 <div class="audit-table-wrap">
                   <table class="audit-table insight-table">
                     <thead><tr><th>Vùng CTKM</th><th>Số ngày</th><th>Mã KM</th><th>Σ bán Q</th><th>Σ nền N</th><th>K vùng</th></tr></thead>
@@ -532,11 +505,30 @@
           <div class="trace-head">
             <span class="trace-glyph">Σ</span>
             <div>
-              <p class="eyebrow">MÔ PHỎNG TÍNH TOÁN · {{ selectedDefinition().id }}</p>
+              <p class="eyebrow">MÔ PHỎNG &amp; KIỂM TOÁN 1–1 · {{ selectedDefinition().id }}</p>
               <h3>{{ trace.heading }}</h3>
               <p class="trace-context">{{ trace.context }}</p>
             </div>
           </div>
+          @if (trace.contract; as contract) {
+            <div class="trace-contract-purpose">
+              <span>Chặng này trả lời</span>
+              <p>{{ contract.purpose }}</p>
+            </div>
+            <details class="trace-contract">
+              <summary>
+                <span><b>Xem hợp đồng nghiệp vụ 1–1</b><small>Đầu vào · quy tắc khóa · bàn giao · điều cấm</small></span>
+                <em>{{ contract.documentCoverage.length }} nhóm đối chiếu tài liệu</em>
+              </summary>
+              <div class="trace-contract-grid">
+                <section class="contract-card input"><h4><i>01</i> Nhận vào</h4><ul>@for (item of contract.inputs; track item) { <li>{{ item }}</li> }</ul></section>
+                <section class="contract-card rule"><h4><i>02</i> Quy tắc khóa</h4><ul>@for (item of contract.rules; track item) { <li>{{ item }}</li> }</ul></section>
+                <section class="contract-card output"><h4><i>03</i> Bàn giao</h4><ul>@for (item of contract.outputs; track item) { <li>{{ item }}</li> }</ul></section>
+                <section class="contract-card control"><h4><i>04</i> Không được làm sai</h4><ul>@for (item of contract.controls; track item) { <li>{{ item }}</li> }</ul></section>
+              </div>
+              <div class="trace-coverage"><span>Đối chiếu tài liệu</span><div>@for (item of contract.documentCoverage; track item) { <code>{{ item }}</code> }</div></div>
+            </details>
+          }
           @if (trace.points?.length) {
             <div class="trace-points">
               <span>{{ trace.pickLabel }}</span>
@@ -547,12 +539,22 @@
               </div>
             </div>
           }
+          <div class="trace-run-head">
+            <div><span>DỮ LIỆU ĐANG CHỌN</span><b>Diễn giải hệ thống đã tính như thế nào</b></div>
+            <div class="trace-run-actions"><em>{{ trace.steps.length }} bước</em><button type="button" (click)="setAllTraceSteps(true, trace.steps.length)">Mở tất cả</button><button type="button" (click)="setAllTraceSteps(false, trace.steps.length)">Thu tất cả</button></div>
+          </div>
           <ol class="trace-steps">
             @for (step of trace.steps; track $index) {
               <li [class]="step.tone ?? 'info'">
                 <span class="trace-step-num">{{ ($index + 1).toString().padStart(2, '0') }}</span>
-                <div class="trace-step-body">
-                  <b>{{ step.title }}</b>
+                <details class="trace-step-card" [open]="isTraceStepOpen($index, trace.steps.length, step.tone)" (toggle)="onTraceStepToggle($index, $event)">
+                  <summary>
+                    <span class="trace-step-kind">{{ $first ? 'Đầu vào' : $last ? 'Bàn giao' : step.checks?.length ? 'Kiểm tra' : step.substitution ? 'Tính / quyết định' : 'Xử lý' }}</span>
+                    <b>{{ step.title }}</b>
+                    @if (step.result) { <em>{{ step.result }}</em> }
+                    <i aria-hidden="true">⌄</i>
+                  </summary>
+                  <div class="trace-step-body">
                   <p>{{ step.detail }}</p>
                   @if (step.values?.length) {
                     <dl>@for (item of step.values; track item.label) { <div><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div> }</dl>
@@ -581,7 +583,8 @@
                       }
                     </details>
                   }
-                </div>
+                  </div>
+                </details>
               </li>
             } @empty { <li class="info"><div class="trace-step-body trace-empty"><p>Chặng này chưa tạo kết quả cho SKU đang chọn.</p></div></li> }
           </ol>

@@ -20,6 +20,11 @@ describe('stage-trace sanity', () => {
         const general = buildStageTrace(stage as StageNumber, state, DEFAULT_POLICY, null);
         expect(general.heading.length).toBeGreaterThan(0);
         expect(general.steps.length).toBeGreaterThan(0);
+        expect(general.contract, `Chặng ${stage} phải có hợp đồng nội dung`).toBeDefined();
+        expect(general.contract!.inputs.length).toBeGreaterThan(0);
+        expect(general.contract!.rules.length).toBeGreaterThan(0);
+        expect(general.contract!.outputs.length).toBeGreaterThan(0);
+        expect(general.contract!.controls.length).toBeGreaterThan(0);
         for (const point of general.points ?? []) {
           const focused = buildStageTrace(stage as StageNumber, state, DEFAULT_POLICY, point.date);
           expect(focused.steps.length).toBeGreaterThan(0);
@@ -92,8 +97,56 @@ describe('stage-trace sanity', () => {
     expect(buildStageTrace(9, stage9State, DEFAULT_POLICY, null).steps).toHaveLength(8);
     const stage10State = Object.values(snapshots[10]!.states).find(state => state.classification.xyz === 'Y' && state.seasonality !== 'confirmed' && state.cycles.filter(cycle => cycle.locked).length >= 12)!;
     expect(buildStageTrace(10, stage10State, DEFAULT_POLICY, null).steps).toHaveLength(8);
-    const stage11State = Object.values(snapshots[11]!.states).find(state => state.classification.xyz !== 'D')!;
-    expect(buildStageTrace(11, stage11State, DEFAULT_POLICY, null).steps).toHaveLength(9);
+    // Chặng 11 có 3 hình dạng khác nhau: X/Y đi qua cửa chu kỳ ngắn 11XY-SN (thêm 1 bước so với Z),
+    // Z chạy thẳng Croston/nhịp phát sinh (không có cửa này), D không backtest thống kê [C11 §3, §8.3, §9].
+    const stage11XY = Object.values(snapshots[11]!.states).find(state => state.classification.xyz === 'X' || state.classification.xyz === 'Y')!;
+    expect(buildStageTrace(11, stage11XY, DEFAULT_POLICY, null).steps, 'Chặng 11 · nhóm X/Y').toHaveLength(10);
+    const stage11Z = Object.values(snapshots[11]!.states).find(state => state.classification.xyz === 'Z')!;
+    expect(buildStageTrace(11, stage11Z, DEFAULT_POLICY, null).steps, 'Chặng 11 · nhóm Z').toHaveLength(9);
+    const stage11D = Object.values(snapshots[11]!.states).find(state => state.classification.xyz === 'D')!;
+    expect(buildStageTrace(11, stage11D, DEFAULT_POLICY, null).steps, 'Chặng 11 · nhóm D').toHaveLength(4);
+  });
+
+  it('trace B1 Chặng 11 dùng đúng forecast.reason, không tự suy diễn nhãn model rồi lệch với model thực khóa', () => {
+    for (const state of Object.values(snapshots[11]!.states)) {
+      if (!state.forecast || state.classification.xyz === 'D') continue;
+      const trace = buildStageTrace(11, state, DEFAULT_POLICY, null);
+      expect(trace.steps[0].detail).toContain(state.forecast.reason);
+      expect(trace.steps[0].substitution).toBe(`Model = ${state.forecast.model}`);
+    }
+  });
+
+  it('cửa chu kỳ ngắn 11XY-SN trong process-panel chỉ xuất hiện cho nhóm X/Y và khớp đúng rpScan/pStar đã khóa', () => {
+    for (const state of Object.values(snapshots[11]!.states)) {
+      if (!state.forecast) continue;
+      const trace = buildStageTrace(11, state, DEFAULT_POLICY, null);
+      const gateStep = trace.steps.find(step => step.title.includes('Cửa chu kỳ ngắn 11XY-SN'));
+      if (state.classification.xyz === 'X' || state.classification.xyz === 'Y') {
+        expect(gateStep, `SKU ${state.definition.id} thuộc nhóm ${state.classification.xyz} phải có bước cửa chu kỳ ngắn`).toBeDefined();
+        expect(gateStep!.values).toHaveLength(state.forecast.rpScan!.length);
+        if (state.forecast.pStar === null) expect(gateStep!.substitution).toContain('Không có p nào');
+        else expect(gateStep!.substitution).toContain(`p* = ${state.forecast.pStar}`);
+      } else {
+        expect(gateStep, `SKU ${state.definition.id} thuộc nhóm ${state.classification.xyz} không được có bước cửa chu kỳ ngắn`).toBeUndefined();
+      }
+    }
+  });
+
+  it('bước công thức mô hình trong process-panel khớp đúng model đã khóa, không rơi về nhánh mặc định', () => {
+    const titleFragment: Record<string, string> = {
+      SES: 'San bằng mũ đơn',
+      Holt: 'Holt — mức nền',
+      'Holt-Winters': 'Holt-Winters nhân tính',
+      SeasonalNaive: 'Seasonal-naïve — sao chép',
+      Croston: 'Croston bình quân',
+      PulseRhythm: 'Mô hình nhịp phát sinh',
+    };
+    for (const state of Object.values(snapshots[11]!.states)) {
+      if (!state.forecast || state.forecast.model === 'PurchasePlan') continue;
+      const trace = buildStageTrace(11, state, DEFAULT_POLICY, null);
+      const formulaStep = trace.steps.find(step => step.title.includes(titleFragment[state.forecast!.model]));
+      expect(formulaStep, `SKU ${state.definition.id} model=${state.forecast.model} phải có bước công thức đúng model`).toBeDefined();
+    }
   });
 
   it('trace chặng 15 khớp safety stock engine', () => {
@@ -107,5 +160,19 @@ describe('stage-trace sanity', () => {
         expect(final.substitution).toContain(`= ${state.safetyStock.toLocaleString('vi-VN', { maximumFractionDigits: 0 })}`);
       }
     }
+  });
+
+  it('panel nêu thẳng các trường tài liệu yêu cầu nhưng bộ mô phỏng chưa lưu, không suy diễn là đã đủ', () => {
+    const firstState = (stage: StageNumber) => Object.values(snapshots[stage]!.states)[0];
+    const text = (stage: StageNumber) => {
+      const trace = buildStageTrace(stage, firstState(stage), DEFAULT_POLICY, null);
+      return trace.steps.flatMap(step => [step.title, step.detail, step.substitution ?? '', ...(step.values ?? []).flatMap(value => [value.label, value.value])]).join(' ');
+    };
+    expect(text(14)).toContain('CHƯA CÓ TRƯỜNG RIÊNG');
+    expect(text(15)).toContain('DisplayMin');
+    expect(text(16)).toContain('CoverWindow');
+    expect(text(17)).toContain('bucket = CHƯA CẤU HÌNH');
+    expect(text(18)).toContain('Q_approved_over=0');
+    expect(text(19)).toContain('WAPE_base = CHƯA LƯU');
   });
 });

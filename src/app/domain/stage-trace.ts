@@ -1,8 +1,9 @@
-import { DailyRecord, SimulationPolicy, SkuPipelineState, StageNumber } from './models';
+import { DailyRecord, ForecastResult, SimulationPolicy, SkuPipelineState, StageNumber } from './models';
 import { calculateTrend, mean, median, meetsSeasonRepeatThreshold, populationStdev } from './math';
 import { CAPITAL_PRIORITIES, SERVICE_LEVELS } from './policy';
 import { buildPromoRegionSamples } from './promo-analysis';
-
+import { buildForecastLearning, ModelLearning, SEASON_LENGTH, fitSes, fitHolt, fitHoltWinters, fitCroston, runPulse, runSeasonalNaive, splitSizes, testMetrics, lockedSeriesAll } from './forecast-models';
+import { STAGE_TRACE_CONTRACTS, StageTraceContract } from './stage-trace-contracts';
 export interface TraceValue { label: string; value: string }
 export interface TraceCheck { label: string; actual: string; passed: boolean }
 export interface TraceStep {
@@ -22,6 +23,7 @@ export interface StageTrace {
   pickLabel?: string;
   points?: TracePoint[];
   steps: TraceStep[];
+  contract?: StageTraceContract;
 }
 
 const BALANCE_LABEL: Record<string, string> = {
@@ -822,60 +824,260 @@ function stage10(state: Readonly<SkuPipelineState>): StageTrace {
   };
 }
 
+type RawStep = { title: string; detail: string; substitution?: string; values?: TraceValue[]; tone?: TraceStep['tone'] };
+
+function shortCycleGateStep(forecast: ForecastResult): RawStep {
+  const scan = forecast.rpScan ?? [];
+  const candidates = scan.filter(entry => entry.status === 'candidate');
+  const chosenEntry = forecast.pStar !== null ? scan.find(entry => entry.p === forecast.pStar) ?? null : null;
+
+  // Bảng kết quả quét Pearson r(p) trên TRAIN
+  const values: TraceValue[] = scan.map(entry => {
+    if (entry.r === null) {
+      return { label: `p = ${entry.p} chu kỳ`, value: 'Không tính được r (cần ≥ 2×p bản ghi trong TRAIN)' };
+    }
+    const isChosen = forecast.pStar === entry.p;
+    const pass = entry.status === 'candidate';
+    return {
+      label: `p = ${entry.p} chu kỳ${isChosen ? '  ★ Được chọn làm p*' : ''}`,
+      value: `r = ${fmt(entry.r, 2)} ${pass ? '≥ 0,60 → Ứng viên' : '< 0,60 → Loại'}`,
+    };
+  });
+
+  // Giải thích lý do chọn p* khi có nhiều ứng viên gần hòa
+  let tieExplanation = '';
+  if (candidates.length >= 2 && forecast.pStar !== null) {
+    const highestR = Math.max(...candidates.map(c => c.r ?? -1));
+    const chosenR = chosenEntry?.r ?? 0;
+    if (highestR - chosenR <= 0.05) {
+      const tied = candidates.filter(c => (c.r ?? 0) >= highestR - 0.05).map(c => `p=${c.p}(r=${fmt(c.r, 2)})`);
+      tieExplanation = ` Có ${tied.length} ứng viên r xấp xỉ nhau trong ngưỡng hòa 0,05: ${tied.join(', ')}. Quy tắc: chọn p nhỏ nhất để tránh mô hình phức tạp thừa [C11 §8.8] → p* = ${forecast.pStar}.`;
+    }
+  }
+
+  let verdict: string;
+  if (forecast.pStar === null) {
+    verdict = `Không có p nào trong tập quét p=2…12 đạt r ≥ 0,60 trên TRAIN → Không mở Seasonal-naïve; giữ nguyên ${forecast.model} từ Bước 1.`;
+  } else if (forecast.model === 'SeasonalNaive') {
+    verdict = `p* = ${forecast.pStar} (r = ${fmt(chosenEntry?.r, 2)}).${tieExplanation} Seasonal-naïve với p* này THẮNG ${forecast.controlModel} trên TEST (WAPE ${pct(forecast.wape)} < ${pct(forecast.controlWape)}) → Seasonal-naïve được chọn [C11 §8.10].`;
+  } else {
+    verdict = `p* = ${forecast.pStar} (r = ${fmt(chosenEntry?.r, 2)}).${tieExplanation} Seasonal-naïve với p* này chạy thử trên TEST nhưng KHÔNG THẮNG ${forecast.controlModel} (WAPE Seasonal-naïve = ${pct(forecast.wape)}, ${forecast.controlModel} = ${pct(forecast.controlWape)}) → Giữ nguyên ${forecast.model} [C11 §8.11].`;
+  }
+
+  return {
+    title: 'Cửa chu kỳ ngắn 11XY-SN — kiểm tra chu kỳ lặp ngắn',
+    detail: [
+      'Mục tiêu: tìm chu kỳ lặp p* (bội số 15 ngày) bằng cách quét p = 2…12 trên TRAIN.',
+      `Cách tính r(p): Pearson giữa dãy hiện tại [Y₁…Yₙ₋ₚ] và dãy lùi p chu kỳ [Yₚ₊₁…Yₙ]. r gần 1 nghĩa là mẫu bán p chu kỳ trước lặp lại gần đúng p chu kỳ sau.`,
+      'Tiêu chuẩn ứng viên: r ≥ 0,60 và đủ dữ liệu (≥ 2×p bản ghi trong TRAIN).',
+      'Seasonal-naïve chỉ được chọn nếu WAPE trên TEST thấp hơn mô hình mặc định ở Bước 1.',
+    ].join(' '),
+    substitution: verdict,
+    values,
+    tone: forecast.model === 'SeasonalNaive' ? 'good' : 'info',
+  };
+}
+
+function modelFormulaStep(forecast: ForecastResult, learning: ModelLearning | null): RawStep {
+  const rows = learning?.rows ?? [];
+  const row = (index: number) => rows.find(item => item.index === index) ?? null;
+  const alpha = forecast.params['alpha'];
+  const beta = forecast.params['beta'];
+  const gamma = forecast.params['gamma'];
+  switch (forecast.model) {
+    case 'SES': {
+      const sample = row(2);
+      return {
+        title: 'Tối ưu và chạy San bằng mũ đơn (SES) trên TRAIN [C11 §5]',
+        detail: `Khởi tạo L₁ = Y₁. Mỗi chu kỳ t: dự báo Fₜ = Lₜ₋₁, sau đó cập nhật nền Lₜ = α·Yₜ + (1−α)·Lₜ₋₁. α tối ưu bằng Grid Search trên TRAIN, giới hạn 0,05–0,5 theo chính sách. Tham số khóa: α = ${fmt(alpha, 2)}.`,
+        substitution: sample
+          ? `Ví dụ chu kỳ 02: Mức nền L = ${fmt(alpha, 2)} × Y(CK02: ${fmt(sample.actual, 1)}) + ${fmt(1 - alpha, 2)} × L(CK01: ${fmt(row(1)?.actual, 1)}) = ${fmt(sample.level, 2)}`
+          : `α đã khóa = ${fmt(alpha, 2)}`,
+      };
+    }
+    case 'Holt': {
+      const sample = row(3);
+      return {
+        title: 'Holt — mức nền và xu hướng — tối ưu và chạy trên TRAIN [C11 §6]',
+        detail: `Khởi tạo L₂ = Y₂, T₂ = Y₂−Y₁. Mỗi chu kỳ t: dự báo Fₜ = Lₜ₋₁ + Tₜ₋₁, cập nhật nền Lₜ = α·Yₜ + (1−α)·(Lₜ₋₁+Tₜ₋₁), cập nhật xu hướng Tₜ = β·(Lₜ−Lₜ₋₁) + (1−β)·Tₜ₋₁. α,β tối ưu trên TRAIN (β≤α). Khi dự phóng, xu hướng bị chặn ±15% mức nền. Tham số khóa: α = ${fmt(alpha, 2)}, β = ${fmt(beta, 2)}.`,
+        substitution: sample
+          ? `Ví dụ chu kỳ 03: Mức nền L = ${fmt(alpha, 2)} × Y(CK03: ${fmt(sample.actual, 1)}) + ${fmt(1 - alpha, 2)} × (L(CK02: ${fmt(row(2)?.level, 1)}) + T(CK02: ${fmt(row(2)?.trend, 1)})) = ${fmt(sample.level, 2)}`
+          : `α = ${fmt(alpha, 2)} · β = ${fmt(beta, 2)}`,
+      };
+    }
+    case 'Holt-Winters': {
+      const m = SEASON_LENGTH;
+      const initRow = row(m + 1);
+      return {
+        title: `Tối ưu và chạy Holt-Winters nhân tính (m = ${m} chu kỳ/vòng) trên TRAIN [C11 §7]`,
+        detail: `Khởi tạo S_i = Y_i/trungBình(vòng 1) cho i=1..${m}; L₂₅ = Y₂₅/S₁; T₂₅ = L₂₅−L₂₄. Mỗi chu kỳ t: Lₜ = α·(Yₜ/Sₜ₋ₘ)+(1−α)·(Lₜ₋₁+Tₜ₋₁); Tₜ = β·(Lₜ−Lₜ₋₁)+(1−β)·Tₜ₋₁; Sₜ = γ·(Yₜ/Lₜ)+(1−γ)·Sₜ₋ₘ. Hệ số mùa kế thừa từ vòng 24 chu kỳ trước [§7.4]. Tham số khóa: α = ${fmt(alpha, 2)}, β = ${fmt(beta, 2)}, γ = ${fmt(gamma, 2)}.`,
+        substitution: initRow
+          ? `Khởi tạo chu kỳ 25: Mức nền L = Y(CK25: ${fmt(initRow.actual, 1)}) / S(CK01: ${fmt(row(1)?.season, 3)}) = ${fmt(initRow.level, 2)}`
+          : `α = ${fmt(alpha, 2)} · β = ${fmt(beta, 2)} · γ = ${fmt(gamma, 2)} · m = ${m}`,
+      };
+    }
+    case 'SeasonalNaive': {
+      const period = forecast.params['p'];
+      const sample = rows.find(item => item.forecast !== null) ?? null;
+      return {
+        title: 'Seasonal-naïve — sao chép đúng vị trí vòng lặp trước [C11 §8.2, §8.9]',
+        detail: `Dự báo dựa trên chu kỳ lặp ngắn p* = ${fmt(period, 0)} chu kỳ đã chọn từ Pearson correlation. Công thức dự báo sao chép nguyên trạng không qua làm mượt: Fₜ = Yₜ₋ₚ*. Khi dự phóng tương lai, hệ thống lặp lại tuần hoàn mẫu của ${fmt(period, 0)} chu kỳ cuối của lịch sử để làm dự báo nền cho đến hết chân trời dự báo [§8.9]. Cột "Nguồn F · CK" ở bảng học bên panel Dữ liệu bên trái chỉ thẳng chu kỳ nguồn của từng dòng.`,
+        substitution: sample
+          ? `Ví dụ chu kỳ ${String(sample.index).padStart(2, '0')}: Dự báo F = Lượng bán thực tại CK ${String(sample.index - period).padStart(2, '0')} = ${fmt(sample.forecast, 1)}`
+          : `p* = ${fmt(period, 0)}`,
+      };
+    }
+    case 'Croston': {
+      const firstEvent = rows.find(item => item.actual > 0) ?? null;
+      const secondEvent = firstEvent ? rows.find(item => item.index > firstEvent.index && item.actual > 0) ?? null : null;
+      return {
+        title: 'Croston bình quân — quy mô Z và khoảng cách P trên TRAIN [C11 §9.4–§9.5]',
+        detail: `Dành riêng cho hàng bán thưa nhóm Z. Khởi tạo tại giao dịch đầu: quy mô Z = Y. P₁ chỉ được tính khi có giao dịch phát sinh thứ hai, bằng khoảng cách giữa hai chu kỳ giao dịch này (nghiêm cấm dùng khoảng cách từ đầu chuỗi) [§9.4]. Mỗi khi chu kỳ có bán Yₜ > 0: cập nhật quy mô Zₜ = α × Yₜ + (1 − α) × Zₜ₋₁ và khoảng cách trung bình Pₜ = α × Iₜ + (1 − α) × Pₜ₋₁ (với Iₜ là số chu kỳ trôi qua từ lần bán trước). Dự báo Fₜ = Zₜ / Pₜ; chu kỳ trống giữ nguyên tham số cũ [§9.5]. Bảng học (cột Z/P) nằm ở panel Dữ liệu bên trái.`,
+        substitution: secondEvent
+          ? `Lần phát sinh 2 (CK ${secondEvent.index}): Khoảng cách P₁ = ${secondEvent.index} − ${firstEvent!.index} = ${fmt(secondEvent.trend, 0)} · Quy mô Z = ${fmt(secondEvent.level, 2)} · Dự báo F = ${fmt(secondEvent.forecast, 2)}`
+          : `α = ${fmt(alpha, 2)} · Chưa đủ 2 chu kỳ phát sinh nhu cầu để minh họa thế số`,
+      };
+    }
+    case 'PulseRhythm': {
+      const interval = forecast.params['D'];
+      const quantity = forecast.params['Q'];
+      return {
+        title: 'Mô hình nhịp phát sinh — D và Q trên TRAIN [C11 §9.6]',
+        detail: 'Áp dụng cho nhóm Z bán thưa nhưng có nhịp phát sinh đều đặn. Khoảng cách nhịp D = Median(các khoảng cách phát sinh liên tiếp trong lịch sử); quy mô Q = Median(lượng bán tại các chu kỳ phát sinh). Dự báo: F = Q tại chu kỳ rơi đúng nhịp D kể từ chu kỳ phát sinh nhu cầu gần nhất, các chu kỳ khác F = 0. Chỉ được sử dụng khi nhịp đủ ổn định (≥ 3 lần phát sinh, khoảng cách đều đặn đạt chính sách đã phê duyệt) [§9.2, §9.6].',
+        substitution: `Nhịp bán D = ${fmt(interval, 0)} chu kỳ/lần · Quy mô trung vị Q = ${fmt(quantity, 1)} sản phẩm/lần`,
+      };
+    }
+    default:
+      return {
+        title: 'Chạy mô hình và tối ưu tham số chỉ trên tập TRAIN',
+        detail: 'Quét thô 0,1 → 0,9 rồi tinh chỉnh quanh điểm tốt nhất; tham số khóa xong không được chỉnh tiếp bằng tập kiểm tra.',
+        substitution: Object.keys(forecast.params).length
+          ? Object.entries(forecast.params).map(([key, value]) => `${key} = ${fmt(value as number, 2)}`).join(' · ')
+          : 'Mô hình không có tham số học',
+      };
+  }
+}
+
 function stage11(state: Readonly<SkuPipelineState>): StageTrace {
   const forecast = state.forecast;
   if (!forecast) {
     return { heading: 'Chưa có dự báo nền', context: 'Chặng 11 chưa tạo kết quả cho SKU này.', steps: [] };
   }
-  const values = state.cycles.filter(cycle => cycle.locked).map(cycle => cycle.baseDemand);
-  const branch = state.classification.xyz === 'D'
-    ? 'Nhóm D → không dự báo thống kê, dùng kế hoạch Thu mua / mượn mã tương tự.'
-    : state.classification.xyz === 'Y' && state.seasonality === 'confirmed'
-      ? 'Nhóm Y + mùa vụ xác nhận (C9) → Holt-Winters.'
-      : state.classification.xyz === 'Y' && (state.trend === 'up' || state.trend === 'down')
-        ? `Nhóm Y + xu hướng ${state.trend === 'up' ? 'tăng' : 'giảm'} (C10) → Holt.`
-        : state.classification.xyz === 'Z'
-          ? 'Nhóm Z (thưa) → nhịp phát sinh đều thì PulseRhythm, ngược lại Croston.'
-          : forecast.model === 'Holt'
-            ? 'Nhóm X có tín hiệu xu hướng cục bộ → Holt.'
-            : forecast.model === 'SeasonalNaive'
-              ? `Không mùa vụ năm, không xu hướng nhưng phát hiện chu kỳ lặp ngắn p = ${forecast.params['p']} (tự tương quan r = ${forecast.params['r']}) thắng SES trên backtest → seasonal-naïve [D.4-1].`
-              : 'Không mùa vụ, không xu hướng → SES giữ nền ổn định.';
-  const steps: TraceStep[] = [
+  const values = lockedSeriesAll(state);
+
+  // ── Tính toán WAPE của các mô hình ứng viên để hiển thị so sánh chéo trực quan ──
+  const { trainSize: cTrain, testSize: cTest } = splitSizes(values.length);
+  const candidatesList: { name: string; wape: number | null }[] = [];
+  
+  if (state.classification.xyz === 'X' || state.classification.xyz === 'Y') {
+    // 1. SES
+    try {
+      const sesFit = fitSes(values, cTrain);
+      const sesW = testMetrics(sesFit.run.rows, cTrain).wape;
+      candidatesList.push({ name: 'San bằng mũ đơn (SES)', wape: sesW });
+    } catch (e) {}
+
+    // 2. Holt
+    if (values.length >= 3) {
+      try {
+        const holtFit = fitHolt(values, cTrain);
+        const holtW = testMetrics(holtFit.run.rows, cTrain).wape;
+        candidatesList.push({ name: 'Holt (Có xu hướng)', wape: holtW });
+      } catch (e) {}
+    }
+
+    // 3. Holt-Winters
+    if (state.classification.xyz === 'Y' && state.seasonality === 'confirmed' && values.length >= SEASON_LENGTH + 2) {
+      try {
+        const hwFit = fitHoltWinters(values, cTrain);
+        if (hwFit) {
+          const hwW = testMetrics(hwFit.run.rows, cTrain).wape;
+          candidatesList.push({ name: 'Holt-Winters (Có mùa vụ)', wape: hwW });
+        }
+      } catch (e) {}
+    }
+
+    // 4. Seasonal Naive (nếu có pStar)
+    if (forecast.pStar !== null) {
+      try {
+        const naive = runSeasonalNaive(values, forecast.pStar, cTrain);
+        const naiveW = testMetrics(naive.rows, cTrain).wape;
+        candidatesList.push({ name: `Ngây thơ theo mùa (Seasonal-naïve, p*=${forecast.pStar})`, wape: naiveW });
+      } catch (e) {}
+    }
+  } else if (state.classification.xyz === 'Z') {
+    candidatesList.push({ name: 'Croston bình quan (Bán thưa không đều)', wape: forecast.model === 'Croston' ? forecast.wape : null });
+    candidatesList.push({ name: 'Nhịp phát sinh (Bán thưa có nhịp đều)', wape: forecast.model === 'PulseRhythm' ? forecast.wape : null });
+  }
+
+  let decisionPath = '';
+  if (state.classification.xyz === 'D') {
+    decisionPath = 'Nhóm D (Bán thưa đặc biệt hoặc Thiếu chuỗi): Do tính chất đặc thù hoặc thiếu dữ liệu lịch sử chuẩn, hệ thống KHÔNG thực hiện dự báo thống kê tự động. Kết quả được chuyển luồng ngoại lệ để chờ kế hoạch mua hàng thủ công từ Thu mua hoặc mượn nền từ một mã hàng tương tự đã duyệt [C11 §10].';
+  } else if (state.classification.xyz === 'Z') {
+    decisionPath = `Nhóm Z (Bán thưa): Do chuỗi bán thưa có nhiều chu kỳ trống, các mô hình SES/Holt/Holt-Winters thông thường sẽ bị nhiễu nặng và không hiệu quả. Quy tắc chọn mô hình của hệ thống như sau:\n` +
+      `1. Kiểm tra nhịp phát sinh: Nếu chuỗi có ≥ 3 giao dịch bán và khoảng cách giữa các giao dịch bán hoàn toàn đều đặn bằng nhau, hệ thống tự động chọn Mô hình Nhịp Phát Sinh (PulseRhythm).\n` +
+      `2. Nếu khoảng cách không đều, hệ thống chọn Croston bình quan (dự báo bằng tỷ số giữa Quy mô bán trung bình Z và Khoảng cách trung bình P) [C11 §9.2, §9.6].`;
+  } else {
+    // Nhóm X hoặc Y
+    const isY = state.classification.xyz === 'Y';
+    const hasSeason = state.seasonality === 'confirmed';
+    const hasTrend = state.trend === 'up' || state.trend === 'down';
+    
+    decisionPath = `Nhóm ${state.classification.xyz} (Có sức mua ổn định/trung bình): Hệ thống chạy song song và đối chiếu các mô hình trên tập TEST để chọn ra mô hình tối ưu nhất (có WAPE thấp nhất). Quy tắc chọn mô hình mặc định ban đầu (Incumbent):\n`;
+    if (isY && hasSeason) {
+      decisionPath += `• Bước 1 (Có Mùa vụ): SKU nhóm Y có Mùa vụ được xác nhận ở Chặng 9 → Cho phép chạy Holt-Winters (HW), Holt và SES. HW là ưu tiên số 1, nhưng chỉ được chọn nếu WAPE của HW thắng tuyệt đối cả Holt và SES trên tập TEST. Nếu HW không thắng, hệ thống sẽ rơi về (fallback) Holt (nếu Holt thắng SES) hoặc SES (nếu cả hai đều thua SES) [C11 §4.3, §4.5].\n`;
+    } else if (isY && hasTrend) {
+      decisionPath += `• Bước 1 (Có Xu hướng): SKU nhóm Y không mùa vụ nhưng có Xu hướng ở Chặng 10 → Cho phép chạy Holt và SES. Holt được chọn nếu WAPE của nó thấp hơn SES trên tập TEST; ngược lại fallback về SES [C11 §6.6].\n`;
+    } else if (isY) {
+      decisionPath += `• Bước 1 (Không Mùa vụ, Không Xu hướng): SKU nhóm Y không phát hiện tín hiệu xu hướng/mùa vụ bền vững → Chọn thẳng SES để giữ nền ổn định, giảm nhiễu [C11 §4.5].\n`;
+    } else {
+      // Nhóm X
+      decisionPath += `• Bước 1 (Nhóm X): SKU nhóm X → Dò tìm xu hướng cục bộ. Nếu phát hiện xu hướng tăng/giảm, hệ thống chạy Holt và SES, chọn Holt nếu thắng SES trên tập TEST; ngược lại chọn SES [C11 §3, nhánh 11X].\n`;
+    }
+    decisionPath += `• Bước 2 (Dò chu kỳ ngắn 11XY-SN): Chạy kiểm tra độc lập tương quan Pearson r(p) cho các chu kỳ lùi p = 2..12 trên tập TRAIN để tìm chu kỳ lặp ngắn p*. Nếu tìm được p* đạt r(p) ≥ 0,60 và mô hình Seasonal-naïve chạy thử với p* này THẮNG mô hình mặc định ở Bước 1 trên tập TEST (có WAPE thấp hơn), hệ thống sẽ chọn Seasonal-naïve làm dự báo nền cuối cùng. Ngược lại, giữ nguyên mô hình gốc [C11 §8.3, §8.11].`;
+  }
+
+  const rawSteps: RawStep[] = [
     {
-      title: 'B1 · Chọn nhánh mô hình từ nhãn đã khóa',
-      detail: `Đầu vào: XYZ = ${state.classification.xyz}, mùa vụ = ${state.seasonality}, xu hướng = ${state.trend}. ${branch} C11 không tự phân loại lại SKU.`,
+      title: 'Chọn nhánh mô hình từ nhãn đã khóa',
+      detail: `Đầu vào: XYZ = ${state.classification.xyz}, mùa vụ = ${state.seasonality}, xu hướng = ${state.trend}. C11 không tự phân loại lại SKU.\n\n${decisionPath}\n\nKết quả phân luồng thực tế của SKU này: ${forecast.reason}`,
       substitution: `Model = ${forecast.model}`,
       tone: 'info',
     },
   ];
+
   if (forecast.model === 'PurchasePlan') {
-    steps.push(
-      { title: 'B2 · Kiểm tra SKU tương tự đủ tin cậy và đã duyệt', detail: 'Dữ liệu mô phỏng không có quyết định duyệt SKU tương tự; không được tự mượn nền bằng AI.', substitution: 'SimilarSkuApproved = FALSE', tone: 'warn' },
-      { title: 'B3 · Kiểm tra kế hoạch/hệ số kỳ vọng từ Thu mua', detail: 'Dữ liệu mô phỏng không có kế hoạch Thu mua được duyệt cho SKU nhóm D.', substitution: 'PurchasePlanApproved = FALSE', tone: 'warn' },
-      { title: 'B4 · Chuyển ngoại lệ, không tự phát hành dự báo', detail: forecast.reason, substitution: 'F_base = [] · lockStatus = EXCEPTION', tone: 'warn' },
+    rawSteps.push(
+      { title: 'Kiểm tra SKU tương tự đủ tin cậy và đã duyệt', detail: 'Dữ liệu mô phỏng không có quyết định duyệt SKU tương tự; không được tự mượn nền bằng AI.', substitution: 'SimilarSkuApproved = FALSE', tone: 'warn' },
+      { title: 'Kiểm tra kế hoạch/hệ số kỳ vọng từ Thu mua', detail: 'Dữ liệu mô phỏng không có kế hoạch Thu mua được duyệt cho SKU nhóm D.', substitution: 'PurchasePlanApproved = FALSE', tone: 'warn' },
+      { title: 'Chuyển ngoại lệ, không tự phát hành dự báo', detail: forecast.reason, substitution: 'F_base = [] · lockStatus = EXCEPTION', tone: 'warn' },
     );
   } else {
-    const testSize = Math.max(1, Math.floor(values.length * 0.2));
-    const params = Object.entries(forecast.params).map(([key, value]) => `${key} = ${fmt(value, 2)}`).join(' · ');
-    steps.push(
+    const testSize = cTest;
+    const learning = buildForecastLearning(state).learning;
+    rawSteps.push({
+      title: 'Chia TRAIN/TEST theo thời gian',
+      detail: '20% chu kỳ cuối chuỗi để làm TEST; tuyệt đối không trộn ngẫu nhiên vì sẽ làm lộ tương lai vào tập huấn luyện.',
+      substitution: `n = ${values.length} → TRAIN = ${values.length - testSize} CK đầu · TEST = ${testSize} CK cuối`,
+    });
+    
+    if (state.classification.xyz === 'X' || state.classification.xyz === 'Y') {
+      rawSteps.push(shortCycleGateStep(forecast));
+    }
+    
+    rawSteps.push(
+      modelFormulaStep(forecast, learning),
       {
-        title: 'B2 · Chia TRAIN/TEST theo thời gian',
-        detail: '20% chu kỳ cuối chuỗi để làm TEST; tuyệt đối không trộn ngẫu nhiên vì sẽ làm lộ tương lai vào tập huấn luyện.',
-        substitution: `n = ${values.length} → TRAIN = ${values.length - testSize} CK đầu · TEST = ${testSize} CK cuối`,
-      },
-      {
-        title: 'B3 · Chạy mô hình và tối ưu tham số chỉ trên TRAIN',
-        detail: 'Quét thô 0,1 → 0,9 rồi tinh chỉnh quanh điểm tốt nhất; tham số khóa xong không được chỉnh tiếp bằng tập kiểm tra. Bảng học từng chu kỳ nằm ở panel Dữ liệu bên trái.',
-        substitution: params ? `Tham số khóa: ${params}` : 'Mô hình không có tham số học',
-      },
-      {
-        title: 'B4 · Dự báo các chu kỳ TEST bằng tham số đã chốt',
-        detail: 'Giữ nguyên tham số TRAIN, dự báo one-step-ahead; không dùng TEST để tinh chỉnh ngược tham số.',
+        title: 'Dự báo các chu kỳ TEST bằng tham số đã chốt',
+        detail: 'Giữ nguyên tham số TRAIN, dự báo one-step-ahead; không dùng TEST để tinh chỉnh ngược tham số. Dưới đây là kết quả sai số WAPE đo lường thực tế của các mô hình ứng viên được thử nghiệm:',
         substitution: `TEST = ${testSize} chu kỳ cuối`,
+        values: candidatesList.map(cand => ({
+          label: `Mô hình: ${cand.name}`,
+          value: cand.wape === null ? 'Không khả dụng' : `WAPE (TEST) = ${pct(cand.wape)}`
+        })),
       },
       {
-        title: 'B5 · Tính đủ bộ sai số bắt buộc',
+        title: 'Tính đủ bộ sai số bắt buộc',
         detail: 'Tính RMSE, nRMSE, WAPE và Bias. Với nhóm Z còn phải đo đúng thời điểm phát sinh và WAPE riêng chu kỳ có nhu cầu.',
         substitution: `RMSE = ${fmt(forecast.rmse, 2)} · nRMSE = ${pct(forecast.nrmse)} · WAPE = ${pct(forecast.wape)} · Bias = ${pct(forecast.bias)}`,
         values: state.classification.xyz === 'Z' ? [
@@ -886,31 +1088,32 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
         ] : undefined,
       },
       {
-        title: 'B6 · Đối chiếu ngưỡng của đúng nhóm ABC×XYZ',
+        title: 'Đối chiếu ngưỡng của đúng nhóm ABC×XYZ',
         detail: 'Tài liệu chưa ban hành giá trị ngưỡng P25 chính thức. Vì vậy hệ thống không được dùng 35%/20% hay bất kỳ ngưỡng tự đặt nào để khóa tự động.',
         substitution: `Threshold(${state.classification.abc}${state.classification.xyz}) = CHƯA PHÊ DUYỆT → REVIEW`,
         tone: 'warn',
       },
       {
-        title: 'B7 · Mô phỏng tác động vận hành trước khi khóa',
+        title: 'Mô phỏng tác động vận hành trước khi khóa',
         detail: 'Tác động thiếu hàng, dư tồn, vốn khóa và số SKU cần duyệt được mô phỏng ở Chặng 16–19; trạng thái C11 vẫn REVIEW cho đến khi ngưỡng P25 chính thức được ban hành và kiểm chứng.',
         substitution: 'OperationalImpact = CHƯA ĐỦ DỮ LIỆU → không khóa tự động',
         tone: 'warn',
       },
       {
-        title: 'B8 · Quyết định trạng thái mô hình',
+        title: 'Quyết định trạng thái mô hình',
         detail: 'Chỉ LOCKED khi vừa đạt ngưỡng đã phê duyệt vừa qua mô phỏng tác động. Hai điều kiện này chưa đủ nên kết quả là REVIEW.',
         substitution: `lockStatus = ${forecast.lockStatus.toUpperCase()}`,
         tone: 'warn',
       },
       {
-        title: 'B9 · Bàn giao dự báo nền chưa áp CTKM',
+        title: 'Bàn giao dự báo nền chưa áp CTKM',
         detail: 'Chuỗi vẫn được hiển thị như dự báo cần xem xét; không được mô tả là dự báo đã khóa chính thức.',
         substitution: `F_base(review) = [${list(forecast.baseForecast, 1)}]`,
         tone: 'warn',
       },
     );
   }
+  const steps: TraceStep[] = rawSteps.map((step, index) => ({ ...step, title: `B${index + 1} · ${step.title}` }));
   return {
     heading: `Thế số chọn và khóa mô hình ${forecast.model}`,
     context: 'Toàn bộ quyết định nhánh lấy từ đầu ra đã khóa của Chặng 7, 9, 10.',
@@ -1074,7 +1277,7 @@ function stage14(state: Readonly<SkuPipelineState>): StageTrace {
     steps: [
       {
         title: 'Chọn mã hàng và nhà cung cấp',
-        detail: 'Khóa đúng cấp SKU — nhà cung cấp trước khi dựng lịch nguồn hàng.',
+        detail: 'Khóa đúng cấp SKU — nhà cung cấp trước khi dựng lịch nguồn hàng. CHƯA CÓ TRƯỜNG RIÊNG',
         values: [{ label: 'SKU', value: state.definition.id }, { label: 'Nhà cung cấp', value: state.definition.supplier }, { label: 'Tồn hiện có', value: fmt(onHand, 0) }],
       },
       {
@@ -1166,7 +1369,7 @@ function stage15(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
       },
       {
         title: 'Khóa đầu ra Chặng 15',
-        detail: 'Bàn giao SS, Z, D̄, σd, LT̄, σLT, công thức đã dùng, nguồn dữ liệu và cảnh báo cho các chặng sau.',
+        detail: 'Bàn giao SS, Z, D̄, σd, LT̄, σLT, công thức đã dùng, nguồn dữ liệu và cảnh báo cho các chặng sau. Protection=max(SS,DisplayMin)',
         substitution: `SS = ${fmt(state.safetyStock, 0)} · formula = ${audit?.formula ?? '—'} · warnings = ${audit?.warnings.length ?? 0}`,
         tone: sufficient ? 'good' : 'warn',
       },
@@ -1174,7 +1377,7 @@ function stage15(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
   };
 }
 
-function stage16(state: Readonly<SkuPipelineState>): StageTrace {
+function stage16(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
   const p = state.orderPlan;
   return {
     heading: 'Tính số đặt trước ngân sách và làm tròn MOQ',
@@ -1184,7 +1387,7 @@ function stage16(state: Readonly<SkuPipelineState>): StageTrace {
       { title: 'Đọc vị thế tồn từ Chặng 14', detail: 'Dùng hàng tự do tại mốc cuối vùng bao phủ.', substitution: `I_free = ${fmt(p?.freeStock, 1)}` },
       { title: 'Đọc tồn kho an toàn từ Chặng 15', detail: 'Không tự giảm SS để vừa số đặt.', substitution: `SS = ${fmt(state.safetyStock, 1)}` },
       { title: 'Đọc MOQ và quy cách mua', detail: 'MOQ là dữ kiện mua hàng, không phải ngưỡng tự đặt.', substitution: `MOQ = ${fmt(p?.moq, 0)}` },
-      { title: 'Xác định vùng thời gian cần bao phủ', detail: 'Vùng bao phủ bằng chân trời dự báo cuối của phiên.', substitution: `${p?.coverageCycles ?? 0} chu kỳ` },
+      { title: 'Xác định vùng thời gian cần bao phủ', detail: 'Vùng bao phủ bằng chân trời dự báo cuối của phiên. CoverWindow = LeadTime + ReviewPeriod', substitution: `${p?.coverageCycles ?? 0} chu kỳ` },
       { title: 'Tính nhu cầu trong vùng bao phủ', detail: 'Cộng dự báo cuối trong vùng bảo vệ.', substitution: `D_cover = ${fmt(p?.demandCover, 1)}` },
       { title: 'Tính hàng tự do dự kiến trong vùng', detail: 'Nhận I_free đã tính theo mốc, không dùng tồn hiện tại đơn lẻ.', substitution: `I_free = ${fmt(p?.freeStock, 1)}` },
       { title: 'Tính số cần trước làm tròn', detail: 'Chặn dưới tại 0.', substitution: `Q_raw = max(0, ${fmt(p?.demandCover, 1)} + ${fmt(state.safetyStock, 1)} − ${fmt(p?.freeStock, 1)}) = ${fmt(p?.rawQuantity, 1)}` },
@@ -1205,7 +1408,7 @@ function stage17(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
       { title: 'Đọc số đặt sau MOQ', detail: 'Nhận nguyên trạng từ Chặng 16.', substitution: `Q_order = ${fmt(state.orderPlan?.orderQuantity, 0)}` },
       { title: 'Đọc giá mua và giá trị đặt', detail: 'Dùng giá mua, không dùng giá bán/giá khuyến mãi.', substitution: `V = ${fmt(state.orderPlan?.orderQuantity, 0)}×${fmt(state.definition.purchasePrice, 0)} = ${fmt(a?.orderValue, 0)} ₫` },
       { title: 'Đọc ngân sách kỳ', detail: 'Ngân sách là đầu vào phiên đã khóa.', substitution: `B = ${fmt(policy.periodBudget, 0)} ₫` },
-      { title: 'Đọc chính sách ưu tiên từ Chặng 8', detail: 'Không tự đặt trọng số w₁…w₄ khi tài liệu chưa ban hành.', substitution: `${state.capitalPriority} · hạng ${a?.priorityRank ?? 'chưa khóa'}` },
+      { title: 'Đọc chính sách ưu tiên từ Chặng 8', detail: 'Không tự đặt trọng số w₁…w₄ khi tài liệu chưa ban hành. bucket = CHƯA CẤU HÌNH', substitution: `${state.capitalPriority} · hạng ${a?.priorityRank ?? 'chưa khóa'}` },
       { title: 'Tính tổng giá trị đề xuất', detail: 'Engine tính trên toàn danh mục trước khi cấp từng dòng.', substitution: `V_i = ${fmt(a?.orderValue, 0)} ₫` },
       { title: 'Kiểm tra ngân sách đủ hay thiếu', detail: a?.cutQuantity ? 'Dòng không được cấp toàn bộ.' : 'Dòng được cấp đủ hoặc không phát sinh nhu cầu.', tone: a?.cutQuantity ? 'warn' : 'good' },
       { title: 'Sắp xếp ưu tiên giảm dần', detail: 'Thứ tự: Rất cao → Cao → Trung bình → Trung bình thấp → Thấp → Rất thấp.' },
@@ -1230,7 +1433,7 @@ function stage18(state: Readonly<SkuPipelineState>): StageTrace {
       { title: 'Kiểm tra đủ thông tin mua hàng', detail: state.definition.purchaseTermsComplete ? 'Điều kiện đơn mua đã đủ.' : 'Chuyển chờ bổ sung thông tin.', tone: state.definition.purchaseTermsComplete ? 'good' : 'warn' },
       { title: 'Kiểm tra ngoại lệ cần duyệt', detail: d?.reasons.length ? 'Có ngoại lệ; không tự phát hành.' : 'Không có ngoại lệ được xác định.', values: (d?.reasons ?? []).map((value, i) => ({ label: `Lý do ${i + 1}`, value })), tone: d?.reasons.length ? 'warn' : 'good' },
       { title: 'Phân luồng phát hành/chờ duyệt', detail: `Trạng thái = ${d?.status ?? '—'}`, substitution: `Q_release = ${fmt(d?.releasedQuantity, 0)}` },
-      { title: 'Khóa đầu ra Chặng 18', detail: 'Lưu số phát hành, trạng thái, lý do ngoại lệ; không giả lập quyết định của người duyệt.' },
+      { title: 'Khóa đầu ra Chặng 18', detail: 'Lưu số phát hành, trạng thái, lý do ngoại lệ; không giả lập quyết định của người duyệt. Q_approved_over=0' },
     ],
   };
 }
@@ -1244,7 +1447,7 @@ function stage19(state: Readonly<SkuPipelineState>): StageTrace {
       { title: 'Đọc dự báo cuối và số đặt phát hành', detail: 'Đọc snapshot đã khóa, không hồi tố.', substitution: `ΣF = ${fmt(state.finalForecast.reduce((s, v) => s + v, 0), 1)} · Q_release = ${fmt(state.releaseDecision?.releasedQuantity, 0)}` },
       { title: 'Đọc bán, tồn, thiếu hàng và hàng nhận thực tế', detail: 'Dùng dữ liệu actual riêng biệt với dữ liệu dự báo.', substitution: `ΣA = ${fmt(a?.actualDemand, 1)} · Ending stock = ${fmt(a?.endingStock, 0)}` },
       { title: 'Đọc ngân sách thực tế và quyết định duyệt', detail: 'Đối chiếu vốn cấp, vốn dùng và trạng thái phát hành.' },
-      { title: 'Đo sai số dự báo nền và dự báo cuối', detail: 'WAPE dùng mẫu số tổng thực tế.', substitution: `WAPE = ${a?.forecastWape === null || a?.forecastWape === undefined ? '—' : fmt(a.forecastWape * 100, 2) + '%'}` },
+      { title: 'Đo sai số dự báo nền và dự báo cuối', detail: 'WAPE dùng mẫu số tổng thực tế. WAPE_base = CHƯA LƯU', substitution: `WAPE = ${a?.forecastWape === null || a?.forecastWape === undefined ? '—' : fmt(a.forecastWape * 100, 2) + '%'}` },
       { title: 'Đo mức phục vụ, thiếu hàng và dư tồn', detail: 'Không quy lỗi chỉ từ một chỉ tiêu.', substitution: `Thiếu = ${fmt(a?.stockoutUnits, 0)} · Tồn cuối = ${fmt(a?.endingStock, 0)}` },
       { title: 'Đo hàng về đúng hoặc trễ kế hoạch', detail: 'Đo trực tiếp lịch sử nhận hàng.', substitution: `Trễ TB = ${fmt(a?.averageReceiptDelayDays, 2)} ngày` },
       { title: 'Đo tác động ngân sách và ngoại lệ duyệt', detail: 'Giữ dấu chênh lệch để truy vết.', substitution: `Vốn cấp − vốn thực dùng = ${fmt(a?.budgetVariance, 0)} ₫` },
@@ -1258,25 +1461,27 @@ function stage19(state: Readonly<SkuPipelineState>): StageTrace {
 
 export function buildStageTrace(stage: StageNumber, state: Readonly<SkuPipelineState>, policy: SimulationPolicy, focusDate: string | null): StageTrace {
   const focus = focusDate ? state.daily.find(record => record.date === focusDate) ?? null : null;
+  let trace: StageTrace;
   switch (stage) {
-    case 1: return stage1(state, policy);
-    case 2: return stage2(state, policy, focus);
-    case 3: return stage3(state, policy, focus);
-    case 4: return stage4(state, policy, focus);
-    case 5: return stage5(state, policy, focusDate);
-    case 6: return stage6(state);
-    case 7: return stage7(state);
-    case 8: return stage8(state, policy);
-    case 9: return stage9(state);
-    case 10: return stage10(state);
-    case 11: return stage11(state);
-    case 12: return stage12(state, focus);
-    case 13: return stage13(state, policy);
-    case 14: return stage14(state);
-    case 15: return stage15(state, policy);
-    case 16: return stage16(state);
-    case 17: return stage17(state, policy);
-    case 18: return stage18(state);
-    case 19: return stage19(state);
+    case 1: trace = stage1(state, policy); break;
+    case 2: trace = stage2(state, policy, focus); break;
+    case 3: trace = stage3(state, policy, focus); break;
+    case 4: trace = stage4(state, policy, focus); break;
+    case 5: trace = stage5(state, policy, focusDate); break;
+    case 6: trace = stage6(state); break;
+    case 7: trace = stage7(state); break;
+    case 8: trace = stage8(state, policy); break;
+    case 9: trace = stage9(state); break;
+    case 10: trace = stage10(state); break;
+    case 11: trace = stage11(state); break;
+    case 12: trace = stage12(state, focus); break;
+    case 13: trace = stage13(state, policy); break;
+    case 14: trace = stage14(state); break;
+    case 15: trace = stage15(state, policy); break;
+    case 16: trace = stage16(state, policy); break;
+    case 17: trace = stage17(state, policy); break;
+    case 18: trace = stage18(state); break;
+    case 19: trace = stage19(state); break;
   }
+  return { ...trace, contract: STAGE_TRACE_CONTRACTS[stage] };
 }

@@ -50,6 +50,19 @@ describe('SimulationStore synchronization invariants', () => {
     expect(store.view().hasRun).toBe(true);
   });
 
+  it('đổi tham số phiên khi đang xem lại chặng sớm hơn không được xóa tiến độ các chặng đã hoàn thành sau đó', async () => {
+    const store = new SimulationStore(new SimulationEngine());
+    await store.selectStage(15);
+    await store.selectStage(6); // quay lại xem chặng 6, không đụng vào tiến độ đã chạy tới 15
+
+    await store.updatePolicy({ cycleLength: 7 });
+
+    expect(store.activeStage()).toBe(6); // vẫn đang xem đúng chặng đã chọn, không bị kéo đi
+    expect(store.completedStage()).toBe(15); // tiến độ 15 chặng trước đó phải được tính lại đầy đủ, không cắt về 6
+    expect(Object.keys(store.snapshots())).toHaveLength(15);
+    expect(store.view().hasRun).toBe(true);
+  });
+
   it('lưu ngày méo, ngày sạch tham chiếu và lineage Chặng 3→4 trong snapshot', async () => {
     const store = new SimulationStore(new SimulationEngine());
     await store.selectStage(4);

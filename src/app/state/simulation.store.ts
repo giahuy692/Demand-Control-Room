@@ -184,13 +184,18 @@ export class SimulationStore {
       .some(key => patch[key] !== currentPolicy[key]);
     if (!changed) return Promise.resolve();
 
-    const targetStage = this.activeStage();
+    // Đổi tham số phiên làm mọi snapshot cũ hết hiệu lực, nhưng KHÔNG được cắt bỏ tiến độ
+    // các chặng đã hoàn thành trước đó chỉ vì người dùng đang xem lại một chặng sớm hơn —
+    // nếu không, dữ liệu Chặng {viewedStage+1}..{completedStage cũ} biến mất khỏi mọi panel
+    // ("Dữ liệu qua từng chặng") cho đến khi bấm lại từng tab một.
+    const viewedStage = this.activeStage();
+    const recomputeTarget = Math.max(viewedStage, this.completedStage()) as StageNumber;
     this.policy.update(policy => ({ ...policy, ...patch }));
     this.snapshots.set({});
     this.completedStage.set(0);
     this.error.set(null);
 
-    return this.runThrough(targetStage);
+    return this.runThrough(recomputeTarget).then(() => this.activeStage.set(viewedStage));
   }
 
   runActive(): void {

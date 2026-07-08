@@ -3,9 +3,9 @@ import { FormulaBlock, SimulationPolicy, SkuPipelineState, StageNumber } from '.
 const f = (title: string, expression: string, source: string): FormulaBlock => ({ title, expression, source });
 
 const METRICS = [
-  f('RMSE', String.raw`\operatorname{RMSE}=\sqrt{\frac{1}{n}\sum_{t=1}^{n}(Y_t-F_t)^2}`, 'C11 §10.3'),
-  f('nRMSE', String.raw`\operatorname{nRMSE}=\frac{\operatorname{RMSE}}{\overline{Y}},\qquad \overline{Y}>0`, 'C11 §10.3'),
-  f('WAPE và Bias', String.raw`\operatorname{WAPE}=\frac{\sum_{t=1}^{n}|Y_t-F_t|}{\sum_{t=1}^{n}Y_t},\qquad \operatorname{Bias}=\frac{\sum_{t=1}^{n}(F_t-Y_t)}{\sum_{t=1}^{n}Y_t}`, 'C11 §10.3'),
+  f('RMSE', String.raw`\operatorname{RMSE}=\sqrt{\frac{1}{n}\sum_{t=1}^{n}(Y_t-F_t)^2}`, 'C11 §11.3'),
+  f('nRMSE', String.raw`\operatorname{nRMSE}=\frac{\operatorname{RMSE}}{\overline{Y}},\qquad \overline{Y}>0`, 'C11 §11.3'),
+  f('WAPE và Bias', String.raw`\operatorname{WAPE}=\frac{\sum_{t=1}^{n}|Y_t-F_t|}{\sum_{t=1}^{n}Y_t},\qquad \operatorname{Bias}=\frac{\sum_{t=1}^{n}(F_t-Y_t)}{\sum_{t=1}^{n}Y_t}`, 'C11 §11.3'),
 ];
 
 function stage11ModelFormulas(state: Readonly<SkuPipelineState> | null): FormulaBlock[] {

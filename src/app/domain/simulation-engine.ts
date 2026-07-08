@@ -390,13 +390,23 @@ function runStage11(previous: StageSnapshot, policy: SimulationPolicy): StageSna
 function runStage12(previous: StageSnapshot, policy: SimulationPolicy): StageSnapshot {
   const states = cloneStates(previous);
   for (const state of Object.values(states)) {
-    const factors = buildPromoRegionSamples(state.daily)
+    const regions = buildPromoRegionSamples(state.daily);
+    const factors = regions
       .filter(region => region.eligible)
       .map(region => region.factor!);
-    state.promoFactor = factors.length ? Math.max(1, median(factors)) : null;
-    state.promoConfidence = factors.length >= 3 ? 'auto' : factors.length === 2 ? 'low' : factors.length === 1 ? 'suggest-only' : 'none';
+    const proposedFactor = factors.length ? median(factors) : null;
+    state.promoFactor = proposedFactor;
+    state.promoConfidence = factors.length >= 3 && proposedFactor! >= 1
+      ? 'auto'
+      : factors.length >= 2
+        ? 'low'
+        : factors.length === 1
+          ? 'suggest-only'
+          : regions.length
+            ? 'blocked'
+            : 'none';
   }
-  return createSnapshot(12, policy, states, { 'Hệ số tự khóa': Object.values(states).filter(state => state.promoConfidence === 'auto').length, 'Tin cậy thấp': Object.values(states).filter(state => state.promoConfidence === 'low').length, 'Không có mẫu': Object.values(states).filter(state => state.promoConfidence === 'none').length }, ['K = bán ghi nhận / nền tự nhiên theo vùng CTKM.', 'K < 1 được chặn về 1,00 theo chính sách.']);
+  return createSnapshot(12, policy, states, { 'Hệ số tự khóa': Object.values(states).filter(state => state.promoConfidence === 'auto').length, 'Cần duyệt': Object.values(states).filter(state => state.promoConfidence === 'low' || state.promoConfidence === 'suggest-only').length, 'Bị chặn': Object.values(states).filter(state => state.promoConfidence === 'blocked').length, 'Không có mẫu': Object.values(states).filter(state => state.promoConfidence === 'none').length }, ['K = bán ghi nhận / nền tự nhiên theo vùng CTKM.', 'K < 1 được giữ làm bằng chứng và chuyển REVIEW, không tự nâng lên 1,00.']);
 }
 
 function runStage13(previous: StageSnapshot, policy: SimulationPolicy): StageSnapshot {
@@ -584,7 +594,8 @@ function runStage18(previous: StageSnapshot, policy: SimulationPolicy): StageSna
     const reasons: string[] = [];
     if (!complete) reasons.push('Thiếu ETA xác nhận, MOQ, giá mua, nhà cung cấp hoặc điều kiện đơn mua.');
     if ((state.budgetAllocation?.cutQuantity ?? 0) > 0) reasons.push('Dòng bị cắt/hoãn do ngân sách.');
-    if (state.promoConfidence === 'low' || state.promoConfidence === 'suggest-only') reasons.push('Hệ số CTKM có độ tin cậy thấp hoặc chỉ được đề xuất.');
+    if (state.promoConfidence === 'low' || state.promoConfidence === 'suggest-only') reasons.push('Hệ số CTKM ở trạng thái REVIEW, chỉ được áp nếu người duyệt xác nhận.');
+    if (state.definition.futurePromotions.some(item => item.confirmed) && (state.promoConfidence === 'blocked' || state.promoConfidence === 'none')) reasons.push('Kế hoạch CTKM có hiệu lực nhưng hệ số đang BLOCKED/MANUAL_ONLY; giữ dự báo nền và chờ xử lý.');
     if (state.safetyStockAudit?.warnings.length) reasons.push(...state.safetyStockAudit.warnings);
     let status: 'not-issued' | 'awaiting-info' | 'awaiting-approval' | 'issued' = 'issued';
     if (funded <= 0) status = 'not-issued';

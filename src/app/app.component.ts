@@ -33,6 +33,7 @@ export class AppComponent implements OnInit {
   readonly auditCollapsed = signal(false);
   readonly processCollapsed = signal(false);
   readonly processPanelWidth = signal(760);
+  readonly traceStepOverrides = signal<Record<number, boolean>>({});
   private processResize: { pointerId: number; startX: number; startWidth: number } | null = null;
   readonly phases = [
     { number: 1, label: 'Clean data', range: '01—05' },
@@ -84,8 +85,6 @@ export class AppComponent implements OnInit {
   readonly temporaryBases = computed(() => this.auditDailyRows().filter(row => ['unbalanced', 'fixed', 'insufficient'].includes(row.balanceStatus!)));
   readonly promos = computed(() => this.auditDailyRows().filter(row => !!row.promoCode));
   readonly unlockedCycles = computed(() => this.auditCycles().filter(c => !c.locked));
-
-  readonly lineage = computed(() => this.buildLineage());
 
   readonly stageTrace = computed(() => {
     const view = this.store.view();
@@ -197,7 +196,10 @@ export class AppComponent implements OnInit {
   get periodBudget(): number { return this.store.policy().periodBudget; }
   set periodBudget(value: number) { void this.store.updatePolicy({ periodBudget: Math.max(0, Number(value)) }); }
 
-  selectStage(stage: number): void { void this.store.selectStage(stage as StageNumber); }
+  selectStage(stage: number): void {
+    this.traceStepOverrides.set({});
+    void this.store.selectStage(stage as StageNumber);
+  }
   resetSession(): void { this.store.reset(); this.selectStage(1); }
   startProcessResize(event: PointerEvent): void {
     if (event.button !== 0) return;
@@ -221,8 +223,22 @@ export class AppComponent implements OnInit {
     else return;
     event.preventDefault();
   }
-  selectSku(sku: SkuDefinition): void { this.store.selectSku(sku.id); this.auditDate.set(null); }
-  selectSkuId(skuId: string): void { this.store.selectSku(skuId); this.auditDate.set(null); }
+  selectSku(sku: SkuDefinition): void { this.store.selectSku(sku.id); this.auditDate.set(null); this.traceStepOverrides.set({}); }
+  selectSkuId(skuId: string): void { this.store.selectSku(skuId); this.auditDate.set(null); this.traceStepOverrides.set({}); }
+  isTraceStepOpen(index: number, total: number, tone: string | undefined): boolean {
+    const overrides = this.traceStepOverrides();
+    return Object.prototype.hasOwnProperty.call(overrides, index)
+      ? overrides[index]
+      : index === 0 || index === total - 1 || tone === 'warn';
+  }
+  onTraceStepToggle(index: number, event: Event): void {
+    const open = (event.currentTarget as HTMLDetailsElement).open;
+    if (this.traceStepOverrides()[index] === open) return;
+    this.traceStepOverrides.update(current => ({ ...current, [index]: open }));
+  }
+  setAllTraceSteps(open: boolean, total: number): void {
+    this.traceStepOverrides.set(Object.fromEntries(Array.from({ length: total }, (_, index) => [index, open])));
+  }
   stateFor(skuId: string): Readonly<SkuPipelineState> | null { return this.currentStageStates()?.[skuId] ?? null; }
   stageStatus(stage: StageNumber): 'locked' | 'active' | 'available' {
     if (stage <= this.store.completedStage()) return stage === this.store.activeStage() ? 'active' : 'locked';
@@ -288,32 +304,4 @@ export class AppComponent implements OnInit {
     return row.balanceStatus ?? (row.baseSource === 'promo-defer' ? 'promo' : row.baseSource === 'clean' ? 'clean' : 'pending');
   }
 
-  private buildLineage(): { stage: number; label: string; value: string; detail: string }[] {
-    const maxStage = Math.min(this.store.activeStage(), this.store.completedStage());
-    const skuId = this.store.selectedSkuId();
-    const date = this.auditDate();
-    const items: { stage: number; label: string; value: string; detail: string }[] = [];
-    for (let stage = 1; stage <= maxStage; stage++) {
-      const state = this.store.snapshots()[stage as StageNumber]?.states[skuId];
-      if (!state) continue;
-      const row = date ? state.daily.find(item => item.date === date) : null;
-      if (stage <= 4 && row) items.push({ stage, label: STAGES[stage - 1].shortTitle, value: stage === 1 ? `Bán ${this.format(row.sales)}` : stage === 2 ? (row.isStockout ? 'STOCKOUT' : 'Ngày sạch') : `Nền ${this.format(row.baseDemand, 1)}`, detail: stage >= 3 ? this.statusLabel(row) : row.stockoutReason ?? 'Bản ghi gốc' });
-      if (stage === 5) items.push({ stage, label: 'Khóa chu kỳ', value: `${state.cycles.filter(cycle => cycle.locked).length} CK khóa`, detail: `${state.cycles.filter(cycle => !cycle.locked).length} CK không dùng` });
-      if (stage === 6) items.push({ stage, label: 'ABC', value: state.classification.abc, detail: `Lũy kế ${this.format(state.classification.cumulativeShare * 100, 1)}%` });
-      if (stage === 7) items.push({ stage, label: 'XYZ/D', value: state.classification.xyz, detail: `ADI ${this.format(state.classification.adi, 2)} · CV² ${this.format(state.classification.cv2, 3)}` });
-      if (stage === 8) items.push({ stage, label: 'Chính sách', value: state.serviceLevel ? `${state.serviceLevel}%` : 'Duyệt riêng', detail: state.capitalPriority });
-      if (stage === 9) items.push({ stage, label: 'Mùa vụ', value: state.seasonality, detail: 'Đầu ra khóa C9' });
-      if (stage === 10) items.push({ stage, label: 'Xu hướng', value: state.trend, detail: `g₁ ${this.format((state.trendRates[0] ?? 0) * 100, 1)}% · g₂ ${this.format((state.trendRates[1] ?? 0) * 100, 1)}%` });
-      if (stage === 11) items.push({ stage, label: 'Mô hình', value: state.forecast?.model ?? 'Ngoại lệ', detail: state.forecast?.lockStatus ?? 'Chưa khóa' });
-      if (stage === 12) items.push({ stage, label: 'Hệ số KM', value: this.format(state.promoFactor, 2), detail: state.promoConfidence });
-      if (stage === 13) items.push({ stage, label: 'Dự báo cuối', value: `${state.finalForecast.length} CK`, detail: state.finalForecast.map(value => this.format(value, 0)).join(' · ') });
-      if (stage === 14) items.push({ stage, label: 'Hàng tự do', value: this.format(state.freeStock), detail: 'Tại mốc bảo vệ' });
-      if (stage === 15) items.push({ stage, label: 'Tồn an toàn', value: this.format(state.safetyStock), detail: state.safetyStockAudit?.formula === 'full' ? 'Công thức đầy đủ' : 'Chính sách/thiếu dữ liệu' });
-      if (stage === 16) items.push({ stage, label: 'Số đặt/MOQ', value: this.format(state.orderPlan?.orderQuantity), detail: `Dư MOQ ${this.format(state.orderPlan?.moqSurplus, 1)}` });
-      if (stage === 17) items.push({ stage, label: 'Được cấp vốn', value: this.format(state.budgetAllocation?.fundedQuantity), detail: state.budgetAllocation?.reason ?? '—' });
-      if (stage === 18) items.push({ stage, label: 'Phát hành', value: state.releaseDecision?.status ?? '—', detail: `SL ${this.format(state.releaseDecision?.releasedQuantity)}` });
-      if (stage === 19) items.push({ stage, label: 'Hậu kiểm', value: state.postAudit?.forecastWape === null ? '—' : `${this.format((state.postAudit?.forecastWape ?? 0) * 100, 1)}% WAPE`, detail: state.postAudit?.primaryCause ?? '—' });
-    }
-    return items;
-  }
 }

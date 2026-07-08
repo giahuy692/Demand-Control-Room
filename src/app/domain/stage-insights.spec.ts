@@ -109,7 +109,7 @@ describe('stage-insights — panel trái đối ứng từng chặng', () => {
     for (const state of Object.values(snapshots[12]!.states)) {
       const audit = buildPromoAudit(state);
       if (audit.rawMedian === null) expect(state.promoFactor).toBeNull();
-      else expect(Math.max(1, audit.rawMedian)).toBe(state.promoFactor);
+      else expect(audit.rawMedian).toBe(state.promoFactor);
       expect(audit.confidence).toBe(state.promoConfidence);
     }
   });

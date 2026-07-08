@@ -38,8 +38,8 @@
 .auto-run-status { display: inline-flex; align-items: center; gap: 7px; color: var(--green); font-size: 10px; font-weight: 700; white-space: nowrap; }
 .auto-run-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; animation: auto-run-pulse .8s ease-in-out infinite alternate; }
 @keyframes auto-run-pulse { to { opacity: .35; transform: scale(.72); } }
-.btn { min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 7px; background: transparent; font-weight: 700; font-size: 12px; cursor: pointer; transition: .18s ease; }
-.btn:hover:not(:disabled) { transform: translateY(-1px); border-color: #51596a; }.btn:disabled { opacity: .38; cursor: not-allowed; }
+.btn { min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 7px; background: transparent; font-weight: 700; font-size: 12px; cursor: pointer; transition: border-color .18s ease, color .18s ease, background-color .18s ease; }
+.btn:hover:not(:disabled) { border-color: #51596a; }.btn:disabled { opacity: .38; cursor: not-allowed; }
 .btn.primary { color: #15100a; border-color: var(--amber); background: var(--amber); box-shadow: 0 5px 22px rgba(255,171,46,.14); }.btn.secondary { background: #1b202a; }.btn.ghost { color: var(--muted); }
 .run-dot { display: inline-block; width: 6px; height: 6px; margin-right: 8px; border-radius: 50%; background: #10131a; box-shadow: 0 0 0 3px rgba(17,19,25,.2); }
 
@@ -98,6 +98,32 @@
 .trace-glyph { display: grid; place-items: center; flex: 0 0 32px; height: 32px; color: var(--cyan); border: 1px solid #2e4a52; border-radius: 8px; font: 700 16px Georgia, serif; }
 .trace-head h3 { margin: 4px 0 3px; font: 650 14px "Bahnschrift Condensed", sans-serif; }
 .trace-context { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.trace-contract { border-bottom: 1px solid #26303b; background: linear-gradient(180deg, rgba(255,171,46,.035), transparent); }
+.trace-contract > summary { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 14px; cursor: pointer; list-style: none; user-select: none; }
+.trace-contract > summary::-webkit-details-marker { display: none; }
+.trace-contract > summary span { min-width: 0; }
+.trace-contract > summary b, .trace-contract > summary small { display: block; }
+.trace-contract > summary b { color: #f1d5a7; font-size: 10px; letter-spacing: .03em; }
+.trace-contract > summary small { margin-top: 3px; color: var(--faint); font-size: 8px; }
+.trace-contract > summary em { flex: 0 0 auto; color: var(--amber); font-size: 8px; font-style: normal; font-weight: 700; }
+.trace-contract-purpose { display: grid; grid-template-columns: 108px 1fr; gap: 12px; align-items: start; margin: 10px 12px; padding: 9px 11px; border-left: 3px solid var(--amber); background: rgba(255,171,46,.06); }
+.trace-contract-purpose span { color: var(--amber); font-size: 8px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.trace-contract-purpose p { margin: 0; color: #d8dce4; font-size: 10px; line-height: 1.5; }
+.trace-contract-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 6px; padding: 0 12px 10px; }
+.contract-card { min-width: 0; padding: 10px 11px; border: 1px solid #282f3b; border-radius: 6px; background: #10141b; }
+.contract-card h4 { display: flex; align-items: center; gap: 7px; margin: 0 0 7px; color: #dfe4ed; font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.contract-card h4 i { display: grid; place-items: center; width: 21px; height: 18px; border-radius: 3px; color: var(--cyan); background: rgba(110,231,231,.08); font: 700 7px "Cascadia Code", monospace; font-style: normal; }
+.contract-card.output h4 i { color: var(--green); background: rgba(123,221,170,.08); }
+.contract-card.control h4 i { color: var(--amber); background: rgba(255,171,46,.08); }
+.contract-card ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.contract-card li { position: relative; padding-left: 11px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+.contract-card li::before { content: ''; position: absolute; left: 0; top: .55em; width: 4px; height: 4px; border-radius: 50%; background: #596273; }
+.contract-card.output li::before { background: var(--green); }
+.contract-card.control li::before { background: var(--amber); }
+.trace-coverage { display: grid; grid-template-columns: 108px minmax(0,1fr); gap: 12px; align-items: start; padding: 9px 14px 11px; border-top: 1px solid #222a35; }
+.trace-coverage > span { color: var(--faint); font-size: 8px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.trace-coverage > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.trace-coverage code { padding: 2px 5px; border: 1px solid #2b3440; border-radius: 3px; color: #8f99aa; background: #0d1117; font: 600 7px "Cascadia Code", monospace; }
 .trace-points { padding: 9px 14px 10px; border-bottom: 1px solid #202632; background: #0c1015; }
 .trace-points > span { display: block; margin-bottom: 6px; color: var(--faint); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
 .trace-points > div { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -107,15 +133,35 @@
 .trace-point.km { box-shadow: inset 2px 0 var(--amber); }
 .trace-point.warn { box-shadow: inset 2px 0 #b7a8ff; }
 .trace-point.active { color: #171108; border-color: var(--amber); background: var(--amber); box-shadow: none; }
+.trace-run-head { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #202632; background: #11151c; }
+.trace-run-head div span, .trace-run-head div b { display: block; }
+.trace-run-head div span { color: var(--cyan); font-size: 7px; font-weight: 800; letter-spacing: .1em; }
+.trace-run-head div b { margin-top: 3px; color: #d9dee8; font-size: 10px; }
+.trace-run-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.trace-run-actions em { flex: 0 0 auto; padding: 3px 7px; border: 1px solid #343c49; border-radius: 20px; color: var(--muted); font-size: 8px; font-style: normal; }
+.trace-run-actions button { height: 24px; padding: 0 7px; color: var(--muted); border: 1px solid #303845; border-radius: 4px; background: #151a23; font-size: 8px; cursor: pointer; }
+.trace-run-actions button:hover { color: var(--cyan); border-color: #3e626a; }
 .trace-steps { margin: 0; padding: 0; list-style: none; }
 .trace-steps li { display: grid; grid-template-columns: 40px 1fr; border-bottom: 1px solid #1b212b; }
 .trace-steps li:last-child { border-bottom: 0; }
 .trace-step-num { display: grid; place-items: start center; padding: 13px 0; color: #3e4656; font: 800 16px "Bahnschrift Condensed", sans-serif; border-right: 1px solid #1b212b; }
 .trace-steps li.good .trace-step-num { color: var(--green); }
 .trace-steps li.warn .trace-step-num { color: var(--amber); }
+.trace-step-card { min-width: 0; }
+.trace-step-card > summary { min-height: 48px; display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; list-style: none; }
+.trace-step-card > summary::-webkit-details-marker { display: none; }
+.trace-step-card > summary > b { min-width: 0; color: #dfe4ec; font-size: 10px; line-height: 1.35; }
+.trace-step-card > summary > em { max-width: 180px; overflow: hidden; color: var(--green); font-size: 8px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.trace-steps li.warn .trace-step-card > summary > em { color: var(--amber); }
+.trace-step-card > summary > i { color: var(--faint); font-size: 11px; font-style: normal; transition: transform .15s ease; }
+.trace-step-card[open] > summary > i { transform: rotate(180deg); }
+.trace-step-kind { padding: 3px 5px; border: 1px solid #303845; border-radius: 3px; color: var(--faint); font-size: 7px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.trace-steps li.good .trace-step-kind { color: var(--green); border-color: #28523f; }
+.trace-steps li.warn .trace-step-kind { color: var(--amber); border-color: #684a21; }
 .trace-step-body { min-width: 0; padding: 11px 14px 12px; }
+.trace-step-card[open] .trace-step-body { border-top: 1px solid #1b212b; background: rgba(255,255,255,.012); }
 .trace-step-body b { font-size: 11px; }
-.trace-step-body p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.trace-step-body p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .trace-step-body dl { margin: 8px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; border: 1px solid #202632; border-radius: 5px; overflow: hidden; background: #202632; }
 .trace-step-body dl div { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 30px; padding: 5px 9px; background: #121722; }
 .trace-step-body dt { color: var(--faint); font-size: 9px; }
@@ -174,17 +220,11 @@ footer { display: flex; justify-content: space-between; padding: 11px 4px 0; col
 .view-switch { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 7px; background: #0b0e13; }
 .view-switch button { height: 24px; padding: 0 8px; color: var(--muted); border: 0; border-radius: 4px; background: transparent; font-size: 9px; font-weight: 700; cursor: pointer; }
 .view-switch button.active { color: #171108; background: var(--amber); }
-.audit-sku-bar { display: grid; grid-template-columns: minmax(0,1fr) 140px; align-items: center; gap: 10px; padding: 9px 11px; border-bottom: 1px solid var(--line); background: #0e1117; }
-.audit-sku-copy { min-width: 0; }.audit-sku-copy span, .audit-sku-copy b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.audit-sku-copy span { color: var(--amber); font: 700 8px "Bahnschrift", sans-serif; }.audit-sku-copy b { margin-top: 3px; font-size: 10px; }
-.audit-sku-bar select { width: 100%; height: 28px; padding: 0 7px; color: var(--text); border: 1px solid var(--line); border-radius: 5px; background: #11151d; font-size: 9px; }
 .audit-toolbar { min-height: 40px; display: flex; align-items: end; gap: 5px; padding: 6px 9px; border-bottom: 1px solid var(--line); overflow-x: auto; }
 .audit-toolbar label span { display: block; margin-bottom: 3px; color: var(--faint); font-size: 7px; letter-spacing: .06em; text-transform: uppercase; }.audit-toolbar input { width: 116px; height: 25px; padding: 0 5px; color: var(--text); border: 1px solid var(--line); border-radius: 4px; background: #0b0e13; font-size: 9px; color-scheme: dark; }
 .audit-toolbar button { height: 25px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; background: #151922; font-size: 8px; white-space: nowrap; cursor: pointer; }.audit-toolbar button:hover { color: var(--text); border-color: #50586a; }.audit-toolbar button.clear { margin-left: auto; background: transparent; }
 .dot { width: 5px; height: 5px; border-radius: 50%; }.dot.stockout { background: var(--danger); box-shadow: 0 0 6px var(--danger); }.dot.promo { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
 .audit-legend { min-height: 28px; display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 7px; white-space: nowrap; overflow-x: auto; }.audit-legend span { display: inline-flex; align-items: center; gap: 4px; }.audit-legend i { width: 10px; height: 6px; border-radius: 2px; }.audit-legend i.focus { background: var(--danger); }.audit-legend i.before { background: var(--cyan); }.audit-legend i.after { background: #9f8cff; }.audit-legend b { margin-left: auto; color: var(--amber); font-size: 7px; }
-.lineage-strip { flex: 0 0 auto; border-bottom: 1px solid var(--line); background: #0b0e13; }.lineage-title { display: flex; justify-content: space-between; padding: 6px 10px 0; color: var(--faint); font-size: 7px; letter-spacing: .07em; }.lineage-title b { color: var(--cyan); }
-.lineage-track { min-height: 56px; display: flex; align-items: center; gap: 5px; padding: 7px 9px 9px; overflow-x: auto; scrollbar-width: thin; }.lineage-track > i { color: #3b424f; font-style: normal; font-size: 9px; }.lineage-track > p { margin: 0; color: var(--faint); font-size: 9px; }
-.lineage-node { min-width: 108px; max-width: 145px; padding: 6px 7px; border: 1px solid #2b3440; border-radius: 5px; background: #121720; }.lineage-node > span { color: var(--amber); font: 700 7px "Bahnschrift", sans-serif; }.lineage-node b, .lineage-node small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.lineage-node b { margin-top: 3px; font: 650 10px "Cascadia Code", monospace; }.lineage-node small { margin-top: 3px; color: var(--faint); font-size: 7px; }
 .audit-context { padding: 8px 10px; border-bottom: 1px solid #3b3020; background: rgba(255,171,46,.045); }.audit-context > div { display: flex; justify-content: space-between; gap: 8px; }.audit-context span { color: var(--amber); font: 700 9px "Cascadia Code", monospace; }.audit-context b { color: var(--green); font-size: 8px; }.audit-context p { margin: 5px 0; color: var(--muted); font-size: 8px; line-height: 1.35; }.audit-context code { color: var(--cyan); font-size: 8px; }
 .audit-table-wrap { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; background: #0d1016; }
 .audit-table { width: 100%; min-width: 780px; border-collapse: separate; border-spacing: 0; font-size: 8px; }
@@ -203,10 +243,24 @@ footer { display: flex; justify-content: space-between; padding: 11px 4px 0; col
 /* Stage insights — panel trái đối ứng từng chặng */
 .insight-note { padding: 8px 11px; border-bottom: 1px solid var(--line); background: rgba(110,231,231,.035); color: var(--muted); font-size: 9px; line-height: 1.5; }
 .insight-note b { color: var(--cyan); }
-.insight-note.sn-flag { background: rgba(255,171,46,.08); }
-.insight-note.sn-flag b { color: #ffab2e; }
-.rp-entry { display: inline-block; margin: 1px 3px 1px 0; padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; color: var(--faint); }
+/* Cửa 11XY-SN đã được giải thích đầy đủ ở panel giữa; không lặp lại và chiếm chỗ của bảng audit. */
+.audit-explorer .insight-note.sn-gate { display: none !important; }
+.learning-status { flex: 0 0 auto; min-height: 34px; display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: rgba(110,231,231,.035); }
+.learning-status > span { color: var(--faint); font-size: 7px; letter-spacing: .08em; text-transform: uppercase; }
+.learning-status > b { color: var(--cyan); font-size: 10px; }
+.learning-status code { padding: 1px 4px; border: 1px solid #2e4a52; border-radius: 3px; color: #bcefed; background: #101b20; font: 700 8px "Cascadia Code", monospace; }
+.learning-status i { margin-left: auto; color: var(--muted); font-size: 8px; font-style: normal; white-space: nowrap; }
+.learning-alert { flex: 0 0 auto; min-height: 26px; display: flex; align-items: center; padding: 5px 10px; color: #ffc56e; border-bottom: 1px solid #4e3820; background: rgba(255,171,46,.075); font-size: 8px; font-weight: 700; }
+.learning-table-wrap { min-height: 230px; }
+.learning-sources { flex: 0 0 auto; border-top: 1px solid var(--line); background: rgba(110,231,231,.025); }
+.learning-sources summary { min-height: 29px; display: flex; align-items: center; padding: 5px 10px; color: var(--muted); font-size: 8px; font-weight: 700; cursor: pointer; list-style: none; }
+.learning-sources summary::before { content: '›'; margin-right: 7px; color: var(--cyan); font-size: 12px; transition: transform .15s ease; }
+.learning-sources[open] summary::before { transform: rotate(90deg); }
+.learning-sources > div { max-height: 74px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 8px; }
+.rp-list { display: flex; flex-wrap: wrap; gap: 3px; margin: 5px 0; }
+.rp-entry { display: inline-block; padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; color: var(--faint); }
 .rp-entry.rp-candidate { border-color: rgba(110,231,231,.5); color: var(--cyan); }
+.rp-entry.rp-chosen { border-color: var(--amber); background: rgba(255,171,46,.14); color: var(--amber); font-weight: 700; }
 .insight-table { min-width: 0; font-size: 9px; }
 .insight-table.abc-table { min-width: 980px; }.insight-table.xyz-table { min-width: 1120px; }
 .insight-table th { min-width: 0; }
@@ -272,21 +326,18 @@ footer { display: flex; justify-content: space-between; padding: 11px 4px 0; col
 .learning-init { opacity: .5; }
 .err-pos { color: var(--green); }
 .err-neg { color: var(--danger); }
-.learning-footer { display: flex; flex-wrap: wrap; gap: 1px; border-top: 1px solid var(--line); background: var(--line); }
-.learning-footer > div { flex: 1 1 90px; padding: 9px 12px; background: #12161e; }
+.learning-footer { flex: 0 0 auto; display: flex; flex-wrap: nowrap; gap: 1px; overflow-x: auto; border-top: 1px solid var(--line); background: var(--line); scrollbar-width: thin; }
+.learning-footer > div { flex: 0 0 94px; padding: 7px 10px; background: #12161e; }
 .learning-footer span { display: block; color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .05em; }
 .learning-footer b { display: block; margin-top: 4px; color: var(--amber); font: 650 12px "Cascadia Code", monospace; }
-.learning-footer .learning-future { flex: 2 1 100%; }
+.learning-footer .learning-future { flex: 0 0 250px; }
 .learning-footer .learning-future b { color: var(--cyan); font-size: 10px; }
 
-/* C11 · hover giải thích cách tính từng ô.
-   Chiều cao CỐ ĐỊNH: nội dung đổi khi rê chuột không được làm bảng bên dưới trồi/sụt (gây vòng lặp hover giật). */
-.calc-hover-hint { flex: 0 0 108px; height: 108px; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; overflow-y: auto; border-bottom: 1px solid var(--line); background: #0c1015; scrollbar-width: thin; }
-.calc-hover-hint > :first-child { margin-top: auto; }
-.calc-hover-hint > :last-child { margin-bottom: auto; }
-.calc-hover-hint p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
-.calc-hover-hint b { flex-shrink: 0; color: var(--amber); font-size: 10px; }
-.calc-hover-hint code { display: block; flex-shrink: 0; width: fit-content; max-width: 100%; padding: 2px 7px; border: 1px solid #2e4a52; border-radius: 4px; background: rgba(110,231,231,.05); color: var(--cyan); font: 650 9px "Cascadia Code", monospace; overflow-wrap: anywhere; }
+/* C11 · thanh giải thích luôn cao đúng 32px. Nội dung hover chỉ thay màu/chữ, tuyệt đối không đổi layout. */
+.calc-hover-hint { flex: 0 0 32px; height: 32px; min-height: 32px; display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 4px 10px; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid var(--line); background: #0c1015; scrollbar-width: thin; white-space: nowrap; }
+.calc-hover-hint p { flex: 0 0 auto; margin: 0; color: var(--muted); font-size: 8px; line-height: 1.2; white-space: nowrap; }
+.calc-hover-hint b { flex: 0 0 auto; color: var(--amber); font-size: 9px; white-space: nowrap; }
+.calc-hover-hint code { display: block; flex: 0 0 auto; width: auto; max-width: none; padding: 2px 7px; border: 1px solid #2e4a52; border-radius: 4px; background: rgba(110,231,231,.05); color: var(--cyan); font: 650 8px "Cascadia Code", monospace; white-space: nowrap; }
 .calc-hover-hint code.calc-substitution { border-color: #684a21; background: rgba(255,171,46,.06); color: #ffc56e; }
 .calc-hover-hint.active { background: rgba(110,231,231,.03); }
 .calc-hover-hint .hint-source { color: var(--cyan); font-weight: 700; }
@@ -333,5 +384,19 @@ footer { display: flex; justify-content: space-between; padding: 11px 4px 0; col
 }
 @media (max-width: 880px) {
   .app-shell { padding: 8px; }.topbar { grid-template-columns: 1fr; padding: 13px; }.run-actions { grid-row: auto; }.session-controls { grid-row: auto; grid-column: auto; grid-template-columns: 1fr 1fr; }.progress-rail { grid-template-columns: 1fr; }.phase-legend { overflow-x: auto; }.progress-copy { display: none; }.main-grid { grid-template-columns: 1fr; }.panel { height: auto; min-height: 0; }.collapsible-panel.collapsed { height: 46px; }.panel-collapse-rail { min-height: 44px; flex-direction: row; justify-content: center; padding: 0 14px; }.panel-collapse-rail b { writing-mode: horizontal-tb; }.catalog-panel { max-height: 420px; }.process-panel { overflow: visible; }.process-resizer { display: none; }.stage-hero { grid-template-columns: 48px 1fr; }.stage-number { font-size: 44px; }.stage-nav-actions { grid-column: 1/-1; }.flow-strip { overflow-x: auto; }.flow-strip div { min-width: 130px; }
+  /* Audit là nội dung ưu tiên trên màn hình nhỏ: cấp gần trọn viewport cho bảng tự cuộn. */
+  .catalog-panel.audit-explorer { height: min(720px, max(440px, calc(100dvh - 16px))); min-height: 440px; max-height: none; }
+  .audit-panel-head { min-height: 54px; padding-block: 9px; }
+  .insight-note { max-height: 52px; overflow-y: auto; }
+  .learning-status { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  .learning-status > * { flex-shrink: 0; }
+  .learning-table-wrap { min-height: 240px; }
+  .trace-panel { margin: 10px; }
+  .trace-contract-grid { grid-template-columns: 1fr; }
+  .trace-contract-purpose, .trace-coverage { grid-template-columns: 1fr; gap: 5px; }
+  .trace-step-card > summary { grid-template-columns: auto minmax(0,1fr) auto; }
+  .trace-step-card > summary > em { display: none; }
+  .trace-run-head { align-items: flex-start; }
+  .trace-run-actions { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }

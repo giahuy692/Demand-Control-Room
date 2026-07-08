@@ -6,6 +6,15 @@
     <base href="/">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0b0d12">
+    <script>
+      (() => {
+        try {
+          const saved = localStorage.getItem('theme');
+          const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.classList.toggle('dark', dark);
+        } catch { /* Theme preference is optional. */ }
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
   </head>
   <body>

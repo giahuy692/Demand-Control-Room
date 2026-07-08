@@ -211,7 +211,7 @@ export interface SkuPipelineState {
   trendRates: [number | null, number | null];
   forecast: ForecastResult | null;
   promoFactor: number | null;
-  promoConfidence: 'auto' | 'low' | 'suggest-only' | 'none';
+  promoConfidence: 'auto' | 'low' | 'suggest-only' | 'none' | 'blocked';
   finalForecast: number[];
   freeStock: number | null;
   supplyMilestones: SupplyMilestone[];
