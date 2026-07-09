@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DTO Architecture — Demand Planning Simulation</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#090b10; --panel:#11141b; --panel-2:#161a23;
+    --line:#292e3a; --line-soft:#20242e;
+    --muted:#7f8798; --faint:#555d6e; --text:#f3f4f7;
+    --amber:#ffab2e; --amber-soft:#352510;
+    --cyan:#6ee7e7; --green:#7bddaa; --danger:#ff7777;
+    --radius:6px;
+    --sans: "Aptos", "Segoe UI Variable", -apple-system, BlinkMacSystemFont, sans-serif;
+    --head: "Bahnschrift Condensed", "Aptos Display", var(--sans);
+    --label: "Bahnschrift", var(--sans);
+    --mono: "Cascadia Code", "SF Mono", Consolas, ui-monospace, monospace;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    background:var(--bg); color:var(--text); font-family:var(--sans);
+    margin:0; padding:32px 24px 64px; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width:1000px; margin:0 auto; }
+
+  header{
+    display:flex; flex-direction:column; gap:8px;
+    padding-bottom:20px; margin-bottom:24px; border-bottom:1px solid var(--line);
+  }
+  h1{
+    font-family:var(--head); font-size:26px; font-weight:700;
+    letter-spacing:0.2px; margin:0; text-wrap:balance;
+  }
+  .subtitle{ color:var(--muted); font-size:13.5px; max-width:70ch; line-height:1.6; }
+  .subtitle code{ font-family:var(--mono); color:var(--muted); }
+  .status-row{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .status-chip{
+    font-family:var(--mono); font-size:11px; padding:3px 9px; border-radius:999px;
+    border:1px solid var(--line); color:var(--muted); background:var(--panel); letter-spacing:0.2px;
+  }
+  .status-chip.ok{ color:var(--green); border-color:#274a3a; }
+  .status-chip.warn{ color:var(--danger); border-color:#4a2626; }
+
+  .legend{ display:flex; gap:20px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:28px; }
+  .legend-item{ display:flex; align-items:center; gap:7px; }
+  .legend-line{ width:26px; height:0; border-top:2px solid var(--amber); }
+  .legend-line.dashed{ border-top:2px dashed var(--faint); }
+
+  .layer-label{
+    font-family:var(--label); font-size:11px; color:var(--faint);
+    text-transform:uppercase; letter-spacing:1.2px; margin-bottom:8px;
+  }
+
+  .sources-row{ display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:4px; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; }
+  .card-title{
+    font-family:var(--label); font-size:14px; font-weight:600;
+    display:flex; align-items:baseline; gap:8px; margin-bottom:4px;
+  }
+  .card-path{ font-family:var(--mono); font-size:10.5px; color:var(--faint); display:block; margin-bottom:10px; }
+  .field-list{ display:flex; flex-wrap:wrap; gap:5px; }
+  .chip{
+    font-family:var(--mono); font-size:11px; padding:2px 7px; border-radius:4px;
+    background:var(--panel-2); border:1px solid var(--line-soft); color:var(--muted);
+  }
+  .chip.raw-existing{ color:var(--cyan); }
+
+  .arrow-row{ display:grid; grid-template-columns:1fr 1fr; margin:2px 0; }
+  .arrow-col{ display:flex; flex-direction:column; align-items:center; gap:2px; padding:10px 0; }
+  .arrow-col.single{ grid-column:1 / -1; }
+  .arrow-line{ width:2px; height:24px; background:var(--amber); position:relative; }
+  .arrow-line.dashed{ background:none; border-left:2px dashed var(--faint); }
+  .arrow-line::after{
+    content:""; position:absolute; bottom:-1px; left:50%; transform:translateX(-50%);
+    border-left:5px solid transparent; border-right:5px solid transparent; border-top:7px solid var(--amber);
+  }
+  .arrow-line.dashed::after{ border-top-color:var(--faint); }
+  .arrow-label{
+    font-family:var(--mono); font-size:11px; color:var(--amber);
+    background:var(--panel); border:1px solid var(--line); padding:2px 9px; border-radius:999px; white-space:nowrap;
+  }
+  .arrow-label.muted{ color:var(--faint); }
+  .arrow-sub{ font-size:10.5px; color:var(--faint); font-weight:400; }
+
+  .main-card{ padding:18px 20px; margin-bottom:2px; }
+  .main-card .card-title{ font-size:16px; }
+  .method-grid{ display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:12px; }
+  .method-heading{ font-family:var(--label); font-size:10px; color:var(--faint); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:6px; }
+  .method-list{ display:flex; flex-direction:column; gap:4px; }
+  .method-item{ font-family:var(--mono); font-size:12px; color:var(--text); display:flex; gap:6px; align-items:baseline; }
+  .method-item .ret{ color:var(--muted); font-size:11px; }
+
+  .wrapper-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px; }
+  .wrapper-row .card{ background:var(--panel-2); }
+  .wrapper-row .card-title{ font-size:12.5px; color:var(--cyan); }
+
+  .consumers-title{
+    font-family:var(--label); font-size:11px; color:var(--faint);
+    text-transform:uppercase; letter-spacing:1.2px; margin:34px 0 12px; text-align:center;
+  }
+  .consumers-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .consumer-card{ border:1px dashed var(--faint); border-radius:var(--radius); padding:12px 14px; text-align:center; }
+  .consumer-card .card-title{ justify-content:center; font-size:12.5px; color:var(--muted); font-weight:500; }
+  .consumer-tag{
+    display:inline-block; margin-top:6px; font-family:var(--mono); font-size:10.5px;
+    color:var(--danger); border:1px solid #4a2626; padding:2px 8px; border-radius:999px;
+  }
+
+  footer{ margin-top:32px; padding-top:16px; border-top:1px solid var(--line); font-size:12px; color:var(--faint); line-height:1.7; }
+  footer code{ font-family:var(--mono); color:var(--muted); }
+
+  @media (max-width:700px){
+    .sources-row,.method-grid,.wrapper-row,.consumers-row,.arrow-row{ grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>DTO Architecture — Demand Planning Simulation</h1>
+    <div class="subtitle">
+      3 file mới trong <code>src/app/domain/dto/</code> — compile sạch (<code>tsc --noEmit</code>), không sửa file cũ nào.
+      Sơ đồ dưới thể hiện luồng dữ liệu thật (hổ phách, liền nét) đang chạy trong app, và phần minh hoạ/chưa nối dây (xám, nét đứt).
+    </div>
+    <div class="status-row">
+      <span class="status-chip ok">tsc --noEmit ✓ 0 lỗi</span>
+      <span class="status-chip ok">vitest ✓ 103 passed</span>
+      <span class="status-chip warn">0 nơi consume — chưa wire vào store/component</span>
+    </div>
+  </header>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-line"></span> Luồng đang hoạt động (đã có dữ liệu thật trong app)</div>
+    <div class="legend-item"><span class="legend-line dashed"></span> Minh hoạ / chưa nối dây</div>
+  </div>
+
+  <div class="layer-label">Lớp 1 — Raw Response DTO &amp; nguồn nội bộ hiện có</div>
+  <div class="sources-row">
+    <div class="card">
+      <div class="card-title">raw-erp.dto.ts <span class="arrow-sub">(minh hoạ)</span></div>
+      <span class="card-path">src/app/domain/dto/raw-erp.dto.ts</span>
+      <div class="field-list">
+        <span class="chip">PosDetailRawDto</span>
+        <span class="chip">PosMasterRawDto</span>
+        <span class="chip">ImExMasterRawDto</span>
+        <span class="chip">ImExDetailRawDto</span>
+        <span class="chip">PromotionRawDto</span>
+        <span class="chip">StatusRawDto</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">models.ts <span class="arrow-sub">(đang chạy)</span></div>
+      <span class="card-path">src/app/domain/models.ts</span>
+      <div class="field-list">
+        <span class="chip raw-existing">SkuPipelineState</span>
+        <span class="chip raw-existing">StageSnapshot.states</span>
+        <span class="chip raw-existing">Classification</span>
+        <span class="chip raw-existing">ForecastResult</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row">
+    <div class="arrow-col">
+      <div class="arrow-line dashed"></div>
+      <span class="arrow-label muted">.fromRawPos()</span>
+    </div>
+    <div class="arrow-col">
+      <div class="arrow-line"></div>
+      <span class="arrow-label">.fromPipelineState()</span>
+    </div>
+  </div>
+
+  <div class="layer-label" style="margin-top:20px;">Lớp 2 — View Model DTO (class, frozen, getter tính sẵn)</div>
+  <div class="card main-card">
+    <div class="card-title">SkuViewModel</div>
+    <span class="card-path">src/app/domain/dto/sku-view.model.ts</span>
+    <div class="method-grid">
+      <div>
+        <div class="method-heading">Thuộc tính (readonly, frozen)</div>
+        <div class="method-list">
+          <div class="method-item">id, name, category, supplier</div>
+          <div class="method-item">abc <span class="ret">: AbcClass</span>, xyz <span class="ret">: XyzClass</span></div>
+          <div class="method-item">onHand, purchasePrice, moq, leadTimeDays</div>
+          <div class="method-item">safetyStock, finalForecast, lockStatus</div>
+        </div>
+      </div>
+      <div>
+        <div class="method-heading">Getter tính sẵn</div>
+        <div class="method-list">
+          <div class="method-item">get totalForecast() <span class="ret">: number</span></div>
+          <div class="method-item">get averageCycleForecast() <span class="ret">: number</span></div>
+          <div class="method-item">get stockValue() <span class="ret">: number</span></div>
+          <div class="method-item">get isStockoutRisk() <span class="ret">: boolean</span></div>
+          <div class="method-item">get cyclesOfSupply() <span class="ret">: number|null</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row">
+    <div class="arrow-col single">
+      <div class="arrow-line"></div>
+      <span class="arrow-label">.fromPipelineStates() / .fromViewModels()</span>
+    </div>
+  </div>
+
+  <div class="layer-label">Lớp 3 — Indexed Collection &amp; DTO bọc (phân trang / tổng hợp)</div>
+  <div class="card main-card">
+    <div class="card-title">SkuCatalogCollection</div>
+    <span class="card-path">src/app/domain/dto/sku-catalog.collection.ts</span>
+    <div class="method-grid">
+      <div>
+        <div class="method-heading">Nội bộ (frozen)</div>
+        <div class="method-list">
+          <div class="method-item">byId <span class="ret">: Record&lt;string, SkuViewModel&gt;</span></div>
+          <div class="method-item">ids <span class="ret">: readonly string[]</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="method-heading">Truy vấn — O(1) theo id</div>
+        <div class="method-list">
+          <div class="method-item">get(id) <span class="ret">: SkuViewModel | undefined</span></div>
+          <div class="method-item">filterByAbc(), filterByXyz(), stockoutRisk()</div>
+          <div class="method-item">toPage(page, size, predicate?)</div>
+          <div class="method-item">aggregate()</div>
+        </div>
+      </div>
+    </div>
+    <div class="wrapper-row">
+      <div class="card">
+        <div class="card-title">PagedResultDto&lt;T&gt;</div>
+        <div class="field-list">
+          <span class="chip">items</span><span class="chip">page</span><span class="chip">pageSize</span>
+          <span class="chip">totalItems</span><span class="chip">totalPages</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">CatalogAggregateDto</div>
+        <div class="field-list">
+          <span class="chip">totalSku</span><span class="chip">totalForecast</span><span class="chip">totalStockValue</span>
+          <span class="chip">stockoutRiskCount</span><span class="chip">countByAbc</span><span class="chip">countByXyz</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="consumers-title">Nơi lẽ ra sẽ tiêu thụ — hiện chưa nối dây</div>
+  <div class="consumers-row">
+    <div class="consumer-card">
+      <div class="card-title">simulation.store.ts</div>
+      <span class="consumer-tag">chưa import</span>
+    </div>
+    <div class="consumer-card">
+      <div class="card-title">app.component.ts</div>
+      <span class="consumer-tag">chưa import</span>
+    </div>
+    <div class="consumer-card">
+      <div class="card-title">Bảng SKU trong template</div>
+      <span class="consumer-tag">vẫn bind SkuPipelineState thô</span>
+    </div>
+  </div>
+
+  <footer>
+    Kiểm chứng: <code>grep -rl "SkuViewModel\|SkuCatalogCollection" src/app --include="*.ts"</code> chỉ khớp 3 file trong
+    <code>domain/dto/</code> — không file nào khác trong repo tham chiếu tới lớp DTO này (tính đến thời điểm tạo tài liệu này).
+  </footer>
+</div>
+</body>
+</html>
