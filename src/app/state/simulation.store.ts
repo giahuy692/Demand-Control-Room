@@ -1,5 +1,5 @@
 import { computed, Injectable, signal } from '@angular/core';
-import { buildCatalog } from '../domain/catalog';
+import { buildCatalog, DataSourceId, parseRealDataset, SimulationDataset } from '../domain/catalog';
 import { SimulationEngine } from '../domain/simulation-engine';
 import { DEFAULT_POLICY, STAGES } from '../domain/policy';
 import { getStageFormulas } from '../domain/formula-registry';
@@ -128,8 +128,16 @@ function createOutputs(stage: StageNumber, state: Readonly<SkuPipelineState> | n
 
 @Injectable({ providedIn: 'root' })
 export class SimulationStore {
-  readonly catalog = buildCatalog();
+  private readonly catalogSignal = signal(buildCatalog());
+  private realDataset: SimulationDataset | null = null;
+
+  get catalog(): readonly SkuPipelineState['definition'][] { return this.catalogSignal(); }
+
   readonly policy = signal<SimulationPolicy>({ ...DEFAULT_POLICY });
+  readonly dataSource = signal<DataSourceId>('mock');
+  readonly dataSourceError = signal<string | null>(null);
+  readonly isLoadingDataSource = signal(false);
+  readonly dataSourceLabel = computed(() => this.dataSource() === 'real' ? 'Dữ liệu thật' : 'Dữ liệu giả');
   readonly activeStage = signal<StageNumber>(1);
   readonly completedStage = signal(0);
   readonly selectedSkuId = signal('SKU-001');
@@ -165,7 +173,7 @@ export class SimulationStore {
   constructor(private readonly engine: SimulationEngine) {}
 
   selectStage(stage: StageNumber): Promise<void> {
-    if (this.isRunning()) return Promise.resolve();
+    if (this.isRunning() || this.isLoadingDataSource()) return Promise.resolve();
     this.activeStage.set(stage);
     this.error.set(null);
     if (stage > this.completedStage()) return this.runThrough(stage);
@@ -177,7 +185,7 @@ export class SimulationStore {
   }
 
   updatePolicy(patch: Partial<SimulationPolicy>): Promise<void> {
-    if (this.isRunning()) return Promise.resolve();
+    if (this.isRunning() || this.isLoadingDataSource()) return Promise.resolve();
 
     const currentPolicy = this.policy();
     const changed = (Object.keys(patch) as (keyof SimulationPolicy)[])
@@ -200,7 +208,7 @@ export class SimulationStore {
 
   runActive(): void {
     const stage = this.activeStage();
-    if (stage !== this.completedStage() + 1 || this.isRunning()) return;
+    if (stage !== this.completedStage() + 1 || this.isRunning() || this.isLoadingDataSource()) return;
     this.isRunning.set(true);
     this.error.set(null);
     try {
@@ -216,11 +224,47 @@ export class SimulationStore {
   }
 
   runAll(): void {
+    if (this.isLoadingDataSource()) return;
     void this.runThrough(19);
   }
 
+  async selectDataSource(source: DataSourceId, targetStage: StageNumber = Math.max(1, this.activeStage(), this.completedStage()) as StageNumber): Promise<void> {
+    if (this.isRunning() || this.isLoadingDataSource()) return;
+    if (source === this.dataSource()) {
+      if (targetStage > this.completedStage()) await this.runThrough(targetStage);
+      return;
+    }
+
+    const viewedStage = this.activeStage();
+    this.isLoadingDataSource.set(true);
+    this.error.set(null);
+    this.dataSourceError.set(null);
+    try {
+      const dataset = source === 'real' ? await this.loadRealDataset() : null;
+      if (dataset?.dateRange && this.policy().runDate > dataset.dateRange.max) {
+        this.policy.update(policy => ({ ...policy, runDate: dataset.dateRange!.recommendedRunDate }));
+      }
+      this.engine.setDataset(dataset);
+      const catalog = dataset?.catalog ?? buildCatalog();
+      this.catalogSignal.set([...catalog]);
+      this.selectedSkuId.set(catalog[0]?.id ?? '');
+      this.dataSource.set(source);
+      this.snapshots.set({});
+      this.completedStage.set(0);
+      this.isLoadingDataSource.set(false);
+      await this.runThrough(targetStage);
+      this.activeStage.set(viewedStage);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể nạp nguồn dữ liệu mô phỏng.';
+      this.error.set(message);
+      this.dataSourceError.set(message);
+    } finally {
+      this.isLoadingDataSource.set(false);
+    }
+  }
+
   private async runThrough(targetStage: StageNumber): Promise<void> {
-    if (this.isRunning() || targetStage <= this.completedStage()) return;
+    if (this.isRunning() || this.isLoadingDataSource() || targetStage <= this.completedStage()) return;
     this.activeStage.set(targetStage);
     this.isRunning.set(true);
     this.error.set(null);
@@ -254,6 +298,22 @@ export class SimulationStore {
     this.completedStage.set(0);
     this.activeStage.set(1);
     this.error.set(null);
+  }
+
+  private async loadRealDataset(): Promise<SimulationDataset> {
+    if (this.realDataset) return this.realDataset;
+    const [daily, products] = await Promise.all([
+      this.fetchText('assets/demand-planning-real.json'),
+      this.fetchText('assets/List-product.json'),
+    ]);
+    this.realDataset = parseRealDataset(daily, products);
+    return this.realDataset;
+  }
+
+  private async fetchText(path: string): Promise<string> {
+    const response = await fetch(path);
+    if (!response.ok) throw new Error(`Không đọc được ${path} (${response.status}).`);
+    return response.text();
   }
 
   stageLabel(state: Readonly<SkuPipelineState> | null, stage = this.activeStage()): string {

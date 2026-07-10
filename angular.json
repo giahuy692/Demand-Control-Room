@@ -15,7 +15,7 @@
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
             "index": "index.html",
-            "assets": ["favicon.svg"],
+            "assets": ["favicon.svg", { "glob": "**/*", "input": "src/assets", "output": "/assets" }],
             "styles": ["node_modules/katex/dist/katex.min.css", "src/styles.css"]
           },
           "configurations": {

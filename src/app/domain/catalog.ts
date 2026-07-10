@@ -1,5 +1,16 @@
 import { DailyRecord, SkuDefinition } from './models';
 
+export type DataSourceId = 'mock' | 'real';
+
+export interface SimulationDataset {
+  readonly source: DataSourceId;
+  readonly label: string;
+  readonly catalog: readonly SkuDefinition[];
+  readonly dailyBySku: Readonly<Record<string, readonly DailyRecord[]>>;
+  readonly audit: readonly string[];
+  readonly dateRange?: { min: string; max: string; recommendedRunDate: string };
+}
+
 function operationalInputs(id: string, type: string, cycles: number): Pick<SkuDefinition, 'supplier' | 'inboundPlan' | 'commitments' | 'futurePromotions' | 'leadTimeHistoryDays' | 'maxStock' | 'warehouseCapacity' | 'shelfLifeDays' | 'purchasePrice' | 'moq' | 'purchaseTermsComplete' | 'actualDemand' | 'actualEndingStock' | 'actualReceiptDelayDays' | 'actualBudgetUsed'> {
   const ordinal = Number(id.slice(-3)) || 1;
   const leadMean = 105 + (ordinal % 3) * 15;
@@ -98,6 +109,15 @@ function addDays(date: Date, amount: number): Date {
 // Mảng rỗng dùng chung cho mọi bản ghi chưa audit; applyReferenceAudit luôn thay bằng mảng mới nên không bị ghi đè.
 const EMPTY_DATES = Object.freeze([]) as unknown as string[];
 
+function dailyRecord(sku: string, date: string, openStock: number, closeStock: number, sales: number, receiptHour: string | null, promoCode: string | null): DailyRecord {
+  return {
+    sku, date, openStock, closeStock, sales, receiptHour, promoCode,
+    isStockout: false, stockoutReason: null, baseDemand: null, baseSource: null,
+    referenceDates: EMPTY_DATES, beforeReferenceDates: EMPTY_DATES, afterReferenceDates: EMPTY_DATES, referenceMedian: null,
+    balanceStatus: null, selectionReason: '',
+  };
+}
+
 interface CalendarDay { iso: string; month: number; dayOfMonth: number }
 
 // Lịch dùng chung cho mọi SKU cùng runDate: index k = ngày thứ k trước runDate.
@@ -153,13 +173,239 @@ export function generateDailyRecords(definition: SkuDefinition, runDate: string,
     const receiptHour = forcedLateReceipt ? '13:00' : stock < target * 2 ? '09:00' : null;
     const receipt = receiptHour ? Math.max(30, Math.round(target * 4)) : 0;
     const closeStock = emptyAllDay ? 0 : Math.max(0, openStock - sold + receipt);
-    records.push({
-      sku: definition.id, date: iso, openStock, closeStock, sales: sold, receiptHour, promoCode,
-      isStockout: false, stockoutReason: null, baseDemand: null, baseSource: null,
-      referenceDates: EMPTY_DATES, beforeReferenceDates: EMPTY_DATES, afterReferenceDates: EMPTY_DATES, referenceMedian: null,
-      balanceStatus: null, selectionReason: '',
-    });
+    records.push(dailyRecord(definition.id, iso, openStock, closeStock, sold, receiptHour, promoCode));
     stock = closeStock;
   }
   return records;
+}
+
+interface ParsedDailyRow {
+  readonly sku: string | null;
+  readonly date: string | null;
+  readonly openStock: number;
+  readonly closeStock: number;
+  readonly sales: number;
+  readonly receiptHour: string | null;
+  readonly promoCode: string | null;
+  readonly price: number;
+  readonly name: string | null;
+}
+
+interface ProductMeta {
+  readonly name: string | null;
+  readonly category: string;
+  readonly supplier: string;
+  readonly price: number;
+  readonly purchasePrice: number;
+  readonly description?: string;
+}
+
+export function parseRealDataset(dailyPayload: string, productPayload: string): SimulationDataset {
+  const dailySourceName = isJsonPayload(dailyPayload) ? 'demand-planning-real.json' : 'demand-planning-real.csv';
+  const productById = parseProducts(productPayload);
+  const dailyBySku: Record<string, DailyRecord[]> = {};
+  const dailyMeta = new Map<string, { price: number; name: string | null }>();
+
+  for (const row of parseDailyPayload(dailyPayload, dailySourceName)) {
+    const sku = row.sku;
+    const date = row.date;
+    if (!sku || !date) continue;
+    (dailyBySku[sku] ??= []).push(dailyRecord(
+      sku,
+      date,
+      row.openStock,
+      row.closeStock,
+      row.sales,
+      row.receiptHour,
+      row.promoCode,
+    ));
+    const current = dailyMeta.get(sku);
+    if (!current || (!current.name && row.name) || (!current.price && row.price)) dailyMeta.set(sku, { price: row.price || current?.price || 0, name: row.name ?? current?.name ?? null });
+  }
+
+  const catalog = Object.keys(dailyBySku).sort().map(id => {
+    const product = productById.get(id);
+    const meta = dailyMeta.get(id);
+    const price = meta?.price || product?.price || 0;
+    const purchasePrice = product?.purchasePrice || (price ? Math.round(price * 0.75) : 0);
+    const records = dailyBySku[id].sort((a, b) => a.date.localeCompare(b.date));
+    const maxStock = Math.max(1, ...records.map(row => row.closeStock));
+    return {
+      id,
+      name: meta?.name ?? product?.name ?? `SKU ${id}`,
+      type: 'REAL',
+      price,
+      cycles: 0,
+      description: product?.description ?? `Dữ liệu thật từ ${dailySourceName}`,
+      category: product?.category ?? 'ERP',
+      supplier: product?.supplier ?? 'Chưa map NCC',
+      inboundPlan: [],
+      commitments: [],
+      futurePromotions: [],
+      leadTimeHistoryDays: [],
+      maxStock,
+      warehouseCapacity: Math.max(maxStock, Math.ceil(maxStock * 1.25)),
+      shelfLifeDays: null,
+      purchasePrice,
+      moq: 1,
+      purchaseTermsComplete: purchasePrice > 0,
+      actualDemand: [],
+      actualEndingStock: records.at(-1)?.closeStock ?? 0,
+      actualReceiptDelayDays: [],
+      actualBudgetUsed: 0,
+    };
+  });
+
+  if (!catalog.length) throw new Error(`Không đọc được SKU nào từ ${dailySourceName}.`);
+  const allDates = Object.values(dailyBySku).flatMap(rows => rows.map(row => row.date)).sort();
+  const minDate = allDates[0];
+  const maxDate = allDates.at(-1)!;
+  const recommendedRunDate = `${maxDate.slice(0, 8)}01`;
+  return {
+    source: 'real',
+    label: 'Dữ liệu thật',
+    catalog,
+    dailyBySku,
+    dateRange: { min: minDate, max: maxDate, recommendedRunDate },
+    audit: [`Đọc ${catalog.length} SKU và ${Object.values(dailyBySku).reduce((sum, rows) => sum + rows.length, 0)} dòng daily từ ${dailySourceName}.`],
+  };
+}
+
+function parseDailyPayload(payload: string, sourceName: string): ParsedDailyRow[] {
+  if (isJsonPayload(payload)) return parseDailyJson(payload, sourceName);
+  return parseCsv(payload).map((row, index) => {
+    if (row.length < 9) throw new Error(`${sourceName} thiếu cột bắt buộc SKU, Date, OpenStock, CloseStock, Sales, ReceiptHour, PromoCode, PromoName, Price.`);
+    return {
+      sku: textCell(row[0]),
+      date: textCell(row[1]),
+      openStock: requiredNumber(row[2], `${sourceName} dòng ${index + 1}: OpenStock`),
+      closeStock: requiredNumber(row[3], `${sourceName} dòng ${index + 1}: CloseStock`),
+      sales: requiredNumber(row[4], `${sourceName} dòng ${index + 1}: Sales`),
+      receiptHour: textCell(row[5]),
+      promoCode: textCell(row[6]) ?? textCell(row[7]),
+      price: numberCell(row[8], 0),
+      name: textCell(row[9]),
+    };
+  });
+}
+
+function parseDailyJson(payload: string, sourceName: string): ParsedDailyRow[] {
+  const rows = parseJsonArray(payload, sourceName);
+  return rows.map((raw, index) => {
+    const row = raw as Record<string, unknown>;
+    return {
+      sku: textCell(row['SKU'] ?? row['sku']),
+      date: textCell(row['Date'] ?? row['date']),
+      openStock: requiredNumber(row['OpenStock'], `${sourceName} dòng ${index + 1}: OpenStock`),
+      closeStock: requiredNumber(row['CloseStock'], `${sourceName} dòng ${index + 1}: CloseStock`),
+      sales: requiredNumber(row['Sales'], `${sourceName} dòng ${index + 1}: Sales`),
+      receiptHour: textCell(row['ReceiptHour']),
+      promoCode: textCell(row['PromoCode']) ?? textCell(row['PromoName']),
+      price: numberCell(row['Price'], 0),
+      name: textCell(row['ProductName']),
+    };
+  });
+}
+
+function parseProducts(payload: string): Map<string, ProductMeta> {
+  const products = new Map<string, ProductMeta>();
+  if (isJsonPayload(payload)) {
+    for (const raw of parseJsonArray(payload, 'List-product.json')) {
+      const row = raw as Record<string, unknown>;
+      const id = textCell(row['Product']);
+      if (!id) continue;
+      const price = numberCell(row['PriceCandidate'], 0);
+      const demandShape = textCell(row['ApproxDemandShape']);
+      const name = textCell(row['ProductName']) ?? textCell(row['Name']) ?? textCell(row['ProductNameVi']);
+      const coverageScore = numberCell(row['CoverageScore'], NaN);
+      products.set(id, {
+        name,
+        category: demandShape ? `Dạng nhu cầu ${demandShape}` : 'ERP',
+        supplier: 'Chưa map NCC',
+        price,
+        purchasePrice: price ? Math.round(price * 0.75) : 0,
+        description: [
+          'Dữ liệu thật từ demand-planning-real.json',
+          demandShape ? `mẫu nhu cầu ${demandShape}` : '',
+          Number.isFinite(coverageScore) ? `điểm phủ ${coverageScore}` : '',
+        ].filter(Boolean).join('; '),
+      });
+    }
+    return products;
+  }
+  for (const row of parseCsv(payload)) {
+    const id = textCell(row[0]);
+    if (!id) continue;
+    products.set(id, {
+      name: textCell(row[3]) ?? textCell(row[4]) ?? `SKU ${id}`,
+      category: textCell(row[9]) ? `Nhóm ERP ${textCell(row[9])}` : 'ERP',
+      supplier: textCell(row[38]) ?? textCell(row[39]) ?? 'Chưa map NCC',
+      price: numberCell(row[17], 0),
+      purchasePrice: numberCell(row[19], 0),
+    });
+  }
+  return products;
+}
+
+function isJsonPayload(payload: string): boolean {
+  const first = payload.trimStart()[0];
+  return first === '[' || first === '{';
+}
+
+function parseJsonArray(payload: string, sourceName: string): unknown[] {
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    throw new Error(`${sourceName} không phải JSON hợp lệ.`);
+  }
+  throw new Error(`${sourceName} phải là mảng JSON.`);
+}
+
+function parseCsv(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+  for (let index = 0; index < csv.length; index++) {
+    const char = csv[index];
+    if (quoted) {
+      if (char === '"' && csv[index + 1] === '"') {
+        field += '"';
+        index++;
+      } else if (char === '"') quoted = false;
+      else field += char;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === ',') {
+      row.push(field);
+      field = '';
+    } else if (char === '\n') {
+      row.push(field);
+      if (row.some(cell => cell.trim())) rows.push(row);
+      row = [];
+      field = '';
+    } else if (char !== '\r') field += char;
+  }
+  row.push(field);
+  if (row.some(cell => cell.trim())) rows.push(row);
+  return rows;
+}
+
+function textCell(value: unknown): string | null {
+  const text = value === null || value === undefined ? '' : String(value).trim();
+  return text && text.toUpperCase() !== 'NULL' ? text : null;
+}
+
+function numberCell(value: unknown, fallback: number): number {
+  const text = textCell(value);
+  const number = text === null ? NaN : Number(text);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function requiredNumber(value: unknown, label: string): number {
+  const number = numberCell(value, NaN);
+  if (!Number.isFinite(number)) throw new Error(`${label} không hợp lệ.`);
+  return number;
 }

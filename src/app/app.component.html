@@ -4,7 +4,7 @@
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <div>
         <p class="kicker">HACHI HACHI · PLANNING LAB</p>
-        <h1>{{ appMode() === 'monitor' ? 'Demand Planning Monitor' : appMode() === 'report' ? 'Báo cáo Ban Giám đốc' : 'Demand Control Room' }}</h1>
+        <h1>Demand Control Room</h1>
       </div>
     </div>
 
@@ -17,26 +17,17 @@
     </div>
 
     <div class="run-actions">
+      <div class="source-switch" aria-label="Nguồn dữ liệu mô phỏng">
+        <button type="button" [class.active]="store.dataSource() === 'real'" [attr.aria-pressed]="store.dataSource() === 'real'" (click)="selectDataSource('real')" [disabled]="store.isRunning() || store.isLoadingDataSource()">Dữ liệu thật</button>
+        <button type="button" [class.active]="store.dataSource() === 'mock'" [attr.aria-pressed]="store.dataSource() === 'mock'" (click)="selectDataSource('mock')" [disabled]="store.isRunning() || store.isLoadingDataSource()">Dữ liệu giả</button>
+      </div>
       <button class="btn ghost journey-btn" type="button" (click)="journeyOpen.set(true)" title="Xem sơ đồ hành trình tổng thể 19 chặng"><span aria-hidden="true">⇶</span>Sơ đồ hành trình</button>
-      <button class="btn ghost" type="button" (click)="resetSession()" [disabled]="store.isRunning()">Đặt lại</button>
+      <button class="btn ghost" type="button" (click)="resetSession()" [disabled]="store.isRunning() || store.isLoadingDataSource()">Đặt lại</button>
+      @if (store.isLoadingDataSource()) { <span class="auto-run-status" role="status"><i aria-hidden="true"></i>Đang nạp nguồn dữ liệu</span> }
       @if (store.isRunning()) { <span class="auto-run-status" role="status"><i aria-hidden="true"></i>Đang tự chạy chặng {{ store.activeStage() }}</span> }
     </div>
   </header>
 
-  <nav class="workspace-switch" aria-label="Khu vực làm việc">
-    <div>
-      <button type="button" [class.active]="appMode() === 'monitor'" (click)="appMode.set('monitor')"><span aria-hidden="true">◉</span><b>Monitor</b><small>Giám sát danh mục</small></button>
-      <button type="button" [class.active]="appMode() === 'simulation'" (click)="appMode.set('simulation')"><span aria-hidden="true">Σ</span><b>Mô phỏng</b><small>Kiểm toán 19 chặng</small></button>
-      <button type="button" [class.active]="appMode() === 'report'" (click)="appMode.set('report')"><span aria-hidden="true">▤</span><b>Báo cáo BGĐ</b><small>Tổng hợp kết quả</small></button>
-    </div>
-    <p><i [class.running]="store.isRunning()"></i>{{ store.isRunning() ? 'Pipeline đang cập nhật' : 'Snapshot gần nhất: ' + monitorSyncLabel() }}</p>
-  </nav>
-
-  @if (appMode() === 'report') {
-    <app-executive-dashboard />
-  }
-
-  @if (appMode() === 'simulation') {
   <section class="progress-rail" aria-label="Tiến độ pipeline">
     <div class="phase-legend">
       @for (phase of phases; track phase.number) {
@@ -98,7 +89,7 @@
                   <tr [id]="'audit-' + row.date" [class.row-stockout]="row.isStockout" [class.row-promo]="row.promoCode" [class.row-focus]="auditDate() === row.date" [class.row-reference-before]="isReferenceBefore(row)" [class.row-reference-after]="isReferenceAfter(row)" (click)="selectAuditRow(row)" tabindex="0" (keydown.enter)="selectAuditRow(row)">
                     <td>{{ row.date }}</td><td>{{ row.openStock }}</td><td>{{ row.closeStock }}</td><td class="value">{{ row.sales }}</td><td>{{ row.receiptHour || '—' }}</td>
                     <td>@if (row.isStockout) { <span class="data-chip so">SO</span> } @else { — }</td>
-                    <td>@if (row.promoCode) { <span class="data-chip km">{{ row.promoCode }}</span> } @else { — }</td>
+                    <td>@if (row.promoCode) { <span class="data-chip km" [attr.title]="row.promoCode">{{ promoChipLabel(row.promoCode) }}</span> } @else { — }</td>
                     <td class="base-value">{{ format(row.baseDemand, 1) }}</td><td><span class="balance-chip" [class]="'balance-chip ' + statusClass(row)">{{ statusLabel(row) }}</span></td>
                   </tr>
                 } @empty { <tr><td colspan="9" class="table-empty">Chặng này chưa có dữ liệu ngày.</td></tr> }
@@ -700,7 +691,7 @@
                     @for (r of promos(); track r.date) {
                       <button class="context-item" (click)="selectAuditRow(r)">
                         <span class="data-chip km">KM</span> <b>{{ r.date }}</b>
-                        <span>{{ r.promoCode }}</span>
+                        <span [attr.title]="r.promoCode">{{ promoChipLabel(r.promoCode!) }}</span>
                       </button>
                     }
                   </div>
@@ -757,152 +748,6 @@
       }
     </aside>
   </main>
-  } @else if (appMode() === 'monitor') {
-  <main class="monitor-page">
-    <section class="monitor-hero" aria-labelledby="monitor-title">
-      <div>
-        <p class="eyebrow">PLANNING GOVERNANCE COMMAND CENTER · {{ store.policy().version }}</p>
-        <h2 id="monitor-title">Demand Planning Operational Monitor</h2>
-        <p>Kiểm soát kết quả khóa, quyết định cần duyệt và hậu kiểm nguyên nhân xuyên suốt 19 chặng.</p>
-      </div>
-      <div class="monitor-hero-actions">
-        <div><span>Phiên / ngày nghiệp vụ</span><b>{{ monitorSnapshot()?.policyVersion ?? store.policy().version }} · {{ runDate }}</b></div>
-        <button class="btn primary" type="button" (click)="runMonitorPipeline()" [disabled]="store.isRunning() || store.completedStage() === 19">
-          <span class="run-dot"></span>{{ store.completedStage() === 19 ? 'Đã đồng bộ 19 chặng' : 'Cập nhật toàn pipeline' }}
-        </button>
-      </div>
-    </section>
-
-    @if (store.error()) { <div class="error-banner" role="alert"><b>Pipeline đã dừng.</b> {{ store.error() }}</div> }
-
-    @if (!monitorSnapshot()) {
-      <section class="monitor-empty" aria-live="polite">
-        <div class="monitor-radar" aria-hidden="true"><span></span></div>
-        <p class="eyebrow">CHƯA CÓ SNAPSHOT</p>
-        <h3>Monitor đang chờ dữ liệu pipeline</h3>
-        <p>Chạy 19 chặng để tạo bản chụp có thể truy vết. Màn hình này không dùng số liệu minh họa.</p>
-        <button class="btn primary" type="button" (click)="runMonitorPipeline()" [disabled]="store.isRunning()">Khởi tạo monitor</button>
-      </section>
-    } @else {
-      <nav class="monitor-view-tabs" aria-label="Chế độ monitor">
-        <button type="button" [class.active]="monitorView() === 'overview'" (click)="monitorView.set('overview')"><b>Tổng quan</b><small>Readiness &amp; cổng kiểm soát</small></button>
-        <button type="button" [class.active]="monitorView() === 'reviews'" (click)="monitorView.set('reviews')"><b>Duyệt &amp; ngoại lệ</b><small>{{ monitorStats().decisions }} quyết định · {{ monitorStats().affectedSkus }} SKU</small></button>
-        <button type="button" [class.active]="monitorView() === 'stages'" (click)="monitorView.set('stages')"><b>Kiểm soát 19 chặng</b><small>Đầu ra khóa &amp; owner</small></button>
-        <button type="button" [class.active]="monitorView() === 'outcomes'" (click)="monitorView.set('outcomes')"><b>Hậu kiểm</b><small>Outcome &amp; root cause</small></button>
-        <span><i [class.ready]="monitorStats().completed === 19"></i>{{ monitorStats().completed === 19 ? 'Snapshot đủ 19 chặng' : 'Snapshot mới đến C' + monitorStats().completed }}</span>
-      </nav>
-
-      <section class="monitor-kpis" aria-label="Chỉ số giám sát chính">
-        <article class="monitor-kpi">
-          <span>Readiness phiên</span><strong>{{ format(monitorStats().completed / 19 * 100, 0) }}%</strong><small>{{ monitorStats().completed }}/19 chặng có snapshot</small>
-          <i [style.width.%]="monitorStats().completed / 19 * 100"></i>
-        </article>
-        <article class="monitor-kpi danger">
-          <span>Decision backlog</span><strong>{{ monitorStats().decisions }}</strong><small>{{ monitorStats().critical }} bị chặn · {{ monitorStats().affectedSkus }} SKU ảnh hưởng</small>
-          <i [style.width.%]="monitorStats().decisions ? monitorStats().critical / monitorStats().decisions * 100 : 0"></i>
-        </article>
-        <article class="monitor-kpi danger">
-          <span>Giá trị mua có rủi ro</span><strong>{{ formatCurrency(monitorStats().atRiskValue) }}</strong><small>Chờ duyệt, chờ thông tin hoặc không phát hành</small>
-          <i [style.width.%]="monitorStats().proposedValue ? monitorStats().atRiskValue / monitorStats().proposedValue * 100 : 0"></i>
-        </article>
-        <article class="monitor-kpi success">
-          <span>Tỷ lệ phát hành</span><strong>{{ monitorStats().total ? format(monitorStats().issued / monitorStats().total * 100, 0) : 0 }}%</strong><small>{{ monitorStats().issued }}/{{ monitorStats().total }} SKU · vốn cấp {{ formatCurrency(monitorStats().fundedValue) }}</small>
-          <i [style.width.%]="monitorStats().total ? monitorStats().issued / monitorStats().total * 100 : 0"></i>
-        </article>
-        <article class="monitor-kpi">
-          <span>WAPE danh mục</span><strong>{{ monitorStats().wape === null ? '—' : format(monitorStats().wape! * 100, 1) + '%' }}</strong><small>Hậu kiểm forecast cuối · không hồi tố</small>
-          <i class="full"></i>
-        </article>
-      </section>
-
-      @if (monitorView() === 'overview') {
-        <section class="monitor-domain-grid" aria-label="Sáu cổng kiểm soát">
-          @for (domain of monitorDomains(); track domain.id) {
-            <button type="button" [class.has-critical]="domain.critical" [class.has-review]="!domain.critical && domain.decisions" (click)="domain.decisions ? showMonitorDomain(domain.stages) : monitorView.set('stages')">
-              <span>{{ domain.range }}</span><b>{{ domain.label }}</b><small>{{ domain.owner }}</small>
-              <div><strong>{{ domain.completed }}/{{ domain.total }}</strong><em>{{ domain.decisions }} quyết định</em><i>{{ domain.critical ? domain.critical + ' chặn' : domain.decisions ? 'cần xem' : 'đã khóa' }}</i></div>
-            </button>
-          }
-        </section>
-
-        <section class="monitor-overview-grid">
-          <section class="panel monitor-priority" aria-labelledby="priority-title">
-            <div class="monitor-panel-head"><div><p class="eyebrow">DECISION INBOX</p><h3 id="priority-title">Ưu tiên xử lý hôm nay</h3></div><button type="button" (click)="showMonitorReviews('all')">Mở toàn bộ {{ monitorStats().decisions }} →</button></div>
-            <div class="monitor-priority-list">
-              @for (row of monitorDecisions().slice(0, 8); track row.id) {
-                <button type="button" (click)="openMonitorSku(row)">
-                  <span [class]="'monitor-severity ' + row.tone"><i></i>{{ monitorToneLabel(row.tone) }}</span>
-                  <div><b>C{{ row.stage.toString().padStart(2, '0') }} · {{ row.title }}</b><small>{{ row.sku.id }} · {{ row.sku.name }}</small></div>
-                  <p>{{ row.impact }}</p><em>{{ row.owner }}</em><strong>→</strong>
-                </button>
-              } @empty { <div class="monitor-no-result">Không có quyết định tồn đọng trong snapshot này.</div> }
-            </div>
-          </section>
-
-          <aside class="monitor-side">
-            <section class="panel monitor-gate">
-              <div class="monitor-panel-head"><div><p class="eyebrow">RELEASE GATE</p><h3>Mức sẵn sàng phát hành</h3></div><b>{{ monitorStats().issued }}/{{ monitorStats().total }}</b></div>
-              <dl>
-                <div><dt>Chính sách ABC×XYZ có SL</dt><dd>{{ monitorStats().policyLocked }}/{{ monitorStats().total }}</dd></div>
-                <div><dt>Forecast đủ điều kiện khóa</dt><dd [class.danger]="monitorStats().forecastLocked < monitorStats().total">{{ monitorStats().forecastLocked }}/{{ monitorStats().total }}</dd></div>
-                <div><dt>SKU Z / D cần chính sách</dt><dd>{{ monitorStats().zCount }} / {{ monitorStats().dCount }}</dd></div>
-                <div><dt>Vốn đã cấp / đề xuất</dt><dd>{{ monitorStats().proposedValue ? format(monitorStats().fundedValue / monitorStats().proposedValue * 100, 0) : 0 }}%</dd></div>
-              </dl>
-              <p><b>Điểm kiểm soát:</b> snapshot có thể đã chạy xong nhưng chưa sẵn sàng phát hành nếu forecast, policy hoặc ngoại lệ chưa được khóa.</p>
-            </section>
-            <section class="panel monitor-governance">
-              <div class="monitor-panel-head"><div><p class="eyebrow">SNAPSHOT CONTRACT</p><h3>Ngữ cảnh kiểm toán</h3></div></div>
-              <dl><div><dt>Policy</dt><dd>{{ monitorSnapshot()!.policyVersion }}</dd></div><div><dt>Snapshot</dt><dd>C{{ monitorSnapshot()!.stage.toString().padStart(2, '0') }}</dd></div><div><dt>Chu kỳ</dt><dd>{{ cycleLength }} ngày</dd></div><div><dt>Ngân sách</dt><dd>{{ formatCurrency(periodBudget) }}</dd></div></dl>
-              <p>Monitor chỉ đọc snapshot đã khóa. Quyết định duyệt phải được ghi nhận trong workflow có người duyệt, lý do và số trước/sau duyệt.</p>
-            </section>
-          </aside>
-        </section>
-      }
-
-      @if (monitorView() === 'reviews') {
-        <section class="monitor-queue panel" aria-labelledby="exception-title">
-          <div class="monitor-panel-head"><div><p class="eyebrow">DECISION &amp; EXCEPTION WORKBENCH</p><h3 id="exception-title">Quyết định cần người chịu trách</h3></div><span>{{ monitorRows().length }} / {{ monitorStats().decisions }} item</span></div>
-          <div class="monitor-toolbar">
-            <label><span aria-hidden="true">⌕</span><input type="search" aria-label="Tìm quyết định monitor" placeholder="Tìm SKU, quyết định, bằng chứng, owner…" [ngModel]="monitorQuery()" (ngModelChange)="monitorQuery.set($event)"></label>
-            <select aria-label="Lọc theo chặng" [ngModel]="monitorStageFilter()" (ngModelChange)="selectMonitorStageFilter($event)"><option [ngValue]="'all'">Tất cả 19 chặng</option>@for (stage of stages; track stage.number) { <option [ngValue]="stage.number">C{{ stage.number.toString().padStart(2, '0') }} · {{ stage.shortTitle }}</option> }</select>
-            <div class="monitor-filters" aria-label="Lọc mức độ"><button type="button" [class.active]="monitorFilter() === 'all'" (click)="monitorFilter.set('all')">Tất cả</button><button type="button" [class.active]="monitorFilter() === 'critical'" (click)="monitorFilter.set('critical')">Khẩn cấp</button><button type="button" [class.active]="monitorFilter() === 'warn'" (click)="monitorFilter.set('warn')">Cần duyệt</button><button type="button" [class.active]="monitorFilter() === 'watch'" (click)="monitorFilter.set('watch')">Theo dõi</button><button type="button" (click)="clearMonitorFilters()">Xóa lọc</button></div>
-          </div>
-          <div class="monitor-table-wrap review-table-wrap">
-            <table class="monitor-table review-table"><thead><tr><th>Mức độ / chặng</th><th>SKU / phân nhóm</th><th>Quyết định</th><th>Bằng chứng</th><th>Tác động vận hành</th><th>Owner</th><th></th></tr></thead><tbody>
-              @for (row of monitorRows(); track row.id) {
-                <tr [class]="'tone-' + row.tone"><td><span [class]="'monitor-severity ' + row.tone"><i></i>{{ monitorToneLabel(row.tone) }}</span><small>C{{ row.stage.toString().padStart(2, '0') }} · {{ stages[row.stage - 1].shortTitle }}</small></td><td class="monitor-sku"><b>{{ row.sku.id }} · {{ row.sku.name }}</b><small>{{ store.stageLabel(row.state, 8) }} · {{ row.sku.category }}</small></td><td class="monitor-decision"><b>{{ row.title }}</b></td><td class="monitor-evidence">{{ row.evidence }}</td><td class="monitor-impact">{{ row.impact }}</td><td><b class="monitor-owner">{{ row.owner }}</b></td><td><button type="button" class="monitor-open" (click)="openMonitorSku(row)">Mở hồ sơ →</button></td></tr>
-              } @empty { <tr><td colspan="7" class="monitor-no-result">Không có quyết định khớp bộ lọc.</td></tr> }
-            </tbody></table>
-          </div>
-        </section>
-      }
-
-      @if (monitorView() === 'stages') {
-        <section class="monitor-stage-board panel" aria-labelledby="stage-board-title">
-          <div class="monitor-panel-head"><div><p class="eyebrow">19-STAGE CONTROL BOARD</p><h3 id="stage-board-title">Kết quả khóa, ngoại lệ và người chịu trách</h3></div><span>{{ monitorStats().completed }}/19 snapshot</span></div>
-          <div class="monitor-table-wrap stage-board-wrap"><table class="monitor-table stage-board-table"><thead><tr><th>Chặng / trạng thái</th><th>Điểm kiểm soát</th><th>Owner</th><th>Đã xử lý</th><th>Cần xem</th><th>Bị chặn</th><th>Kết quả snapshot</th><th></th></tr></thead><tbody>
-            @for (control of monitorStageControls(); track control.number) {
-              <tr [class]="'control-' + control.status"><td><span class="stage-control-id">C{{ control.number.toString().padStart(2, '0') }}</span><b>{{ control.title }}</b><small [class]="'stage-control-status ' + control.status">{{ monitorStatusLabel(control.status) }}</small></td><td class="stage-question">{{ control.question }}</td><td><b class="monitor-owner">{{ control.owner }}</b></td><td class="stage-number-cell">{{ control.processed || '—' }}</td><td><button type="button" class="stage-count review" [disabled]="!control.reviews" (click)="showMonitorReviews(control.number)">{{ control.reviews }}</button></td><td><button type="button" class="stage-count critical" [disabled]="!control.exceptions" (click)="showMonitorReviews(control.number)">{{ control.exceptions }}</button></td><td class="stage-result">{{ control.result }}</td><td><button type="button" class="monitor-open" (click)="openMonitorStage(control.number)">Audit →</button></td></tr>
-            }
-          </tbody></table></div>
-        </section>
-      }
-
-      @if (monitorView() === 'outcomes') {
-        <section class="monitor-outcome-grid">
-          <section class="panel monitor-causes"><div class="monitor-panel-head"><div><p class="eyebrow">ROOT CAUSE</p><h3>Phân bổ nguyên nhân Chặng 19</h3></div><span>{{ monitorOutcomes().length }} SKU</span></div><div class="monitor-cause-list">
-            @for (cause of monitorCauses(); track cause.cause) { <div><span>{{ cause.cause }}</span><i><em [style.width.%]="monitorStats().total ? cause.count / monitorStats().total * 100 : 0"></em></i><b>{{ cause.count }}</b></div> } @empty { <p>Chạy đến Chặng 19 để tạo phân tích nguyên nhân.</p> }
-          </div></section>
-          <section class="panel monitor-learning-rule"><div class="monitor-panel-head"><div><p class="eyebrow">NON-RETROACTIVE LEARNING</p><h3>Nguyên tắc học lại</h3></div></div><p>WAPE, stockout, ETA, tồn cuối, MOQ, vốn và duyệt phải được tách theo nguyên nhân. Mọi thay đổi chỉ tạo policy/version cho phiên sau; không sửa snapshot C1–C18 hoặc đơn đã phát hành.</p><dl><div><dt>WAPE danh mục</dt><dd>{{ monitorStats().wape === null ? '—' : format(monitorStats().wape! * 100, 1) + '%' }}</dd></div><div><dt>SKU thiếu hàng</dt><dd>{{ monitorDecisions().filter(item => item.id.includes('outcome-stockout')).length }}</dd></div><div><dt>Đề xuất phiên sau</dt><dd>{{ monitorDecisions().filter(item => item.id.includes('future-proposal')).length }}</dd></div></dl></section>
-        </section>
-        <section class="monitor-outcome-table panel"><div class="monitor-panel-head"><div><p class="eyebrow">OUTCOME BY SKU</p><h3>Hiệu quả và nguyên nhân theo SKU</h3></div></div><div class="monitor-table-wrap"><table class="monitor-table outcome-table"><thead><tr><th>SKU</th><th>WAPE final</th><th>Nhu cầu thực</th><th>Thiếu hàng</th><th>Tồn cuối</th><th>Trễ nhận TB</th><th>Nguyên nhân</th><th>Đề xuất phiên sau</th><th></th></tr></thead><tbody>
-          @for (state of monitorOutcomes(); track state.definition.id) { <tr><td class="monitor-sku"><b>{{ state.definition.id }} · {{ state.definition.name }}</b><small>{{ store.stageLabel(state, 8) }} · {{ state.definition.category }}</small></td><td class="monitor-quantity">{{ state.postAudit!.forecastWape === null ? '—' : format(state.postAudit!.forecastWape! * 100, 1) + '%' }}</td><td>{{ format(state.postAudit!.actualDemand) }}</td><td [class.outcome-danger]="state.postAudit!.stockoutUnits > 0">{{ format(state.postAudit!.stockoutUnits) }}</td><td>{{ format(state.postAudit!.endingStock) }}</td><td>{{ format(state.postAudit!.averageReceiptDelayDays, 1) }} ngày</td><td><b>{{ state.postAudit!.primaryCause }}</b></td><td class="outcome-proposal">{{ state.postAudit!.proposal }}</td><td><button type="button" class="monitor-open" (click)="openMonitorOutcome(state)">Audit →</button></td></tr> } @empty { <tr><td colspan="9" class="monitor-no-result">Chưa có dữ liệu hậu kiểm Chặng 19.</td></tr> }
-        </tbody></table></div></section>
-      }
-    }
-  </main>
-  }
-
   @if (journeyOpen()) { <app-journey-map (closed)="journeyOpen.set(false)" /> }
   @if (metricTip(); as tip) { <div class="metric-tooltip" role="tooltip" [style.left.px]="tip.x" [style.top.px]="tip.y">{{ tip.text }}</div> }
 

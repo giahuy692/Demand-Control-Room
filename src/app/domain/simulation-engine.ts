@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { buildCatalog, generateDailyRecords } from './catalog';
+import { buildCatalog, generateDailyRecords, SimulationDataset } from './catalog';
 import { FORECAST_HORIZON, fitBaseForecast, lockedSeriesAll } from './forecast-models';
 import { applyPromoFactor, calculateFreeStock, calculateTrend, classifyXyz, isStockout, mean, median, meetsSeasonRepeatThreshold, safetyStock } from './math';
 import { AbcClass, BalanceStatus, Classification, CycleRecord, DailyRecord, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, XyzClass } from './models';
@@ -128,35 +128,101 @@ function buildPromoRegions(records: DailyRecord[], policy: SimulationPolicy): { 
   return runs;
 }
 
+function resetDailyRecord(record: DailyRecord): DailyRecord {
+  return {
+    ...record,
+    isStockout: false, stockoutReason: null, baseDemand: null, baseSource: null,
+    referenceDates: [], beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null,
+    balanceStatus: null, selectionReason: '',
+  };
+}
+
+function createInitialState(definition: SkuPipelineState['definition'], daily: DailyRecord[]): SkuPipelineState {
+  return {
+    definition,
+    daily,
+    cycles: [], classification: emptyClassification(), serviceLevel: null, capitalPriority: 'Chưa xác định',
+    seasonality: 'not-applicable', trend: 'insufficient', trendRates: [null, null], forecast: null,
+    promoFactor: null, promoConfidence: 'none', finalForecast: [], freeStock: null, supplyMilestones: [], safetyStock: null, safetyStockAudit: null,
+    orderPlan: null, budgetAllocation: null, releaseDecision: null, postAudit: null,
+  };
+}
+
+function futureActualDemand(rows: readonly DailyRecord[], policy: SimulationPolicy): number[] {
+  const future = rows.filter(row => row.date >= policy.runDate).sort((a, b) => a.date.localeCompare(b.date));
+  const actual: number[] = [];
+  for (let index = 0; index + policy.cycleLength <= future.length && actual.length < 6; index += policy.cycleLength) {
+    actual.push(future.slice(index, index + policy.cycleLength).reduce((sum, row) => sum + row.sales, 0));
+  }
+  return actual;
+}
+
+function futurePromotions(rows: readonly DailyRecord[], policy: SimulationPolicy): SkuPipelineState['definition']['futurePromotions'] {
+  const future = rows.filter(row => row.date >= policy.runDate).sort((a, b) => a.date.localeCompare(b.date)).slice(0, policy.cycleLength * 6);
+  const counts = new Map<string, { cycleOffset: number; code: string; promoDays: number }>();
+  future.forEach((row, index) => {
+    if (!row.promoCode) return;
+    const cycleOffset = Math.floor(index / policy.cycleLength) + 1;
+    const key = `${cycleOffset}:${row.promoCode}`;
+    const current = counts.get(key) ?? { cycleOffset, code: row.promoCode, promoDays: 0 };
+    current.promoDays++;
+    counts.set(key, current);
+  });
+  return [...counts.values()].map(item => ({ ...item, confirmed: true }));
+}
+
 function lockedValues(state: SkuPipelineState): number[] {
   return state.cycles.filter(cycle => cycle.locked).slice(-24).map(cycle => cycle.baseDemand);
 }
 
-function runStage1(policy: SimulationPolicy): StageSnapshot {
+function runStage1(policy: SimulationPolicy, dataset: SimulationDataset | null): StageSnapshot {
   const runDate = new Date(`${policy.runDate}T00:00:00Z`);
   const historyStart = new Date(Date.UTC(runDate.getUTCFullYear() - policy.historyYears, 0, 1));
   const historyEnd = new Date(runDate);
   historyEnd.setUTCDate(historyEnd.getUTCDate() - 1);
   const totalDays = Math.round((historyEnd.getTime() - historyStart.getTime()) / 86_400_000) + 1;
   const cycleCount = Math.floor(totalDays / policy.cycleLength);
+  const fullCycleDays = cycleCount * policy.cycleLength;
+  const historyEndIso = historyEnd.toISOString().slice(0, 10);
+  const fullCycleStart = dateAfter(historyEndIso, -fullCycleDays + 1);
   const states: Record<string, SkuPipelineState> = {};
-  for (const definition of buildCatalog()) {
-    states[definition.id] = {
-      definition,
-      daily: generateDailyRecords(definition, policy.runDate, policy.cycleLength, cycleCount),
-      cycles: [], classification: emptyClassification(), serviceLevel: null, capitalPriority: 'Chưa xác định',
-      seasonality: 'not-applicable', trend: 'insufficient', trendRates: [null, null], forecast: null,
-      promoFactor: null, promoConfidence: 'none', finalForecast: [], freeStock: null, supplyMilestones: [], safetyStock: null, safetyStockAudit: null,
-      orderPlan: null, budgetAllocation: null, releaseDecision: null, postAudit: null,
-    };
+  if (dataset?.source === 'real') {
+    for (const baseDefinition of dataset.catalog) {
+      const allRows = [...(dataset.dailyBySku[baseDefinition.id] ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+      const daily = allRows
+        .filter(row => row.date >= fullCycleStart && row.date <= historyEndIso)
+        .slice(-fullCycleDays)
+        .map(resetDailyRecord);
+      const definition = {
+        ...baseDefinition,
+        cycles: Math.floor(daily.length / policy.cycleLength),
+        futurePromotions: futurePromotions(allRows, policy),
+        actualDemand: futureActualDemand(allRows, policy),
+        actualEndingStock: allRows.filter(row => row.date >= policy.runDate).at(-1)?.closeStock ?? daily.at(-1)?.closeStock ?? 0,
+      };
+      states[definition.id] = createInitialState(definition, daily);
+    }
+  } else {
+    for (const definition of buildCatalog()) {
+      states[definition.id] = createInitialState(
+        definition,
+        generateDailyRecords(definition, policy.runDate, policy.cycleLength, cycleCount),
+      );
+    }
   }
   return createSnapshot(1, policy, states, {
+    'Nguồn dữ liệu': dataset?.label ?? 'Dữ liệu giả',
+    'SKU': Object.keys(states).length,
     'Bắt đầu lịch sử': historyStart.toISOString().slice(0, 10),
     'Kết thúc lịch sử': historyEnd.toISOString().slice(0, 10),
     'Tổng ngày D': totalDays,
     'Chu kỳ đầy đủ N': cycleCount,
     'Ngày dư r': totalDays - cycleCount * policy.cycleLength,
-  }, [`Khóa ${totalDays} ngày lịch theo chính sách ${policy.version}.`, `Tạo ${cycleCount} chu kỳ cố định, không phụ thuộc số bản ghi của từng SKU.`]);
+  }, [
+    `Khóa ${totalDays} ngày lịch theo chính sách ${policy.version}.`,
+    `Tạo ${cycleCount} chu kỳ cố định, không phụ thuộc số bản ghi của từng SKU.`,
+    ...(dataset?.audit ?? ['Sinh dữ liệu giả nội bộ để mô phỏng.']),
+  ]);
 }
 
 function runStage2(previous: StageSnapshot, policy: SimulationPolicy): StageSnapshot {
@@ -663,8 +729,14 @@ function runStage19(previous: StageSnapshot, policy: SimulationPolicy): StageSna
 
 @Injectable({ providedIn: 'root' })
 export class SimulationEngine {
+  private dataset: SimulationDataset | null = null;
+
+  setDataset(dataset: SimulationDataset | null): void {
+    this.dataset = dataset;
+  }
+
   run(stage: StageNumber, previous: StageSnapshot | null, policy: SimulationPolicy): StageSnapshot {
-    if (stage === 1) return runStage1(policy);
+    if (stage === 1) return runStage1(policy, this.dataset);
     if (!previous || previous.stage !== stage - 1) throw new Error(`Chặng ${stage} cần snapshot đã khóa của Chặng ${stage - 1}.`);
     switch (stage) {
       case 2: return runStage2(previous, policy);
