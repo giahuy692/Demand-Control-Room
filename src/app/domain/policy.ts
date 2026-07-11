@@ -1,5 +1,17 @@
 import { SimulationPolicy, StageDefinition } from './models';
 
+// Mã CTKM THƯỜNG TRỰC (chính sách giá cố định theo hạng khách hàng thân thiết
+// "KHTT", ví dụ "GIẢM 5% GIÁ TỐT NHẤT - DÀNH RIÊNG KHTT" / "GIẢM 5% BEST PRICE
+// - DÀNH RIÊNG KHTT") đã xác nhận trên bộ dữ liệu thật 19 SKU (2026-07-10) —
+// KHÁC CTKM chiến dịch thời vụ (ví dụ "HACHI KHUYẾN MÃI (5/9-1/10)", "Combo
+// siêu tiết kiệm...", "HÀNG TUYỂN GIÁ SỐC"), các mã đó KHÔNG đưa vào đây vì
+// chưa xác nhận là thường trực hay chiến dịch dài ngày — xem
+// Sql/demand-planing-data-source-notes.md mục 13 trước khi thêm/bớt mã.
+export const STANDING_PROMOTION_CODES: readonly string[] = [
+  '-165', '17607', '17715', '17736', '27763', '27782', '27861', '27886', '27891',
+  '27892', '27902', '27912', '27927', '38101', '38216', '38231', '38242', '38350', '38373',
+];
+
 export const DEFAULT_POLICY: SimulationPolicy = {
   runDate: '2026-06-01',
   historyYears: 3,
@@ -11,6 +23,7 @@ export const DEFAULT_POLICY: SimulationPolicy = {
   maxBalancedPerSide: 7,
   version: 'DP-2026.06-v1',
   periodBudget: 4_000_000_000,
+  standingPromotionCodes: STANDING_PROMOTION_CODES,
 };
 
 export const STAGES: readonly StageDefinition[] = [

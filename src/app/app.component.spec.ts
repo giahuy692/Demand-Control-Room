@@ -39,4 +39,31 @@ describe('Demand Planning simulation shell', () => {
 
     expect(app.auditDate()).toBeNull();
   });
+
+  it('sắp xếp danh sách SKU theo tiêu chí của chặng', async () => {
+    const { app, store } = createApp();
+
+    // Default sorting (by ID ascending) when pipeline has not run
+    const catalogBefore = app.visibleCatalog();
+    for (let i = 0; i < catalogBefore.length - 1; i++) {
+      expect(catalogBefore[i].id.localeCompare(catalogBefore[i+1].id)).toBeLessThan(0);
+    }
+
+    // Run to Stage 2 (Stockout)
+    await store.selectStage(2);
+    const catalogStage2 = app.visibleCatalog();
+
+    for (let i = 0; i < catalogStage2.length - 1; i++) {
+      const aState = app.stateFor(catalogStage2[i].id);
+      const bState = app.stateFor(catalogStage2[i+1].id);
+      const aSO = aState?.daily?.filter(d => d.isStockout).length ?? 0;
+      const bSO = bState?.daily?.filter(d => d.isStockout).length ?? 0;
+
+      if (aSO !== bSO) {
+        expect(aSO).toBeGreaterThan(bSO);
+      } else {
+        expect(catalogStage2[i].id.localeCompare(catalogStage2[i+1].id)).toBeLessThan(0);
+      }
+    }
+  });
 });

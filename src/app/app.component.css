@@ -408,3 +408,111 @@ footer { display: flex; justify-content: space-between; padding: 11px 4px 0; col
   .trace-run-actions { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+
+/* View Mode Switch Style */
+.view-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #0c0f15;
+  margin-right: 8px;
+}
+.view-mode-switch button {
+  height: 28px;
+  padding: 0 12px;
+  color: var(--muted);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: .16s ease;
+}
+.view-mode-switch button:hover:not(:disabled) {
+  color: var(--cyan);
+  background: #151923;
+}
+.view-mode-switch button.active {
+  color: #0d0f14;
+  background: var(--cyan);
+  box-shadow: 0 4px 16px rgba(110,231,231,.18);
+}
+
+/* Report grid structure layout */
+.report-grid {
+  grid-template-columns: 1fr;
+  display: block;
+}
+
+/* Background Report Simulation Loader Overlay */
+.report-loading-overlay {
+  position: fixed;
+  z-index: 9999;
+  inset: 0;
+  background: rgba(9, 11, 16, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.loader-box {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px 32px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  max-width: 400px;
+}
+.loader-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--line-soft);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  margin: 0 auto 16px;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.loader-box p {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Phân lớp ABC/XYZ Visuals */
+.grade-chip {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font: 700 9px "Bahnschrift", sans-serif;
+  text-align: center;
+}
+.grade-chip.grade-A, .grade-chip.grade-X {
+  background: rgba(123, 221, 170, 0.12);
+  color: var(--green);
+}
+.grade-chip.grade-B, .grade-chip.grade-Y {
+  background: rgba(255, 171, 46, 0.12);
+  color: var(--amber);
+}
+.grade-chip.grade-C, .grade-chip.grade-Z {
+  background: rgba(110, 160, 255, 0.12);
+  color: #8faaff;
+}
+.grade-chip.grade-NA, .grade-chip.grade-D {
+  background: #242935;
+  color: var(--muted);
+}
+
+.sku-sort-meta {
+  color: var(--amber);
+  font-weight: 500;
+}
+

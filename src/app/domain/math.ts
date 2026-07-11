@@ -23,10 +23,27 @@ export function sampleStdev(values: readonly number[]): number {
   return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
 }
 
-export function isStockout(record: Pick<DailyRecord, 'openStock' | 'closeStock' | 'sales' | 'receiptHour'>, cutoffHour = '10:00'): boolean {
+export function isStockout(record: Pick<DailyRecord, 'openStock' | 'closeStock' | 'sales' | 'receiptHour' | 'hasRecord'>, cutoffHour = '10:00'): boolean {
+  // lateReceipt chỉ cần tồn đầu/cuối/giờ nhập (nguồn sổ tồn kho, tin được kể cả
+  // ngày không có giao dịch bán) nên không cần gate theo hasRecord.
   const lateReceipt = record.openStock === 0 && record.closeStock > 0 && !!record.receiptHour && record.receiptHour > cutoffHour;
-  const emptyAllDay = record.openStock === 0 && record.closeStock === 0 && record.sales === 0;
+  // emptyAllDay cần Q=0 đã XÁC NHẬN — ngày không có bản ghi (hasRecord=false)
+  // không được suy diễn thành bán=0 [nguyên tắc bất biến #2, C1 §3].
+  const emptyAllDay = record.hasRecord && record.openStock === 0 && record.closeStock === 0 && record.sales === 0;
   return lateReceipt || emptyAllDay;
+}
+
+/**
+ * Loại mã CTKM THƯỜNG TRỰC (policy.standingPromotionCodes) khỏi một promoCode
+ * đã ghép nhiều mã bằng "|". Ngày chỉ dính mã thường trực trở thành ngày
+ * không CTKM (null) — được Chặng 2-4 xử lý như bán bình thường. Nếu vẫn còn
+ * mã CHIẾN DỊCH khác sau khi loại, ngày đó vẫn là ngày CTKM (đúng phần còn lại).
+ */
+export function stripStandingPromoCodes(promoCode: string | null, standingCodes: readonly string[]): string | null {
+  if (!promoCode || !standingCodes.length) return promoCode;
+  const standing = new Set(standingCodes);
+  const remaining = promoCode.split('|').filter(code => !standing.has(code));
+  return remaining.length ? remaining.join('|') : null;
 }
 
 export function stockoutBaseline(sales: number, references: readonly number[]): number | null {

@@ -1,0 +1,392 @@
+<div class="report-container">
+  <!-- Report Header -->
+  <header class="report-header">
+    <div class="report-title-block">
+      <span class="report-icon" aria-hidden="true">📊</span>
+      <div>
+        <p class="report-eyebrow">DASHBOARD PHÂN TÍCH HIỆU QUẢ</p>
+        <h2>Báo cáo So sánh Kết quả Mô phỏng</h2>
+      </div>
+    </div>
+    <div class="report-tabs" role="tablist" aria-label="Báo cáo phân khu">
+      <button type="button" role="tab" [class.active]="activeTab() === 'kpis'" [attr.aria-selected]="activeTab() === 'kpis'" (click)="activeTab.set('kpis')">Tổng quan KPIs</button>
+      <button type="button" role="tab" [class.active]="activeTab() === 'sku'" [attr.aria-selected]="activeTab() === 'sku'" (click)="activeTab.set('sku')">Chi tiết SKU</button>
+      <button type="button" role="tab" [class.active]="activeTab() === 'guide'" [attr.aria-selected]="activeTab() === 'guide'" (click)="activeTab.set('guide')">Hướng dẫn đọc & Logic</button>
+    </div>
+  </header>
+
+  <!-- Tab 1: Overview KPIs -->
+  @if (activeTab() === 'kpis') {
+    <div class="report-view active-view" role="tabpanel">
+      <!-- Summary Cards Grid -->
+      <div class="kpi-grid">
+        <!-- Average WAPE Card -->
+        <div class="kpi-card">
+          <div class="kpi-card-meta">
+            <span>Sai số WAPE Trung bình (Pha TEST)</span>
+            <small>Đo độ lệch dự báo nền (Chặng 11)</small>
+          </div>
+          <div class="kpi-comparative-val">
+            <div class="kpi-val mock"><span>Giả lập</span><b>{{ format(kpis().mockAvgWape * 100, 1) }}%</b></div>
+            <div class="kpi-val real"><span>Thực tế</span><b>{{ format(kpis().realAvgWape * 100, 1) }}%</b></div>
+          </div>
+          <div class="kpi-delta" [class.bad]="kpis().realAvgWape > kpis().mockAvgWape" [class.good]="kpis().realAvgWape <= kpis().mockAvgWape">
+            @if (kpis().realAvgWape > kpis().mockAvgWape) {
+              <span>↗ Tăng sai số: +{{ format((kpis().realAvgWape - kpis().mockAvgWape) * 100, 1) }}%</span>
+            } @else {
+              <span>↘ Giảm sai số: {{ format((kpis().realAvgWape - kpis().mockAvgWape) * 100, 1) }}%</span>
+            }
+          </div>
+          <!-- Mini comparative bar -->
+          <div class="kpi-bar-wrapper">
+            <div class="kpi-bar mock-fill" [style.width.%]="kpis().mockAvgWape * 100"></div>
+            <div class="kpi-bar real-fill" [style.width.%]="kpis().realAvgWape * 100"></div>
+          </div>
+        </div>
+
+        <!-- Average Bias Card -->
+        <div class="kpi-card">
+          <div class="kpi-card-meta">
+            <span>Độ chệch Bias Trung bình</span>
+            <small>Xu hướng thừa/thiếu dự báo (Chặng 11)</small>
+          </div>
+          <div class="kpi-comparative-val">
+            <div class="kpi-val mock"><span>Giả lập</span><b>{{ format(kpis().mockAvgBias * 100, 1) }}%</b></div>
+            <div class="kpi-val real"><span>Thực tế</span><b>{{ format(kpis().realAvgBias * 100, 1) }}%</b></div>
+          </div>
+          <div class="kpi-delta" [class.bad]="Math.abs(kpis().realAvgBias) > Math.abs(kpis().mockAvgBias)">
+            <span>Bias Chênh lệch: {{ format((kpis().realAvgBias - kpis().mockAvgBias) * 100, 1) }}%</span>
+          </div>
+          <div class="kpi-bar-wrapper">
+            <div class="kpi-bar mock-fill" [style.width.%]="100"></div>
+            <div class="kpi-bar real-fill" [style.width.%]="kpis().realAvgBias !== 0 ? Math.min(100, Math.abs(kpis().realAvgBias / Math.max(0.01, kpis().mockAvgBias)) * 100) : 0"></div>
+          </div>
+        </div>
+
+        <!-- Total Forecast Quantity Card -->
+        <div class="kpi-card">
+          <div class="kpi-card-meta">
+            <span>Tổng Lượng Dự Báo (6 chu kỳ tới)</span>
+            <small>Quy mô nhu cầu dự phóng (Chặng 13)</small>
+          </div>
+          <div class="kpi-comparative-val">
+            <div class="kpi-val mock"><span>Giả lập</span><b>{{ format(kpis().mockForecastQty) }} sp</b></div>
+            <div class="kpi-val real"><span>Thực tế</span><b>{{ format(kpis().realForecastQty) }} sp</b></div>
+          </div>
+          <div class="kpi-subtext">
+            <span>Chênh lệch lượng: <b>{{ format(kpis().realForecastQty - kpis().mockForecastQty) }} sp</b></span>
+          </div>
+          <div class="kpi-bar-wrapper">
+            <div class="kpi-bar mock-fill" [style.width.%]="100"></div>
+            <div class="kpi-bar real-fill" [style.width.%]="kpis().realForecastQty > 0 ? (kpis().realForecastQty / Math.max(kpis().mockForecastQty, 1) * 100) : 0"></div>
+          </div>
+        </div>
+
+        <!-- Total Forecast Value Card -->
+        <div class="kpi-card">
+          <div class="kpi-card-meta">
+            <span>Tổng Giá Trị Dự Báo (Chặng 13 - Giá trị)</span>
+            <small>Quy mô kế hoạch ngân sách nhu cầu</small>
+          </div>
+          <div class="kpi-comparative-val">
+            <div class="kpi-val mock"><span>Giả lập</span><b>{{ formatCurrency(kpis().mockForecastVal) }}</b></div>
+            <div class="kpi-val real"><span>Thực tế</span><b>{{ formatCurrency(kpis().realForecastVal) }}</b></div>
+          </div>
+          <div class="kpi-subtext">
+            <span>Chênh lệch vốn: <b>{{ formatCurrency(kpis().realForecastVal - kpis().mockForecastVal) }}</b></span>
+          </div>
+          <div class="kpi-bar-wrapper">
+            <div class="kpi-bar mock-fill" [style.width.%]="100"></div>
+            <div class="kpi-bar real-fill" [style.width.%]="kpis().realForecastVal > 0 ? (kpis().realForecastVal / Math.max(kpis().mockForecastVal, 1) * 100) : 0"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Forecast & Classification Comparison Section (Chặng 1-13) -->
+      <div class="financial-section">
+        <div class="section-title">
+          <h3>Đối chiếu Hiệu năng Dự báo & Thiết lập Vận hành (Chặng 1-13)</h3>
+          <p>So sánh sai số mô hình và định lượng dự phóng kế hoạch nhu cầu trước khi chuyển sang pha đặt hàng.</p>
+        </div>
+        <div class="financial-grid">
+          <div class="financial-panel">
+            <h4>Bảng so sánh gộp hiệu năng dự báo mô phỏng</h4>
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th>Chỉ số dự báo</th>
+                  <th class="col-mock">Giả lập (Mock)</th>
+                  <th class="col-real">Thực tế (Real)</th>
+                  <th>Chênh lệch (Real - Mock)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><b>Sai số WAPE Trung bình (Pha TEST)</b></td>
+                  <td>{{ format(kpis().mockAvgWape * 100, 1) }}%</td>
+                  <td>{{ format(kpis().realAvgWape * 100, 1) }}%</td>
+                  <td [class.err-neg]="kpis().realAvgWape > kpis().mockAvgWape" [class.good]="kpis().realAvgWape <= kpis().mockAvgWape">
+                    {{ kpis().realAvgWape >= kpis().mockAvgWape ? '+' : '' }}{{ format((kpis().realAvgWape - kpis().mockAvgWape) * 100, 1) }}%
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>Độ chệch Bias hệ thống Trung bình</b></td>
+                  <td>{{ format(kpis().mockAvgBias * 100, 1) }}%</td>
+                  <td>{{ format(kpis().realAvgBias * 100, 1) }}%</td>
+                  <td>
+                    {{ kpis().realAvgBias >= kpis().mockAvgBias ? '+' : '' }}{{ format((kpis().realAvgBias - kpis().mockAvgBias) * 100, 1) }}%
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>Sai số RMSE Trung bình (Pha TEST)</b></td>
+                  <td>{{ format(kpis().mockAvgRmse, 1) }} sp</td>
+                  <td>{{ format(kpis().realAvgRmse, 1) }} sp</td>
+                  <td [class.err-neg]="kpis().realAvgRmse > kpis().mockAvgRmse">
+                    {{ kpis().realAvgRmse >= kpis().mockAvgRmse ? '+' : '' }}{{ format(kpis().realAvgRmse - kpis().mockAvgRmse, 1) }} sp
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>Mức phục vụ cam kết trung bình (Chặng 8)</b></td>
+                  <td>{{ format(kpis().mockAvgSL * 100, 1) }}%</td>
+                  <td>{{ format(kpis().realAvgSL * 100, 1) }}%</td>
+                  <td>
+                    {{ format((kpis().realAvgSL - kpis().mockAvgSL) * 100, 1) }}%
+                  </td>
+                </tr>
+                <tr>
+                  <td><b>Tổng số lượng dự báo (6 chu kỳ tới)</b></td>
+                  <td>{{ format(kpis().mockForecastQty) }} sp</td>
+                  <td>{{ format(kpis().realForecastQty) }} sp</td>
+                  <td>{{ format(kpis().realForecastQty - kpis().mockForecastQty) }} sp</td>
+                </tr>
+                <tr>
+                  <td><b>Tổng giá trị dự báo kế hoạch (Chặng 13 - Giá trị)</b></td>
+                  <td><b>{{ formatCurrency(kpis().mockForecastVal) }}</b></td>
+                  <td><b>{{ formatCurrency(kpis().realForecastVal) }}</b></td>
+                  <td [class.err-pos]="kpis().realForecastVal >= kpis().mockForecastVal">
+                    {{ kpis().realForecastVal >= kpis().mockForecastVal ? '+' : '' }}{{ formatCurrency(kpis().realForecastVal - kpis().mockForecastVal) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="financial-insights">
+            <h5>Phân tích từ hệ thống</h5>
+            <ul>
+              <li>
+                <span class="bullet" aria-hidden="true">▪</span>
+                <span><b>Biến động sai số WAPE</b>: Dữ liệu thật chứa các ngày stockout thực tế và supplier giao hàng trễ, dẫn đến sai số WAPE trung bình tăng lên <b>{{ format(kpis().realAvgWape * 100, 1) }}%</b> so với dữ liệu giả lập sạch. điều này phản ánh đúng thực tế phức tạp của chuỗi cung ứng.</span>
+              </li>
+              <li>
+                <span class="bullet" aria-hidden="true">▪</span>
+                <span><b>Xu hướng kế hoạch nhu cầu</b>: Tổng nhu cầu dự phóng 6 chu kỳ tới bằng tiền đạt <b>{{ formatCurrency(kpis().realForecastVal) }}</b> ở luồng Real. Định mức giá trị này là cơ sở quan trọng nhất để thiết lập và thương lượng hạn mức quỹ vốn cho các chặng hậu cần tiếp theo.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Tab 2: SKU Detail Analysis -->
+  @if (activeTab() === 'sku') {
+    <div class="report-view active-view" role="tabpanel">
+      <!-- SKU selector -->
+      <div class="sku-selector-block">
+        <label for="sku-select">Chọn mã SKU đối chiếu:</label>
+        <select id="sku-select" [ngModel]="selectedSkuId()" (ngModelChange)="selectedSkuId.set($event)">
+          @for (sku of catalog(); track sku.id) {
+            <option [value]="sku.id">{{ sku.id }} - {{ sku.name }} ({{ sku.category }})</option>
+          }
+        </select>
+        @if (selectedSkuDetail().definition; as def) {
+          <div class="sku-info-badge">
+            <span>Phân loại gốc: <b>{{ def.type }}</b></span>
+            <span>Đơn giá chuẩn: <b>{{ formatCurrency(def.price) }}</b></span>
+            <span>Giá mua: <b>{{ formatCurrency(def.purchasePrice) }}</b></span>
+          </div>
+        }
+      </div>
+
+      <!-- Detail Grid Comparison -->
+      <div class="sku-detail-grid">
+        <div class="sku-detail-table-card">
+          <h4>Bảng So sánh Tham số Vận hành & Đầu ra Chặng 19</h4>
+          <table class="report-table detail-table">
+            <thead>
+              <tr>
+                <th>Thông số mô phỏng</th>
+                <th class="col-mock">Giả lập (Mock)</th>
+                <th class="col-real">Thực tế (Real)</th>
+                <th>Phân tích</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Phân lớp ABC × XYZ (Chặng 6-7)</td>
+                <td><span class="grade-chip" [class]="'grade-chip grade-' + (selectedSkuDetail().mock?.classification?.abc || 'NA')">{{ selectedSkuDetail().mock?.classification?.abc || '—' }}{{ selectedSkuDetail().mock?.classification?.xyz || '' }}</span></td>
+                <td><span class="grade-chip" [class]="'grade-chip grade-' + (selectedSkuDetail().real?.classification?.abc || 'NA')">{{ selectedSkuDetail().real?.classification?.abc || '—' }}{{ selectedSkuDetail().real?.classification?.xyz || '' }}</span></td>
+                <td>{{ selectedSkuDetail().real?.classification?.abc === selectedSkuDetail().mock?.classification?.abc ? 'Đồng bộ phân loại tầm quan trọng' : 'Phân loại thay đổi do sức mua thực tế' }}</td>
+              </tr>
+              <tr>
+                <td>Mức phục vụ & Hệ số Z (Chặng 8)</td>
+                <td>{{ selectedSkuDetail().mock?.serviceLevel ? selectedSkuDetail().mock!.serviceLevel + '%' : 'Ngoại lệ' }} (Z={{ format(selectedSkuDetail().mock?.safetyStockAudit?.z, 2) }})</td>
+                <td>{{ selectedSkuDetail().real?.serviceLevel ? selectedSkuDetail().real!.serviceLevel + '%' : 'Ngoại lệ' }} (Z={{ format(selectedSkuDetail().real?.safetyStockAudit?.z, 2) }})</td>
+                <td>Chính sách dịch vụ đồng nhất theo ma trận</td>
+              </tr>
+              <tr>
+                <td>Mô hình dự báo nền tốt nhất (Chặng 11)</td>
+                <td><b class="highlight-model">{{ selectedSkuDetail().mock?.forecast?.model || '—' }}</b></td>
+                <td><b class="highlight-model">{{ selectedSkuDetail().real?.forecast?.model || '—' }}</b></td>
+                <td>{{ selectedSkuDetail().real?.forecast?.model === selectedSkuDetail().mock?.forecast?.model ? 'Mô hình chiến thắng trùng nhau' : 'Thuật toán tự động chọn mô hình bám sát hơn' }}</td>
+              </tr>
+              <tr>
+                <td>Sai số WAPE (Backtest pha TEST)</td>
+                <td>{{ selectedSkuDetail().mockWapeStr }}</td>
+                <td>{{ selectedSkuDetail().realWapeStr }}</td>
+                <td [class.err-neg]="(selectedSkuDetail().real?.forecast?.wape ?? 0) > (selectedSkuDetail().mock?.forecast?.wape ?? 0)">
+                  Chênh lệch: {{ format(((selectedSkuDetail().real?.forecast?.wape ?? 0) - (selectedSkuDetail().mock?.forecast?.wape ?? 0)) * 100, 1) }}%
+                </td>
+              </tr>
+              <tr>
+                <td>Độ chệch Bias hệ thống (Chặng 11)</td>
+                <td>{{ selectedSkuDetail().mockBiasStr }}</td>
+                <td>{{ selectedSkuDetail().realBiasStr }}</td>
+                <td>Đo xu hướng vượt/thiếu của dự báo nền</td>
+              </tr>
+              <tr>
+                <td>Sai số RMSE (Chặng 11)</td>
+                <td>{{ selectedSkuDetail().mockRmseStr }}</td>
+                <td>{{ selectedSkuDetail().realRmseStr }}</td>
+                <td>Mức độ chênh lệch cực đại phạt nặng</td>
+              </tr>
+              <tr>
+                <td>Hệ số khuyến mãi K (Chặng 12)</td>
+                <td>{{ format(selectedSkuDetail().mock?.promoFactor ?? 1, 2) }}x</td>
+                <td>{{ format(selectedSkuDetail().real?.promoFactor ?? 1, 2) }}x</td>
+                <td>Hệ số nhân kích cầu CTKM được phân bổ</td>
+              </tr>
+              <tr>
+                <td>Tổng lượng dự báo 6 chu kỳ (Chặng 13)</td>
+                <td>{{ format(Math.round((selectedSkuDetail().mock?.finalForecast || []).reduce((a, b) => a + b, 0))) }} sp</td>
+                <td>{{ format(Math.round((selectedSkuDetail().real?.finalForecast || []).reduce((a, b) => a + b, 0))) }} sp</td>
+                <td>Tổng lượng dự báo sau khuyến mãi</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Interactive SVG Chart Card -->
+        <div class="sku-detail-chart-card">
+          <h4>Mô phỏng Dự Báo vs Thực Tế tiêu thụ (6 chu kỳ tới)</h4>
+          <p class="chart-subtitle">So sánh kết quả dự phóng cuối sau khi đã áp CTKM tương lai.</p>
+          
+          @if (selectedSkuChartPaths(); as paths) {
+            <div class="svg-chart-container">
+              <svg [attr.viewBox]="'0 0 ' + paths.width + ' ' + paths.height" class="interactive-chart">
+                <!-- Grid Lines and Ticks -->
+                @for (tick of paths.ticks; track tick.y) {
+                  <line x1="40" [attr.y1]="tick.y" [attr.x2]="paths.width - 20" [attr.y2]="tick.y" class="chart-gridline" />
+                  <text x="32" [attr.y]="tick.y + 4" class="chart-axis-text Y-axis">{{ tick.label }}</text>
+                }
+                
+                <!-- X-Axis Labels -->
+                @for (p of paths.actualPoints; track $index) {
+                  <text [attr.x]="p.x" y="170" class="chart-axis-text X-axis">CK +{{ $index + 1 }}</text>
+                }
+
+                <!-- Lines -->
+                <path [attr.d]="paths.actualPath" class="path-line line-actual" />
+                <path [attr.d]="paths.realPath" class="path-line line-real" />
+                <path [attr.d]="paths.mockPath" class="path-line line-mock" />
+
+                <!-- Dots and Tooltips for Actual -->
+                @for (p of paths.actualPoints; track $index) {
+                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-actual" />
+                  <text [attr.x]="p.x" [attr.y]="p.y - 8" class="chart-tooltip-text">{{ p.val }}</text>
+                }
+                <!-- Dots for Real Forecast -->
+                @for (p of paths.realPoints; track $index) {
+                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-real" />
+                }
+                <!-- Dots for Mock Forecast -->
+                @for (p of paths.mockPoints; track $index) {
+                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-mock" />
+                }
+              </svg>
+              
+              <!-- Chart Legend -->
+              <div class="chart-legend">
+                <span class="legend-item actual"><i aria-hidden="true"></i>Thực tế tiêu thụ</span>
+                <span class="legend-item real"><i aria-hidden="true"></i>Dự báo Real</span>
+                <span class="legend-item mock"><i aria-hidden="true"></i>Dự báo Mock</span>
+              </div>
+            </div>
+          } @else {
+            <div class="chart-empty">Chưa đủ dữ liệu dự phóng để lập biểu đồ. Hãy đảm bảo cả hai nguồn dữ liệu đã được chạy mô phỏng.</div>
+          }
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Tab 3: Guide & Operational Logic -->
+  @if (activeTab() === 'guide') {
+    <div class="report-view active-view guide-view" role="tabpanel">
+      <div class="guide-grid">
+        <section class="guide-card">
+          <h4>1. Hướng dẫn Đọc các Chỉ số Dự báo (WAPE, RMSE, Bias)</h4>
+          <p>Hệ thống sử dụng ba chỉ số chính để đo lường sai số mô hình trong quá trình học và hậu kiểm chặng 11 & 19:</p>
+          <ul>
+            <li>
+              <span><b>WAPE (Weighted Absolute Percentage Error)</b>:</span>
+              <app-math-formula [expression]="'WAPE = \\\\frac{\\\\sum |A_t - F_t|}{\\\\sum A_t}'" label="Công thức WAPE"></app-math-formula>
+              <p class="formula-desc">Đo lường phần trăm sai lệch tuyệt đối. Ví dụ: WAPE = 20% nghĩa là cứ 100 sản phẩm bán ra thì dự báo lệch trung bình 20 sản phẩm. Càng gần 0% càng tốt. Chỉ số dưới 25% được coi là đạt chuẩn phân phối bán lẻ.</p>
+            </li>
+            <li>
+              <span><b>Bias (Độ chệch hệ thống)</b>:</span>
+              <app-math-formula [expression]="'Bias = \\\\frac{\\\\sum (F_t - A_t)}{\\\\sum A_t}'" label="Công thức Bias"></app-math-formula>
+              <p class="formula-desc">Đo hướng lệch ổn định. Bias Dương (>0) thể hiện mô hình đang dự báo cao hơn thực tế (thừa hàng, đọng vốn). Bias Âm (<0) thể hiện dự báo thấp hơn thực tế (thiếu hàng, mất doanh thu). Mục tiêu giữ Bias quanh ±5%.</p>
+            </li>
+            <li>
+              <span><b>RMSE (Root Mean Squared Error)</b>:</span>
+              <app-math-formula [expression]="'RMSE = \\\\sqrt{\\\\frac{\\\\sum (A_t - F_t)^2}{n}}'" label="Công thức RMSE"></app-math-formula>
+              <p class="formula-desc">Phạt rất nặng những chu kỳ trượt dự báo cực đại (lệch đột biến). RMSE nhỏ đảm bảo dòng chảy cung ứng không bị sốc đột ngột.</p>
+            </li>
+          </ul>
+        </section>
+
+        <section class="guide-card">
+          <h4>2. Tác động của Dữ liệu Giá & Quy tắc Phân bổ Vốn</h4>
+          <p>Hệ thống không chỉ giả lập dòng chảy số lượng vật lý (lượng sản phẩm) mà tích hợp chặt chẽ <b>Dữ liệu Giá (Purchase Price)</b> để kiểm soát an toàn tài chính:</p>
+          <ul>
+            <li>
+              <span><b>Ma trận Phân hạng vốn (Chặng 8 & 17)</b>:</span>
+              <p class="formula-desc">Không cấp vốn cào bằng. Khi tổng ngân sách kỳ bị chặn bởi <code>periodBudget</code>, hệ thống sẽ xếp hạng mức độ quan trọng bằng tiền. Nhóm <b>AX, AY</b> (Giá trị cao, bán đều) luôn được cấp vốn 100% đề xuất. Nhóm <b>CZ</b> (Giá trị thấp, bán thưa) sẽ bị cắt giảm đầu tiên nếu quỹ vốn hết hạn.</p>
+            </li>
+            <li>
+              <span><b>Làm tròn MOQ & Phần dư làm tròn (Chặng 16)</b>:</span>
+              <p class="formula-desc">Quy cách đóng gói MOQ của nhà cung cấp buộc số lượng đặt hàng đề xuất <code>Qorder</code> phải là bội số của MOQ. Điều này làm tăng vốn mua thực tế. Báo cáo đo lường phần chênh lệch này để người dùng đánh giá mức đọng vốn tối thiểu bắt buộc của từng nhà cung cấp.</p>
+            </li>
+          </ul>
+        </section>
+
+        <section class="guide-card">
+          <h4>3. Cơ chế Tồn kho an toàn SS (Safety Stock)</h4>
+          <p>Tồn an toàn tại Chặng 15 được tính toán động nhằm mục đích gánh đỡ đồng thời hai rủi ro lớn:</p>
+          <app-math-formula [expression]="'SS = Z \\\\times \\\\sqrt{\\\\bar{LT} \\\\times \\\\sigma_d^2 + \\\\bar{D}^2 \\\\times \\\\sigma_{LT}^2}'" label="Công thức tính tồn an toàn SS"></app-math-formula>
+          <div class="formula-breakdown">
+            <h5>Giải thích các thành phần:</h5>
+            <ul>
+              <li><code>Z</code>: Hệ số phản ánh mức phục vụ cam kết (Service Level) lấy từ ma trận chính sách chặng 8.</li>
+              <li><code>LT trung bình</code>: Thời gian giao hàng trung bình (Lead Time) tính bằng số chu kỳ.</li>
+              <li><code>sigma_d</code>: Độ lệch chuẩn của sai số dự báo trong pha chạy thử backtest.</li>
+              <li><code>D trung bình</code>: Nhu cầu trung bình dự tính cho chu kỳ tới.</li>
+              <li><code>sigma_LT</code>: Độ lệch chuẩn biến động thời gian nhận hàng thực tế từ nhà cung cấp.</li>
+            </ul>
+          </div>
+        </section>
+      </div>
+    </div>
+  }
+</div>

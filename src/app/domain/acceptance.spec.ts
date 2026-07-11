@@ -8,6 +8,7 @@ import { buildPromoRegionSamples } from './promo-analysis';
 function dailyRecord(index: number, baseDemand: number | null, baseSource: DailyRecord['baseSource']): DailyRecord {
   return {
     sku: 'TEST', date: `2026-01-${String(index + 1).padStart(2, '0')}`, openStock: 10, closeStock: 9, sales: baseDemand ?? 5,
+    hasRecord: true,
     receiptHour: null, promoCode: null, isStockout: false, stockoutReason: null, baseDemand, baseSource, referenceDates: [],
     beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null, balanceStatus: null, selectionReason: '',
   };
@@ -22,11 +23,11 @@ describe('21 acceptance tests từ Developer Spec', () => {
   });
 
   it('T02 · Chặng 2: nhập 13:00 sau cutoff là stockout', () => {
-    expect(isStockout({ openStock: 0, closeStock: 20, sales: 0, receiptHour: '13:00' }, '10:00')).toBe(true);
+    expect(isStockout({ openStock: 0, closeStock: 20, sales: 0, receiptHour: '13:00', hasRecord: true }, '10:00')).toBe(true);
   });
 
   it('T03 · Chặng 2: trống cả ngày luôn là stockout, không có heuristic SKU thưa', () => {
-    expect(isStockout({ openStock: 0, closeStock: 0, sales: 0, receiptHour: null }, '10:00')).toBe(true);
+    expect(isStockout({ openStock: 0, closeStock: 0, sales: 0, receiptHour: null, hasRecord: true }, '10:00')).toBe(true);
   });
 
   it('T04 · Chặng 3: max(8, median 18/20/21/19) = 19,5', () => {

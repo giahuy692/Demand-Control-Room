@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { buildCatalog, generateDailyRecords, SimulationDataset } from './catalog';
 import { FORECAST_HORIZON, fitBaseForecast, lockedSeriesAll } from './forecast-models';
-import { applyPromoFactor, calculateFreeStock, calculateTrend, classifyXyz, isStockout, mean, median, meetsSeasonRepeatThreshold, safetyStock } from './math';
+import { applyPromoFactor, calculateFreeStock, calculateTrend, classifyXyz, isStockout, mean, median, meetsSeasonRepeatThreshold, safetyStock, stripStandingPromoCodes } from './math';
 import { AbcClass, BalanceStatus, Classification, CycleRecord, DailyRecord, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, XyzClass } from './models';
 import { CAPITAL_PRIORITIES, DEFAULT_POLICY, SERVICE_LEVELS, Z_VALUES } from './policy';
 import { buildPromoRegionSamples } from './promo-analysis';
@@ -40,7 +40,9 @@ interface ReferenceSelection {
 }
 
 function isObservedClean(record: DailyRecord): boolean {
-  return !record.promoCode && !record.isStockout && (record.baseSource === null || record.baseSource === 'clean');
+  // Ngày không có bản ghi (hasRecord=false) không được dùng làm nền tham chiếu
+  // cho ngày khác — chưa xác nhận nó thật sự "sạch" [nguyên tắc bất biến #2, C1 §3].
+  return record.hasRecord && !record.promoCode && !record.isStockout && (record.baseSource === null || record.baseSource === 'clean');
 }
 
 function collectCleanSide(records: DailyRecord[], fromIndex: number, direction: -1 | 1, radius: number, stopAtPromoBoundary: boolean): ReferenceItem[] {
@@ -188,7 +190,9 @@ function runStage1(policy: SimulationPolicy, dataset: SimulationDataset | null):
   const states: Record<string, SkuPipelineState> = {};
   if (dataset?.source === 'real') {
     for (const baseDefinition of dataset.catalog) {
-      const allRows = [...(dataset.dailyBySku[baseDefinition.id] ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+      const allRows = [...(dataset.dailyBySku[baseDefinition.id] ?? [])]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map(row => ({ ...row, promoCode: stripStandingPromoCodes(row.promoCode, policy.standingPromotionCodes) }));
       const daily = allRows
         .filter(row => row.date >= fullCycleStart && row.date <= historyEndIso)
         .slice(-fullCycleDays)
@@ -248,7 +252,14 @@ function runStage3(previous: StageSnapshot, policy: SimulationPolicy): StageSnap
     const source = state.daily;
     state.daily = source.map((record, index) => {
       if (record.promoCode) return { ...record, baseDemand: null, baseSource: 'promo-defer' as const };
-      if (!record.isStockout) return { ...record, baseDemand: record.sales, baseSource: 'clean' as const };
+      if (record.hasRecord && !record.isStockout) return { ...record, baseDemand: record.sales, baseSource: 'clean' as const };
+      if (!record.hasRecord) {
+        // Ngày không có bản ghi nguồn: KHÔNG tự nâng nền ở Chặng 3 (không đủ căn
+        // cứ để coi là stockout hay sạch) — để nguyên 'insufficient', giao cho
+        // Chặng 5 lấp nền kỹ thuật với bán kính tìm rộng hơn.
+        insufficient++;
+        return { ...record, baseDemand: null, baseSource: 'insufficient' as const };
+      }
       const selection = qualifySelection(selectReferences(source, index, index, policy), source.length, index, index);
       const audited = applyReferenceAudit(record, selection);
       if (selection.status === 'insufficient' || audited.referenceMedian === null) {

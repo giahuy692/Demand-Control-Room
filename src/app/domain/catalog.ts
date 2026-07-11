@@ -109,9 +109,9 @@ function addDays(date: Date, amount: number): Date {
 // Mảng rỗng dùng chung cho mọi bản ghi chưa audit; applyReferenceAudit luôn thay bằng mảng mới nên không bị ghi đè.
 const EMPTY_DATES = Object.freeze([]) as unknown as string[];
 
-function dailyRecord(sku: string, date: string, openStock: number, closeStock: number, sales: number, receiptHour: string | null, promoCode: string | null): DailyRecord {
+function dailyRecord(sku: string, date: string, openStock: number, closeStock: number, sales: number, receiptHour: string | null, promoCode: string | null, hasRecord = true): DailyRecord {
   return {
-    sku, date, openStock, closeStock, sales, receiptHour, promoCode,
+    sku, date, openStock, closeStock, sales, hasRecord, receiptHour, promoCode,
     isStockout: false, stockoutReason: null, baseDemand: null, baseSource: null,
     referenceDates: EMPTY_DATES, beforeReferenceDates: EMPTY_DATES, afterReferenceDates: EMPTY_DATES, referenceMedian: null,
     balanceStatus: null, selectionReason: '',
@@ -185,6 +185,9 @@ interface ParsedDailyRow {
   readonly openStock: number;
   readonly closeStock: number;
   readonly sales: number;
+  // false ⇔ dòng không phải bản ghi nguồn đã xác nhận (giữ để đọc lại file cũ).
+  // Cột tùy chọn: vắng mặt nghĩa là true, tương thích ngược với actual-record.
+  readonly hasRecord: boolean;
   readonly receiptHour: string | null;
   readonly promoCode: string | null;
   readonly price: number;
@@ -218,6 +221,7 @@ export function parseRealDataset(dailyPayload: string, productPayload: string): 
       row.sales,
       row.receiptHour,
       row.promoCode,
+      row.hasRecord,
     ));
     const current = dailyMeta.get(sku);
     if (!current || (!current.name && row.name) || (!current.price && row.price)) dailyMeta.set(sku, { price: row.price || current?.price || 0, name: row.name ?? current?.name ?? null });
@@ -281,6 +285,7 @@ function parseDailyPayload(payload: string, sourceName: string): ParsedDailyRow[
       openStock: requiredNumber(row[2], `${sourceName} dòng ${index + 1}: OpenStock`),
       closeStock: requiredNumber(row[3], `${sourceName} dòng ${index + 1}: CloseStock`),
       sales: requiredNumber(row[4], `${sourceName} dòng ${index + 1}: Sales`),
+      hasRecord: true,
       receiptHour: textCell(row[5]),
       promoCode: textCell(row[6]) ?? textCell(row[7]),
       price: numberCell(row[8], 0),
@@ -299,6 +304,8 @@ function parseDailyJson(payload: string, sourceName: string): ParsedDailyRow[] {
       openStock: requiredNumber(row['OpenStock'], `${sourceName} dòng ${index + 1}: OpenStock`),
       closeStock: requiredNumber(row['CloseStock'], `${sourceName} dòng ${index + 1}: CloseStock`),
       sales: requiredNumber(row['Sales'], `${sourceName} dòng ${index + 1}: Sales`),
+      // Vắng cột HasRecord (định dạng actual-record cũ) = true.
+      hasRecord: booleanCell(row['HasRecord'], true),
       receiptHour: textCell(row['ReceiptHour']),
       promoCode: textCell(row['PromoCode']) ?? textCell(row['PromoName']),
       price: numberCell(row['Price'], 0),
@@ -402,6 +409,11 @@ function numberCell(value: unknown, fallback: number): number {
   const text = textCell(value);
   const number = text === null ? NaN : Number(text);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function booleanCell(value: unknown, fallback: boolean): boolean {
+  const text = textCell(value);
+  return text === null ? fallback : !['0', 'FALSE', 'NO', 'N'].includes(text.toUpperCase());
 }
 
 function requiredNumber(value: unknown, label: string): number {

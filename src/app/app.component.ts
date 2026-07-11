@@ -13,11 +13,12 @@ import { explainLearningCell, LearningColumn } from './domain/forecast-models';
 import { SimulationStore, viNumberFormat } from './state/simulation.store';
 import { JourneyMapComponent } from './ui/journey-map.component';
 import { MathFormulaComponent } from './ui/math-formula.component';
+import { ComparisonReportComponent } from './ui/comparison-report.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [FormsModule, KeyValuePipe, JourneyMapComponent, MathFormulaComponent],
+  imports: [FormsModule, KeyValuePipe, JourneyMapComponent, MathFormulaComponent, ComparisonReportComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -31,6 +32,14 @@ export class AppComponent implements OnInit {
   readonly auditDate = signal<string | null>(null);
   readonly journeyOpen = signal(false);
   readonly contextCollapsed = signal(false);
+  readonly currentView = signal<'simulation' | 'report'>('simulation');
+
+  setView(view: 'simulation' | 'report'): void {
+    this.currentView.set(view);
+    if (view === 'report') {
+      void this.store.generateReportData();
+    }
+  }
   readonly auditCollapsed = signal(false);
   readonly processCollapsed = signal(false);
   readonly processPanelWidth = signal(760);
@@ -47,8 +56,21 @@ export class AppComponent implements OnInit {
 
   readonly visibleCatalog = computed(() => {
     const query = this.searchQuery().trim().toLocaleLowerCase('vi');
-    if (!query) return this.store.catalog;
-    return this.store.catalog.filter(sku => `${sku.id} ${sku.name} ${sku.category}`.toLocaleLowerCase('vi').includes(query));
+    const filtered = query
+      ? this.store.catalog.filter(sku => `${sku.id} ${sku.name} ${sku.category}`.toLocaleLowerCase('vi').includes(query))
+      : [...this.store.catalog];
+
+    const states = this.currentStageStates();
+    if (!states) {
+      return filtered.sort((a, b) => a.id.localeCompare(b.id));
+    }
+
+    const stage = this.store.activeStage();
+    return filtered.sort((a, b) => {
+      const aState = states[a.id] ?? null;
+      const bState = states[b.id] ?? null;
+      return compareSkus(a, b, aState, bState, stage);
+    });
   });
   readonly summaryEntries = computed(() => Object.entries(this.store.view().summary));
   readonly selectedDefinition = computed(() => this.store.catalog.find(sku => sku.id === this.store.selectedSkuId())!);
@@ -319,4 +341,228 @@ export class AppComponent implements OnInit {
     return codes.length > 1 ? `${codes[0]} +${codes.length - 1}` : codes[0];
   }
 
+  getSkuSortValueLabel(sku: SkuDefinition): string {
+    const state = this.stateFor(sku.id);
+    const stage = this.store.activeStage();
+    if (!state) return '';
+    switch (stage) {
+      case 1: {
+        const count = state.daily?.length ?? sku.actualDemand?.length ?? 0;
+        return `${count} ngày`;
+      }
+      case 2: {
+        const count = state.daily?.filter(d => d.isStockout).length ?? 0;
+        return `${count} SO`;
+      }
+      case 3: {
+        const count = state.daily?.filter(d => d.baseSource === 'stockout-lifted').length ?? 0;
+        return `${count} nâng nền`;
+      }
+      case 4: {
+        const count = state.daily?.filter(d => d.baseSource === 'promo-normalized').length ?? 0;
+        return `${count} chuẩn hóa`;
+      }
+      case 5: {
+        const locked = state.cycles?.filter(c => c.locked).length ?? 0;
+        const total = state.cycles?.length ?? 0;
+        return `${locked}/${total} CK`;
+      }
+      case 6: {
+        const val = state.classification?.annualValue ?? 0;
+        return this.formatCurrency(val);
+      }
+      case 7: {
+        const adi = state.classification?.adi;
+        const cv2 = state.classification?.cv2;
+        return `ADI: ${this.format(adi, 2)} · CV²: ${this.format(cv2, 2)}`;
+      }
+      case 8: {
+        const sl = state.serviceLevel;
+        return sl !== null ? `SL: ${sl}%` : 'Chính sách riêng';
+      }
+      case 9: {
+        const mapping: Record<string, string> = {
+          'confirmed': 'Mùa vụ',
+          'no-clear-season': 'Không rõ',
+          'insufficient-structure': 'Thiếu chu kỳ',
+          'not-applicable': 'Không áp dụng'
+        };
+        return mapping[state.seasonality] ?? state.seasonality;
+      }
+      case 10: {
+        const g1 = state.trendRates?.[0];
+        const g2 = state.trendRates?.[1];
+        if (g1 === null || g1 === undefined || g2 === null || g2 === undefined) return 'Không có xu hướng';
+        return `g₁: ${g1 > 0 ? '+' : ''}${this.format(g1 * 100, 1)}% · g₂: ${g2 > 0 ? '+' : ''}${this.format(g2 * 100, 1)}%`;
+      }
+      case 11: {
+        const wape = state.forecast?.wape;
+        return wape != null ? `WAPE: ${this.format(wape * 100, 1)}%` : 'Không có WAPE';
+      }
+      case 12: {
+        const k = state.promoFactor;
+        return k != null ? `K: ${this.format(k, 2)}` : 'K: —';
+      }
+      case 13: {
+        const sum = (state.finalForecast ?? []).reduce((a, b) => a + b, 0);
+        return `F: ${this.format(sum, 1)}`;
+      }
+      case 14: {
+        const free = state.freeStock;
+        return `Free: ${this.format(free)}`;
+      }
+      case 15: {
+        const ss = state.safetyStock;
+        return `SS: ${this.format(ss)}`;
+      }
+      case 16: {
+        const qty = state.orderPlan?.orderQuantity;
+        return `Đặt: ${this.format(qty)}`;
+      }
+      case 17: {
+        const cut = state.budgetAllocation?.cutQuantity ?? 0;
+        if (cut > 0) return `Cắt: ${this.format(cut)}`;
+        const funded = state.budgetAllocation?.fundedQuantity ?? 0;
+        return `Cấp: ${this.format(funded)}`;
+      }
+      case 18: {
+        const count = state.releaseDecision?.reasons?.length ?? 0;
+        return `${count} ngoại lệ`;
+      }
+      case 19: {
+        const wape = state.postAudit?.forecastWape;
+        if (wape != null) return `Audit WAPE: ${this.format(wape * 100, 1)}%`;
+        const so = state.postAudit?.stockoutUnits;
+        return so != null ? `Thiếu: ${this.format(so)}` : '';
+      }
+      default:
+        return '';
+    }
+  }
+
+}
+
+function compareSkus(
+  a: SkuDefinition,
+  b: SkuDefinition,
+  aState: Readonly<SkuPipelineState> | null,
+  bState: Readonly<SkuPipelineState> | null,
+  stage: StageNumber
+): number {
+  if (!aState && !bState) return a.id.localeCompare(b.id);
+  if (!aState) return 1;
+  if (!bState) return -1;
+
+  let valA: any = 0;
+  let valB: any = 0;
+
+  switch (stage) {
+    case 1:
+      valA = aState.daily?.length ?? 0;
+      valB = bState.daily?.length ?? 0;
+      break;
+    case 2:
+      valA = aState.daily?.filter(d => d.isStockout).length ?? 0;
+      valB = bState.daily?.filter(d => d.isStockout).length ?? 0;
+      break;
+    case 3:
+      valA = aState.daily?.filter(d => d.baseSource === 'stockout-lifted').length ?? 0;
+      valB = bState.daily?.filter(d => d.baseSource === 'stockout-lifted').length ?? 0;
+      break;
+    case 4:
+      valA = aState.daily?.filter(d => d.baseSource === 'promo-normalized').length ?? 0;
+      valB = bState.daily?.filter(d => d.baseSource === 'promo-normalized').length ?? 0;
+      break;
+    case 5:
+      valA = aState.cycles?.filter(c => c.locked).length ?? 0;
+      valB = bState.cycles?.filter(c => c.locked).length ?? 0;
+      break;
+    case 6:
+      valA = aState.classification?.annualValue ?? 0;
+      valB = bState.classification?.annualValue ?? 0;
+      break;
+    case 7: {
+      const adiA = aState.classification?.adi ?? 0;
+      const adiB = bState.classification?.adi ?? 0;
+      if (adiA !== adiB) {
+        return adiB - adiA;
+      }
+      valA = aState.classification?.cv2 ?? 0;
+      valB = bState.classification?.cv2 ?? 0;
+      break;
+    }
+    case 8:
+      valA = aState.serviceLevel ?? 0;
+      valB = bState.serviceLevel ?? 0;
+      break;
+    case 9: {
+      const order: Record<string, number> = { 'confirmed': 4, 'no-clear-season': 3, 'insufficient-structure': 2, 'not-applicable': 1 };
+      valA = order[aState.seasonality] ?? 0;
+      valB = order[bState.seasonality] ?? 0;
+      break;
+    }
+    case 10: {
+      const g1A = aState.trendRates?.[0] ?? 0;
+      const g2A = aState.trendRates?.[1] ?? 0;
+      const g1B = bState.trendRates?.[0] ?? 0;
+      const g2B = bState.trendRates?.[1] ?? 0;
+      valA = (Math.abs(g1A) + Math.abs(g2A)) / 2;
+      valB = (Math.abs(g1B) + Math.abs(g2B)) / 2;
+      break;
+    }
+    case 11:
+      valA = aState.forecast?.wape ?? 0;
+      valB = bState.forecast?.wape ?? 0;
+      break;
+    case 12:
+      valA = aState.promoFactor ?? 1;
+      valB = bState.promoFactor ?? 1;
+      break;
+    case 13:
+      valA = (aState.finalForecast ?? []).reduce((sum, v) => sum + v, 0);
+      valB = (bState.finalForecast ?? []).reduce((sum, v) => sum + v, 0);
+      break;
+    case 14:
+      valA = aState.freeStock ?? 0;
+      valB = bState.freeStock ?? 0;
+      break;
+    case 15:
+      valA = aState.safetyStock ?? 0;
+      valB = bState.safetyStock ?? 0;
+      break;
+    case 16:
+      valA = aState.orderPlan?.orderQuantity ?? 0;
+      valB = bState.orderPlan?.orderQuantity ?? 0;
+      break;
+    case 17: {
+      const cutA = aState.budgetAllocation?.cutQuantity ?? 0;
+      const cutB = bState.budgetAllocation?.cutQuantity ?? 0;
+      if (cutA !== cutB) {
+        return cutB - cutA;
+      }
+      valA = aState.budgetAllocation?.orderValue ?? 0;
+      valB = bState.budgetAllocation?.orderValue ?? 0;
+      break;
+    }
+    case 18:
+      valA = aState.releaseDecision?.reasons?.length ?? 0;
+      valB = bState.releaseDecision?.reasons?.length ?? 0;
+      break;
+    case 19: {
+      const wapeA = aState.postAudit?.forecastWape ?? 0;
+      const wapeB = bState.postAudit?.forecastWape ?? 0;
+      if (wapeA !== wapeB) {
+        return wapeB - wapeA;
+      }
+      valA = aState.postAudit?.stockoutUnits ?? 0;
+      valB = bState.postAudit?.stockoutUnits ?? 0;
+      break;
+    }
+  }
+
+  if (valA !== valB) {
+    return valB - valA;
+  }
+
+  return a.id.localeCompare(b.id);
 }

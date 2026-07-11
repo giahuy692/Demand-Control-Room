@@ -17,6 +17,10 @@
     </div>
 
     <div class="run-actions">
+      <div class="view-mode-switch" aria-label="Chế độ hiển thị">
+        <button type="button" [class.active]="currentView() === 'simulation'" (click)="setView('simulation')">Không gian mô phỏng</button>
+        <button type="button" [class.active]="currentView() === 'report'" (click)="setView('report')">Báo cáo so sánh</button>
+      </div>
       <div class="source-switch" aria-label="Nguồn dữ liệu mô phỏng">
         <button type="button" [class.active]="store.dataSource() === 'real'" [attr.aria-pressed]="store.dataSource() === 'real'" (click)="selectDataSource('real')" [disabled]="store.isRunning() || store.isLoadingDataSource()">Dữ liệu thật</button>
         <button type="button" [class.active]="store.dataSource() === 'mock'" [attr.aria-pressed]="store.dataSource() === 'mock'" (click)="selectDataSource('mock')" [disabled]="store.isRunning() || store.isLoadingDataSource()">Dữ liệu giả</button>
@@ -52,7 +56,8 @@
 
   @if (store.error()) { <div class="error-banner" role="alert"><b>Pipeline đã dừng.</b> {{ store.error() }}</div> }
 
-  <main class="main-grid" [class.audit-collapsed]="auditCollapsed()" [class.process-collapsed]="processCollapsed()" [class.context-collapsed]="contextCollapsed()" [style.--process-panel-width]="processPanelWidth() + 'px'">
+  @if (currentView() === 'simulation') {
+    <main class="main-grid" [class.audit-collapsed]="auditCollapsed()" [class.process-collapsed]="processCollapsed()" [class.context-collapsed]="contextCollapsed()" [style.--process-panel-width]="processPanelWidth() + 'px'">
     <section class="panel catalog-panel audit-explorer collapsible-panel" [class.collapsed]="auditCollapsed()" aria-labelledby="audit-explorer-title">
       @if (auditCollapsed()) {
         <button type="button" class="panel-collapse-rail" (click)="auditCollapsed.set(false)" aria-label="Mở rộng Audit Explorer" title="Mở rộng Audit Explorer"><i aria-hidden="true">»</i><b>AUDIT EXPLORER</b></button>
@@ -630,7 +635,15 @@
           @for (sku of visibleCatalog(); track sku.id) {
             <button type="button" class="sku-row" [class.selected]="sku.id === store.selectedSkuId()" (click)="selectSku(sku)" [attr.aria-selected]="sku.id === store.selectedSkuId()">
               <span class="sku-index">{{ sku.id.slice(-3) }}</span>
-              <span class="sku-copy"><b>{{ sku.name }}</b><small>{{ sku.category }} · {{ sku.description }}</small></span>
+              <span class="sku-copy">
+                <b>{{ sku.name }}</b>
+                <small>
+                  {{ sku.category }} · {{ sku.description }}
+                  @if (getSkuSortValueLabel(sku)) {
+                    · <span class="sku-sort-meta">{{ getSkuSortValueLabel(sku) }}</span>
+                  }
+                </small>
+              </span>
               <span class="sku-class" [class.pending]="!stateFor(sku.id)">{{ store.stageLabel(stateFor(sku.id)) }}</span>
             </button>
           }
@@ -748,6 +761,19 @@
       }
     </aside>
   </main>
+  } @else {
+    <app-comparison-report class="main-grid report-grid" />
+  }
+
+  @if (store.isGeneratingReportData()) {
+    <div class="report-loading-overlay" role="status">
+      <div class="loader-box">
+        <div class="loader-spinner"></div>
+        <p>Đang chạy mô phỏng 19 chặng của nguồn dữ liệu còn thiếu để lập báo cáo...</p>
+      </div>
+    </div>
+  }
+
   @if (journeyOpen()) { <app-journey-map (closed)="journeyOpen.set(false)" /> }
   @if (metricTip(); as tip) { <div class="metric-tooltip" role="tooltip" [style.left.px]="tip.x" [style.top.px]="tip.y">{{ tip.text }}</div> }
 

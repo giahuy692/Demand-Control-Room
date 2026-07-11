@@ -84,4 +84,15 @@ describe('real dataset import', () => {
     expect(dataset.audit[0]).toContain('demand-planning-real.json');
     expect(dataset.dateRange).toEqual({ min: '2026-01-01', max: '2026-01-02', recommendedRunDate: '2026-01-01' });
   });
+
+  it('giữ HasRecord=false khi JSON dùng 0 dạng string', () => {
+    const dataset = parseRealDataset(
+      JSON.stringify([
+        { SKU: 'P1', Date: '2026-01-01', OpenStock: 0, CloseStock: 0, Sales: 0, HasRecord: '0', ReceiptHour: null, PromoCode: null, Price: 100000 },
+      ]),
+      '[]',
+    );
+
+    expect(dataset.dailyBySku['P1'][0].hasRecord).toBe(false);
+  });
 });

@@ -145,6 +145,10 @@ export class SimulationStore {
   readonly error = signal<string | null>(null);
   readonly isRunning = signal(false);
 
+  readonly realFinalState = signal<Record<string, SkuPipelineState> | null>(null);
+  readonly mockFinalState = signal<Record<string, SkuPipelineState> | null>(null);
+  readonly isGeneratingReportData = signal(false);
+
   readonly currentSnapshot = computed(() => this.snapshots()[this.activeStage()] ?? null);
   readonly inputSnapshot = computed(() => {
     const stage = this.activeStage();
@@ -202,6 +206,8 @@ export class SimulationStore {
     this.snapshots.set({});
     this.completedStage.set(0);
     this.error.set(null);
+    this.realFinalState.set(null);
+    this.mockFinalState.set(null);
 
     return this.runThrough(recomputeTarget).then(() => this.activeStage.set(viewedStage));
   }
@@ -278,10 +284,63 @@ export class SimulationStore {
         this.completedStage.set(stage);
         this.snapshots.set({ ...nextSnapshots });
       }
+      if (targetStage >= 13) {
+        if (this.dataSource() === 'real') {
+          this.realFinalState.set(nextSnapshots[13]?.states ?? null);
+        } else {
+          this.mockFinalState.set(nextSnapshots[13]?.states ?? null);
+        }
+      }
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Pipeline đã dừng vì lỗi hợp đồng dữ liệu.');
     } finally {
       this.isRunning.set(false);
+    }
+  }
+
+  async generateReportData(): Promise<void> {
+    if (this.realFinalState() && this.mockFinalState()) return;
+    if (this.isGeneratingReportData()) return;
+    this.isGeneratingReportData.set(true);
+    try {
+      const originalSource = this.dataSource();
+      
+      // 1. Run for 'real' if missing
+      if (!this.realFinalState()) {
+        const dataset = await this.loadRealDataset();
+        this.engine.setDataset(dataset);
+        const nextSnapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
+        for (let number = 1; number <= 13; number++) {
+          const stage = number as StageNumber;
+          const previous = stage === 1 ? null : nextSnapshots[(stage - 1) as StageNumber] ?? null;
+          nextSnapshots[stage] = this.engine.run(stage, previous, this.policy());
+        }
+        this.realFinalState.set(nextSnapshots[13]?.states ?? null);
+      }
+
+      // 2. Run for 'mock' if missing
+      if (!this.mockFinalState()) {
+        this.engine.setDataset(null);
+        const nextSnapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
+        for (let number = 1; number <= 13; number++) {
+          const stage = number as StageNumber;
+          const previous = stage === 1 ? null : nextSnapshots[(stage - 1) as StageNumber] ?? null;
+          nextSnapshots[stage] = this.engine.run(stage, previous, this.policy());
+        }
+        this.mockFinalState.set(nextSnapshots[13]?.states ?? null);
+      }
+
+      // 3. Restore dataset in engine
+      if (originalSource === 'real') {
+        const dataset = await this.loadRealDataset();
+        this.engine.setDataset(dataset);
+      } else {
+        this.engine.setDataset(null);
+      }
+    } catch (error) {
+      console.error('Error generating report data:', error);
+    } finally {
+      this.isGeneratingReportData.set(false);
     }
   }
 
@@ -304,7 +363,10 @@ export class SimulationStore {
     if (this.realDataset) return this.realDataset;
     const [daily, products] = await Promise.all([
       this.fetchText('assets/demand-planning-real.json'),
-      this.fetchText('assets/List-product.json'),
+      // List-product.json là metadata bổ sung không bắt buộc (Price/ProductName giờ
+      // đã nằm sẵn trong từng dòng demand-planning-real.json) — thiếu file này
+      // không được chặn nạp dữ liệu thật.
+      this.fetchTextOptional('assets/List-product.json'),
     ]);
     this.realDataset = parseRealDataset(daily, products);
     return this.realDataset;
@@ -314,6 +376,14 @@ export class SimulationStore {
     const response = await fetch(path);
     if (!response.ok) throw new Error(`Không đọc được ${path} (${response.status}).`);
     return response.text();
+  }
+
+  private async fetchTextOptional(path: string): Promise<string> {
+    try {
+      return await this.fetchText(path);
+    } catch {
+      return '[]';
+    }
   }
 
   stageLabel(state: Readonly<SkuPipelineState> | null, stage = this.activeStage()): string {

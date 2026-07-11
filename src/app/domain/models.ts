@@ -16,6 +16,16 @@ export interface SimulationPolicy {
   maxBalancedPerSide: number;
   version: string;
   periodBudget: number;
+  /**
+   * Mã CTKM THƯỜNG TRỰC (chính sách giá cố định theo hạng khách hàng, ví dụ
+   * "GIẢM 5% GIÁ TỐT NHẤT - DÀNH RIÊNG KHTT") — khác CTKM CHIẾN DỊCH thời vụ.
+   * Các mã trong danh sách này bị loại khỏi promoCode trước Chặng 2, để những
+   * ngày CHỈ dính mã thường trực được coi là ngày bán bình thường (baseDemand
+   * = sales thật) thay vì luôn bị Chặng 3/4 chuẩn hóa về median ngày sạch.
+   * Rỗng theo mặc định — không tự đoán; chỉ điền sau khi người có thẩm quyền
+   * xác nhận từng mã qua bảng chẩn đoán (xem Sql/demand-planing.sql mục 9b).
+   */
+  standingPromotionCodes: readonly string[];
 }
 
 export interface SkuDefinition {
@@ -49,6 +59,15 @@ export interface DailyRecord {
   openStock: number;
   closeStock: number;
   sales: number;
+  /**
+   * false ⇔ ngày này KHÔNG có bản ghi giao dịch nguồn (POS event-driven: không
+   * phát sinh giao dịch thì không sinh dòng) — `sales` ở trên chỉ là placeholder
+   * 0, KHÔNG được coi là bán=0 đã xác nhận [nguyên tắc bất biến #2, C1 §3].
+   * openStock/closeStock vẫn tin được (tính từ sổ tồn kho, nguồn khác, độc lập
+   * với có giao dịch bán hay không). true ở mọi nơi khác (dữ liệu giả, hoặc
+   * dòng đã được nguồn xác nhận là bán=0 thật).
+   */
+  hasRecord: boolean;
   receiptHour: string | null;
   promoCode: string | null;
   isStockout: boolean;

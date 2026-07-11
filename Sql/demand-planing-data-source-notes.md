@@ -1313,3 +1313,124 @@ Ngoài ra, có 164/92.400 dòng (9 SKU) tồn âm (`OpenStock`/`CloseStock` < 0)
 hiệu ghi nhận chứng từ lệch thứ tự trong ERP nguồn (bán ghi trước, nhập kho ghi
 sau). Quy mô nhỏ, chỉ mới thêm bảng đếm ở mục "9c" của `demand-planing.sql`,
 chưa sửa vì không có căn cứ để đoán giá trị tồn đúng.
+
+## 13. Bộ dữ liệu thật thứ hai (2026-07-10, 19 SKU từ `demand-planning-real.txt`): nền CTKM ra 0 và câu hỏi "CTKM thường trực"
+
+Bộ dữ liệu thật khác (19 SKU, từ `src/assets/demand-planning-real.txt` — định dạng
+**thưa**, chỉ ghi dòng khi tồn/bán thay đổi, đã convert thành
+`src/assets/demand-planning-real.json` đủ một dòng/ngày, xác nhận
+`CloseStock[i-1] === OpenStock[i]` đúng 100% qua mọi khoảng hở trước khi mở rộng) cho
+kết quả Chặng 7: **0/19 SKU thuộc X hoặc Y**, dù raw sales cho thấy nhiều SKU bán rất
+tốt (ví dụ SKU `48902` CocaCola 160ml: 22.205 đơn vị/3 năm).
+
+**Cơ chế đã chứng minh:** với mọi 19 SKU, ngày "sạch" (không CTKM, không stockout) có tỷ
+lệ ngày bán > 0 rất thấp (0–42%), trong khi 40–100% tổng doanh số nằm trên ngày có
+CTKM. Chặng 4 tính `Bₜ = Median(ngày sạch quanh vùng)` đúng công thức §4 — nhưng vì ngày
+sạch gần như luôn bán = 0, median ra 0 cho hầu hết vùng CTKM, kéo `baseDemand` của phần
+lớn chu kỳ về 0, đẩy ADI > 1,32 → luôn rơi vào Z (không bao giờ đạt X/Y).
+
+Người dùng xác nhận (2026-07-10): CTKM **thường trực** (chính sách giá cố định theo hạng
+khách hàng, ví dụ "GIẢM 5% GIÁ TỐT NHẤT - DÀNH RIÊNG KHTT") nên được coi là một phần
+của nền bán bình thường, không phải nội dung Chặng 4 cần chuẩn hóa/loại bỏ.
+
+**Đã cài đặt (engine, không phải SQL, vì file `.txt` này đi thẳng vào app không qua
+`demand-planing.sql`):**
+
+- `SimulationPolicy.standingPromotionCodes` (`models.ts`) — danh sách mã CTKM thường
+  trực, rỗng theo mặc định.
+- `stripStandingPromoCodes()` (`math.ts`) — loại các mã này khỏi `promoCode` đã ghép
+  nhiều mã bằng `|`; ngày chỉ dính mã thường trực trở thành ngày không CTKM (bán bình
+  thường); nếu còn mã chiến dịch khác thì ngày đó vẫn là ngày CTKM.
+- Áp dụng ở Chặng 1 (`simulation-engine.ts::runStage1`), trước khi bất kỳ chặng nào
+  khác đọc `promoCode` — áp dụng cho toàn bộ `allRows` (kể cả phần dùng tính
+  `futurePromotions`), không chỉ phần `daily` đưa vào chu kỳ.
+- `DEFAULT_POLICY.standingPromotionCodes` (`policy.ts`) đã điền 19 mã xác nhận là
+  "GIẢM 5% GIÁ TỐT NHẤT/BEST PRICE - DÀNH RIÊNG KHTT" trên bộ 19 SKU này:
+  `-165, 17607, 17715, 17736, 27763, 27782, 27861, 27886, 27891, 27892, 27902, 27912,
+  27927, 38101, 38216, 38231, 38242, 38350, 38373`.
+
+**Kết quả thực tế sau khi cài (quan trọng — đọc kỹ):** áp danh sách trên vào Chặng 7
+**KHÔNG đổi bất kỳ SKU nào** (vẫn 0 X, 0 Y). Lý do: 19 mã "GIẢM 5%...KHTT" này chỉ hoạt
+động 2023–2024 (kiểm tra `first`/`last` từng mã), còn cửa sổ phân loại (24 chu kỳ gần
+`runDate` nhất, tức khoảng 2025-02 → 2026-02) đã KHÔNG còn mã nào trong số đó — chương
+trình giá cố định này có vẻ đã ngừng trước 2025.
+
+**Phát hiện mới, khác bản chất, cần quyết định riêng:** từ 2025 trở đi, mẫu hình chi
+phối không phải "một mã cố định" mà là **"HACHI KHUYẾN MÃI" chạy nối tiếp gần như mỗi
+tháng** (`(1/3-31/3)`, `(1/4-4/5)`, `(2/6-30/6)`, `(1/7-31/7)`, `(3/9-30/9)`,
+`(1/10-31/10)`, `(1/11-30/11)`, `(1/12-4/1)`...), gần như không có ngày trống giữa hai
+đợt. Đây là các chiến dịch **có tên, có khung ngày cụ thể, hợp lệ theo đúng nghĩa CTKM
+chiến dịch** — KHÁC bản chất với "giá cố định theo hạng khách hàng" mà bạn vừa xác nhận.
+Nhưng vì gần như không có ngày trống giữa các đợt, hệ quả toán học vẫn giống hệt: không
+đủ ngày sạch để làm nền tham chiếu. Đây là câu hỏi chính sách MỚI, chưa xin ý kiến:
+
+> Có nên coi các đợt CTKM chiến dịch chạy sát nhau, gần như liên tục quanh năm (không
+> phải giá cố định, mà là tần suất tổ chức) cũng là một phần của nền bình thường
+> không, hay giữ nguyên đúng theo Chặng 4 (chấp nhận baseDemand thấp/0 vì đó là thực
+> tế: SKU gần như chỉ bán được khi có chương trình)?
+
+Chưa tự quyết theo hướng nào — nếu chọn coi các đợt "HACHI KHUYẾN MÃI" hàng tháng là nền
+bình thường, cơ chế `standingPromotionCodes` đã có sẵn để áp dụng, chỉ cần điền đúng mã
+sau khi xác nhận.
+
+## 14. Root cause THẬT SỰ của "0 X, 0 Y" (2026-07-10, phát hiện sau khi người dùng tự
+    rà `demand-planing.sql`): ngày không có bản ghi bị coi nhầm là "bán = 0 đã xác nhận"
+
+Mục 12/13 ở trên đúng nhưng CHƯA phải nguyên nhân lớn nhất. Người dùng tự sửa
+`demand-planing.sql` thành bản dựng `#ProductDates` chỉ từ `#MovementDaily` (chỉ lấy
+ngày có phát sinh) và tự kiểm chứng: lọc `tbl_SALPoSDetails.Qty = 0` trên tập SKU đang
+chạy chỉ ra ĐÚNG 1 dòng — xác nhận `tbl_SALPoSDetails` là event-driven thật (chỉ sinh
+dòng khi Qty thay đổi, không sinh dòng Qty=0 cho ngày không bán).
+
+**Lỗi kép đã xác nhận:**
+
+1. Khi convert file thưa này thành dữ liệu dày (bản trước của tôi, mục 12), tôi đã tự
+   gán `Sales=0, OpenStock=CloseStock=(giá trị cuối đã biết)` cho MỌI ngày không có dòng
+   nguồn — vi phạm trực tiếp **nguyên tắc bất biến #2** của Developer Spec: *"Giá trị 0
+   là dữ liệu thật. Ngày không có bản ghi không được suy diễn thành bán = 0, tồn = 0 hay
+   stockout [C1 §3]"*.
+2. Hệ quả nghiêm trọng hơn cả việc tính sai MỘT ngày: những ngày "bán=0 giả định" này bị
+   engine dùng làm **NGÀY SẠCH THAM CHIẾU** cho các ngày CTKM/stockout ở gần nó (Chặng
+   3/4's `selectReferences`/`isObservedClean`) — tức là median tham chiếu của rất nhiều
+   ngày CTKM thật bị kéo về gần 0 bởi các ngày "sạch giả" chen vào, không phải vì SKU đó
+   thật sự không bán được ngoài CTKM (đây là lý do phát hiện mục 12 có vẻ đúng nhưng thật
+   ra chỉ là TRIỆU CHỨNG của lỗi này).
+
+**Đã sửa (cả engine lẫn 2 nguồn dữ liệu):**
+
+- `models.ts`: thêm `DailyRecord.hasRecord: boolean` — `false` ⇔ ngày scaffold không có
+  dòng nguồn; `sales` ở dòng đó chỉ là placeholder, không được tin.
+- `math.ts::isStockout`: nhánh `emptyAllDay` (cần Q=0 đã xác nhận) gate theo
+  `hasRecord`; nhánh `lateReceipt` không cần (tồn kho là nguồn độc lập, vẫn tin được).
+- `simulation-engine.ts`: `isObservedClean` gate theo `hasRecord` (ngày không có bản ghi
+  không bao giờ được chọn làm tham chiếu cho ngày khác); `runStage3` không tự nâng nền
+  cho ngày `!hasRecord` — gán thẳng `baseSource:'insufficient'`, giao **nguyên vẹn** cho
+  Chặng 5 lấp nền kỹ thuật (đúng yêu cầu: chỉ MỘT nơi quyết định lấp nền).
+- `tools/convert-real-data.mjs` (mới, thay bản nháp cũ): convert
+  `demand-planning-real.txt` → `demand-planning-real.json`, đánh dấu đúng
+  `HasRecord=true` cho ngày có dòng nguồn, `HasRecord=false` cho MỌI ngày còn lại
+  (không còn tự "chứng minh bằng sổ tồn kho" như bản nháp trước — giao hẳn cho Chặng 5).
+  Chạy lại: `npm run convert:real-data`.
+- `demand-planing.sql` mục 7/10: dựng lại trục thời gian **liên tục, một dòng/ngày**
+  (CTE đệ quy `#Dates`, neo theo ngày phát sinh đầu tiên của TỪNG SKU — không lùi về
+  `@StartDate` chung, đúng "SKU có dữ liệu một phần vẫn xử lý phần đang có" [C1]), thêm
+  cột `HasRecord`, và đổi OpenStock/CloseStock từ subquery tương quan O(n²) sang
+  `SUM() OVER` cộng dồn O(n log n) — vừa đúng lại vừa nhanh hơn khi trục thời gian dày
+  trở lại.
+
+**Kết quả thực nghiệm (bộ 19 SKU, so trước/sau):**
+
+| | Trước (sales=0 giả định cho ngày khuyết) | Sau (hasRecord, giao Chặng 5) |
+|---|---|---|
+| Chặng 7 | 0 X · 0 Y · 14 Z · 5 D | 15 X · 0 Y · 0 Z · 4 D |
+| SKU `33959` | Z, ADI=6,00 | X, ADI=1,00, CV²=0,032 |
+| SKU `48902` | D (m=0/24 — CocaCola 22.205 đv/3 năm bị coi "không nhu cầu") | X, n=18, m=18, ADI=1,00 |
+
+4 SKU còn `D` (`33970`, `55875`, `60537`, `164034`) là các SKU lịch sử thật sự ngắn/thưa
+(≤3 chu kỳ khóa được) — đúng bản chất `n<6`, không phải lỗi.
+
+**Việc cần làm tiếp:** đây là kết quả trên bộ 19 SKU export tay; cần chạy lại
+`demand-planing.sql` đã sửa trên DB thật để xác nhận `HasRecord` tính đúng ở quy mô lớn
+hơn, và xem lại câu hỏi "CTKM thường trực"/"HACHI KHUYẾN MÃI liên tục" ở mục 13 có còn
+đáng kể sau khi lỗi lớn hơn này đã sửa hay không (rất có thể một phần hiện tượng ở mục
+13 chỉ là triệu chứng phụ của lỗi này, cần đo lại trên dữ liệu đã sửa trước khi quyết).

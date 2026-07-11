@@ -6,7 +6,8 @@
     "start": "ng serve",
     "build": "ng build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "convert:real-data": "node tools/convert-real-data.mjs src/assets/demand-planning-real.txt src/assets/demand-planning-real.json"
   },
   "dependencies": {
     "@angular/common": "^21.2.0",
