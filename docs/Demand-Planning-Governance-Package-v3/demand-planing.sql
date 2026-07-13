@@ -46,7 +46,7 @@ DECLARE @FailOnStockMismatch bit = 1;
 DECLARE @RequireFullPostRunWindow bit = 1;
 DECLARE @RejectFutureSourceDate bit = 1;
 DECLARE @ShowDiagnostics bit = 1;
-DECLARE @OutputMode nvarchar(20) = N'ROWS'; -- ROWS hoặc APP_JSON.
+DECLARE @OutputMode nvarchar(20) = N'ROWS'; -- Chỉ ROWS. JSON payload tạo ở converter để tránh phụ thuộc FOR JSON.
 DECLARE @Tolerance decimal(38,6) = 0.000001;
 
 DECLARE @QueryVersion nvarchar(100) = N'demand-planing-v6-pos-real-backtest';
@@ -75,9 +75,9 @@ BEGIN
     RETURN;
 END;
 
-IF UPPER(@OutputMode) NOT IN (N'ROWS',N'APP_JSON')
+IF UPPER(@OutputMode)<>N'ROWS'
 BEGIN
-    RAISERROR(N'@OutputMode chỉ nhận ROWS hoặc APP_JSON.',16,1);
+    RAISERROR(N'@OutputMode hiện chỉ nhận ROWS. Hãy xuất 3 result set và dùng converter tạo JSON versioned.',16,1);
     RETURN;
 END;
 
@@ -859,27 +859,11 @@ OUTER APPLY
 
 CREATE UNIQUE CLUSTERED INDEX IX_DailyOutput ON #DailyOutput(SKU,[Date]);
 
-/* ============================== RESULT SET 1 =============================== */
-IF UPPER(@OutputMode)=N'APP_JSON'
-BEGIN
-    SELECT
-    (
-        SELECT
-            SKU,[Date],OpenStock,CloseStock,Sales,HasRecord,HasSalesRecord,
-            ReturnQty,HasReturnRecord,InventoryNetMovement,HasInventoryMovement,
-            TotalStockDelta,StockCalculationStatus,StockReconciliationStatus,
-            ReceiptHour,HasReceiptRecord,ReceiptTimeSource,ReceiptTimeQuality,
-            PromoCode,PromoName,PromoOverlapCount,Price,ProductName,
-            IsOpeningAnchor,IsReferenceOnly,IsHistoryRecord,IsValidationActual,
-            ExtractId,DataContractVersion,StoreCode,PriceObservedDate,PriceSource
-        FROM #DailyOutput
-        ORDER BY SKU,[Date]
-        FOR JSON PATH,INCLUDE_NULL_VALUES
-    ) AS DemandPlanningRealJson;
-
-    RETURN;
-END;
-
+/* ============================== RESULT SET 1 ===============================
+   Không dùng FOR JSON tại SQL để tránh lỗi parse trên SQL Server/compatibility
+   chưa hỗ trợ INCLUDE_NULL_VALUES. Converter sẽ nhận 3 result set/file riêng và
+   tạo payload DAILY-SOURCE-V2, giữ nguyên NULL.
+   ============================================================================ */
 SELECT *
 FROM #DailyOutput
 ORDER BY SKU,[Date];

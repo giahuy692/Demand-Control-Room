@@ -1,4 +1,4 @@
-import { DailyRecord, PortfolioMode, SkuDefinition } from './models';
+import { DailyRecord, DailySourceRecordV2, ExtractMetadata, HachiBusinessRole, PortfolioMode, SkuDefinition } from './models';
 
 export type DataSourceId = 'mock' | 'real';
 
@@ -136,10 +136,15 @@ function addDays(date: Date, amount: number): Date {
 // Mảng rỗng dùng chung cho mọi bản ghi chưa audit; applyReferenceAudit luôn thay bằng mảng mới nên không bị ghi đè.
 const EMPTY_DATES = Object.freeze([]) as unknown as string[];
 
-function dailyRecord(sku: string, date: string, openStock: number, closeStock: number, sales: number, receiptHour: string | null, promoCode: string | null, hasRecord = true): DailyRecord {
+/**
+ * Yêu cầu cập nhật nguồn dữ liệu thật §4 — `sales` nay là `number | null`: `null` khi không có bằng
+ * chứng bán POS thật trong ngày (khác `0` = có dòng bán thật với tổng Qty bằng 0). Dữ liệu giả
+ * (`generateDailyRecords`) luôn truyền số cụ thể nên không đổi hành vi cũ.
+ */
+function dailyRecord(sku: string, date: string, openStock: number, closeStock: number, sales: number | null, receiptHour: string | null, promoCode: string | null, hasRecord = true): DailyRecord {
   return {
     sku, date, openStock, closeStock, sales, hasRecord, receiptHour, promoCode,
-    salesStatus: hasRecord ? (sales > 0 ? 'OBSERVED' : 'OBSERVED_ZERO') : 'SOURCE_UNKNOWN', isReferenceOnly: false,
+    salesStatus: sales === null ? 'SOURCE_UNKNOWN' : sales > 0 ? 'OBSERVED' : 'OBSERVED_ZERO', isReferenceOnly: false,
     // Dữ liệu giả/nguồn thật trước scaffold luôn coi là đã tính được (không có mốc bị thiếu);
     // buildCalendarScaffold() sẽ tính lại đúng theo bất biến RULE-02-003 khi ghép vào lịch liên tục.
     stockSource: 'OBSERVED', stockCalculationStatus: openStock < 0 || closeStock < 0 ? 'NEGATIVE_REVIEW' : 'CALCULATED',
@@ -210,21 +215,6 @@ export function generateDailyRecords(definition: SkuDefinition, runDate: string,
   return records;
 }
 
-interface ParsedDailyRow {
-  readonly sku: string | null;
-  readonly date: string | null;
-  readonly openStock: number;
-  readonly closeStock: number;
-  readonly sales: number;
-  // false ⇔ dòng không phải bản ghi nguồn đã xác nhận (giữ để đọc lại file cũ).
-  // Cột tùy chọn: vắng mặt nghĩa là true, tương thích ngược với actual-record.
-  readonly hasRecord: boolean;
-  readonly receiptHour: string | null;
-  readonly promoCode: string | null;
-  readonly price: number;
-  readonly name: string | null;
-}
-
 interface ProductMeta {
   readonly name: string | null;
   readonly category: string;
@@ -234,9 +224,93 @@ interface ProductMeta {
   readonly description?: string;
 }
 
-export function parseRealDataset(dailyPayload: string, productPayload: string): SimulationDataset {
+/**
+ * RESULT SET 3 (`ExtractMetadata`) của `Sql/demand-planing.sql` (demand-planing-v6-pos-real-backtest),
+ * đọc từ asset JSON RIÊNG, optional — xem ghi chú ở `SimulationStore.loadRealDataset`. Trả `null` khi
+ * payload rỗng/không hợp lệ — caller PHẢI giữ mặc định bảo thủ hiện có, không suy diễn.
+ */
+export function parseExtractMetadata(payload: string): ExtractMetadata | null {
+  if (!payload || !payload.trim()) return null;
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    // fetchTextOptional() trả về '[]' khi asset vắng mặt (quy ước dùng chung cho các asset optional dạng
+    // mảng như List-product.json) — ExtractMetadata là MỘT object, nên mảng/giá trị không phải object đều
+    // coi như "chưa có metadata", không phải "metadata rỗng".
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const raw = parsed as Record<string, unknown>;
+    const portfolioModeText = textCell(raw['PortfolioMode']);
+    // SINGLE_SKU_DIAGNOSTIC (02-Hop-dong-du-lieu-dau-vao.md §3.3) chưa có khái niệm tương ứng trong
+    // PortfolioMode nội bộ — quy về SELECTED_SKU_SIMULATION (bảo thủ, không tự nhận FULL_PORTFOLIO).
+    const portfolioMode: PortfolioMode = portfolioModeText === 'FULL_PORTFOLIO' || portfolioModeText === 'USE_APPROVED_SNAPSHOT' ? portfolioModeText : 'SELECTED_SKU_SIMULATION';
+    const gateText = textCell(raw['StockReconciliationGate']);
+    return {
+      extractId: textCell(raw['ExtractId']) ?? '',
+      queryVersion: textCell(raw['QueryVersion']) ?? '',
+      dataContractVersion: textCell(raw['DataContractVersion']) ?? '',
+      runMode: textCell(raw['RunMode']) ?? '',
+      runDate: textCell(raw['RunDate']) ?? '',
+      historyCandidateStartDate: textCell(raw['HistoryCandidateStartDate']) ?? '',
+      processingStartDate: textCell(raw['ProcessingStartDate']) ?? '',
+      processingEndDate: textCell(raw['ProcessingEndDate']) ?? '',
+      referenceReadStartDate: textCell(raw['ReferenceReadStartDate']) ?? '',
+      actualValidationEndDate: textCell(raw['ActualValidationEndDate']) ?? '',
+      databaseWatermarkDate: textCell(raw['DatabaseWatermarkDate']) ?? '',
+      cycleLengthDays: numberCell(raw['CycleLengthDays'], 0),
+      fullCycleCount: numberCell(raw['FullCycleCount'], 0),
+      droppedLeadingDays: numberCell(raw['DroppedLeadingDays'], 0),
+      storeCode: textCell(raw['StoreCode']) ?? '',
+      selectedSkuCount: numberCell(raw['SelectedSkuCount'], 0),
+      portfolioMode,
+      extractIsTruncated: booleanCell(raw['ExtractIsTruncated'], true),
+      stockAnchorAssumption: textCell(raw['StockAnchorAssumption']) ?? '',
+      // Gate vắng mặt/không hợp lệ được coi là FAIL — không được mặc định PASS khi chưa chắc chắn.
+      stockReconciliationGate: gateText === 'PASS' ? 'PASS' : 'FAIL',
+      stockMismatchSkuCount: numberCell(raw['StockMismatchSkuCount'], 0),
+      dailySourceRecordCount: numberCell(raw['DailySourceRecordCount'], 0),
+      promotionIntervalCount: numberCell(raw['PromotionIntervalCount'], 0),
+      generatedAt: textCell(raw['GeneratedAt']) ?? '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * §7 LỆNH CODEX — benchmark HachiBusinessRole, nạp từ asset JSON RIÊNG (`src/assets/hachi-business-roles.json`),
+ * KHÔNG phải từ pipeline SQL/ingest thật. Trả map rỗng khi payload rỗng/không hợp lệ — không bao giờ suy đoán.
+ */
+export function parseHachiBusinessRoles(payload: string): Readonly<Record<string, HachiBusinessRole>> {
+  if (!payload || !payload.trim()) return {};
+  const VALID_ROLES: readonly HachiBusinessRole[] = ['CORE', 'SEASONAL', 'MARGIN', 'TRAFFIC', 'NEW', 'STANDARD'];
+  try {
+    const rows = JSON.parse(payload) as unknown;
+    if (!Array.isArray(rows)) return {};
+    const map: Record<string, HachiBusinessRole> = {};
+    for (const raw of rows) {
+      const row = raw as Record<string, unknown>;
+      const sku = textCell(row['SKU'] ?? row['sku']);
+      const role = textCell(row['HachiBusinessRole'] ?? row['BusinessRole']) as HachiBusinessRole | null;
+      if (sku && role && VALID_ROLES.includes(role)) map[sku] = role;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+export function parseRealDataset(dailyPayload: string, productPayload: string, extractMetadataPayload = ''): SimulationDataset {
   const dailySourceName = isJsonPayload(dailyPayload) ? 'demand-planning-real.json' : 'demand-planning-real.csv';
   const productById = parseProducts(productPayload);
+  // §9 — đọc ExtractMetadata thật khi asset có sẵn thay vì hard-code; vắng mặt thì GIỮ mặc định
+  // bảo thủ cũ (SELECTED_SKU_SIMULATION/extractIsTruncated=true), không suy diễn ngược từ dữ liệu daily.
+  const extractMetadata = parseExtractMetadata(extractMetadataPayload);
+  // §9 Yêu cầu cập nhật nguồn dữ liệu thật — gate đối soát tồn PHẢI PASS trước khi dữ liệu được nạp vào
+  // mô phỏng; khi metadata có mặt nhưng gate FAIL, KHÔNG được fallback âm thầm sang dữ liệu giả.
+  if (extractMetadata && extractMetadata.stockReconciliationGate !== 'PASS') {
+    throw new Error(`ExtractMetadata.StockReconciliationGate=FAIL (${extractMetadata.stockMismatchSkuCount} SKU lệch tồn) — không nạp dữ liệu thật vào mô phỏng. Kiểm tra lại mapping/lịch sử nguồn trước khi export lại.`);
+  }
+  const portfolioMode: PortfolioMode = extractMetadata?.portfolioMode ?? 'SELECTED_SKU_SIMULATION';
+  const extractIsTruncated = extractMetadata ? extractMetadata.portfolioMode !== 'FULL_PORTFOLIO' : true;
   const dailyBySku: Record<string, DailyRecord[]> = {};
   const dailyMeta = new Map<string, { price: number; name: string | null }>();
 
@@ -244,6 +318,10 @@ export function parseRealDataset(dailyPayload: string, productPayload: string): 
     const sku = row.sku;
     const date = row.date;
     if (!sku || !date) continue;
+    // §4/§6 — không ép record thô vào DailyRecord quá sớm: chỉ opening-anchor bị loại hẳn (chỉ dùng để
+    // thiết lập trạng thái tồn trước khung đọc, không phải ngày lịch sử); mọi ngày khác giữ nguyên, kể
+    // cả `sales=null` (hasSalesRecord=false) — buildCalendarScaffold ở Chặng 1 xử lý phần còn lại.
+    if (row.isOpeningAnchor) continue;
     (dailyBySku[sku] ??= []).push(dailyRecord(
       sku,
       date,
@@ -255,7 +333,7 @@ export function parseRealDataset(dailyPayload: string, productPayload: string): 
       row.hasRecord,
     ));
     const current = dailyMeta.get(sku);
-    if (!current || (!current.name && row.name) || (!current.price && row.price)) dailyMeta.set(sku, { price: row.price || current?.price || 0, name: row.name ?? current?.name ?? null });
+    if (!current || (!current.name && row.productName) || (!current.price && row.price)) dailyMeta.set(sku, { price: row.price || current?.price || 0, name: row.productName ?? current?.name ?? null });
   }
 
   const catalog = Object.keys(dailyBySku).sort().map(id => {
@@ -304,11 +382,10 @@ export function parseRealDataset(dailyPayload: string, productPayload: string): 
       landedCostPerUnit: null,
       coreOrStrategicRole: 'normal' as const,
       obsolescenceRiskRank: 0,
-      // RULE-01-004 — chưa có ExtractMetadata.PortfolioMode thật trong pipeline ingest hiện tại
-      // (tools/convert-real-data.mjs không mang metadata này) — mặc định bảo thủ, không tự nhận
-      // là toàn danh mục. Sao chép từ dataset-level portfolioMode/extractIsTruncated bên dưới.
-      portfolioMode: 'SELECTED_SKU_SIMULATION' as const,
-      extractIsTruncated: true,
+      // §9 LỆNH CODEX/RULE-01-004 — đọc từ ExtractMetadata khi có (xem trên); vắng mặt thì bảo thủ
+      // SELECTED_SKU_SIMULATION/true như trước, không tự nhận là toàn danh mục.
+      portfolioMode,
+      extractIsTruncated,
     };
   });
 
@@ -316,58 +393,93 @@ export function parseRealDataset(dailyPayload: string, productPayload: string): 
   const allDates = Object.values(dailyBySku).flatMap(rows => rows.map(row => row.date)).sort();
   const minDate = allDates[0];
   const maxDate = allDates.at(-1)!;
-  const recommendedRunDate = `${maxDate.slice(0, 8)}01`;
+  // §6 — recommendedRunDate PHẢI ưu tiên ExtractMetadata.RunDate (ngày chạy chính thức của lượt trích
+  // xuất); chỉ suy ra ngày đầu tháng từ maxDate khi hoàn toàn không có metadata.
+  const recommendedRunDate = extractMetadata?.runDate || `${maxDate.slice(0, 8)}01`;
   return {
     source: 'real',
     label: 'Dữ liệu thật',
     catalog,
     dailyBySku,
     dateRange: { min: minDate, max: maxDate, recommendedRunDate },
-    // RULE-01-004 — xem chú thích SimulationDataset.portfolioMode: mặc định bảo thủ vì
-    // demand-planing-v3.sql ExtractMetadata (§02) chưa được ingest bởi pipeline hiện tại.
-    portfolioMode: 'SELECTED_SKU_SIMULATION',
-    extractIsTruncated: true,
-    audit: [`Đọc ${catalog.length} SKU và ${Object.values(dailyBySku).reduce((sum, rows) => sum + rows.length, 0)} dòng daily từ ${dailySourceName}.`],
+    // §9 — đọc từ ExtractMetadata khi asset có sẵn; vắng mặt thì giữ mặc định bảo thủ cũ (RESULT SET 3
+    // chưa được ingest — xem `parseExtractMetadata`).
+    portfolioMode,
+    extractIsTruncated,
+    audit: [
+      `Đọc ${catalog.length} SKU và ${Object.values(dailyBySku).reduce((sum, rows) => sum + rows.length, 0)} dòng daily từ ${dailySourceName}.`,
+      extractMetadata
+        ? `[§9][ExtractMetadata] Đã đọc extractId=${extractMetadata.extractId || '—'}, queryVersion=${extractMetadata.queryVersion || '—'}, gate=${extractMetadata.stockReconciliationGate} — portfolioMode/extractIsTruncated/recommendedRunDate lấy từ metadata thật.`
+        : `[§9][ExtractMetadata] Không có asset ExtractMetadata trong pipeline ingest hiện tại — giữ mặc định bảo thủ portfolioMode=SELECTED_SKU_SIMULATION/extractIsTruncated=true, recommendedRunDate suy từ maxDate.`,
+    ],
   };
 }
 
-function parseDailyPayload(payload: string, sourceName: string): ParsedDailyRow[] {
-  if (isJsonPayload(payload)) return parseDailyJson(payload, sourceName);
-  return parseCsv(payload).map((row, index) => {
-    if (row.length < 9) throw new Error(`${sourceName} thiếu cột bắt buộc SKU, Date, OpenStock, CloseStock, Sales, ReceiptHour, PromoCode, PromoName, Price.`);
-    return {
-      sku: textCell(row[0]),
-      date: textCell(row[1]),
-      openStock: requiredNumber(row[2], `${sourceName} dòng ${index + 1}: OpenStock`),
-      closeStock: requiredNumber(row[3], `${sourceName} dòng ${index + 1}: CloseStock`),
-      sales: requiredNumber(row[4], `${sourceName} dòng ${index + 1}: Sales`),
-      hasRecord: true,
-      receiptHour: textCell(row[5]),
-      promoCode: textCell(row[6]) ?? textCell(row[7]),
-      price: numberCell(row[8], 0),
-      name: textCell(row[9]),
-    };
-  });
+/**
+ * Yêu cầu cập nhật nguồn dữ liệu thật §4/§6 — một cặp giá trị/cờ (Sales/HasSalesRecord,
+ * ReturnQty/HasReturnRecord, InventoryNetMovement/HasInventoryMovement) trong hợp đồng DAILY-SOURCE-V2.
+ * Bất biến bắt buộc: `hasRecord=false ⇒ value=null` và `hasRecord=true ⇒ value là số cụ thể`. Không bao
+ * giờ suy diễn 0 khi không có bằng chứng, không bao giờ giữ số khi cờ nói không có bằng chứng.
+ */
+function parseNullablePair(row: Record<string, unknown>, valueKey: string, flagKey: string, sourceName: string, index: number, required: boolean): { value: number | null; hasRecord: boolean } {
+  if (row[flagKey] === undefined) {
+    if (required) throw new Error(`${sourceName} dòng ${index + 1}: thiếu cột ${flagKey} (hợp đồng DAILY-SOURCE-V2 bắt buộc).`);
+    return { value: null, hasRecord: false };
+  }
+  const hasRecord = booleanCell(row[flagKey], false);
+  const rawValue = textCell(row[valueKey]);
+  if (hasRecord && rawValue === null) throw new Error(`${sourceName} dòng ${index + 1}: ${flagKey}=true nhưng ${valueKey} rỗng.`);
+  if (!hasRecord && rawValue !== null) throw new Error(`${sourceName} dòng ${index + 1}: ${flagKey}=false nhưng ${valueKey}=${rawValue} — vi phạm bất biến null/0 (không được suy diễn số khi không có bằng chứng).`);
+  return { value: hasRecord ? requiredNumber(row[valueKey], `${sourceName} dòng ${index + 1}: ${valueKey}`) : null, hasRecord };
 }
 
-function parseDailyJson(payload: string, sourceName: string): ParsedDailyRow[] {
+const RECEIPT_TIME_SOURCES: readonly string[] = ['RECEIPT_DATE', 'CREATE_TIME_FALLBACK', 'UNRESOLVED'];
+
+/**
+ * Parse MỘT dòng thô (đã ở dạng key/value — JSON row hoặc CSV row đã map theo header) thành
+ * `DailySourceRecordV2`. Dùng chung cho cả JSON và CSV để không lặp logic validate hai lần.
+ */
+function parseDailySourceRow(row: Record<string, unknown>, sourceName: string, index: number): DailySourceRecordV2 {
+  const sales = parseNullablePair(row, 'Sales', 'HasSalesRecord', sourceName, index, true);
+  const returns = parseNullablePair(row, 'ReturnQty', 'HasReturnRecord', sourceName, index, false);
+  const movement = parseNullablePair(row, 'InventoryNetMovement', 'HasInventoryMovement', sourceName, index, false);
+  const receiptTimeSourceText = textCell(row['ReceiptTimeSource']);
+  const priceText = textCell(row['Price']);
+  return {
+    sku: textCell(row['SKU'] ?? row['sku']) ?? '',
+    date: textCell(row['Date'] ?? row['date']) ?? '',
+    openStock: requiredNumber(row['OpenStock'], `${sourceName} dòng ${index + 1}: OpenStock`),
+    closeStock: requiredNumber(row['CloseStock'], `${sourceName} dòng ${index + 1}: CloseStock`),
+    sales: sales.value,
+    hasSalesRecord: sales.hasRecord,
+    returnQty: returns.value,
+    hasReturnRecord: returns.hasRecord,
+    inventoryNetMovement: movement.value,
+    hasInventoryMovement: movement.hasRecord,
+    totalStockDelta: numberCell(row['TotalStockDelta'], 0),
+    receiptHour: textCell(row['ReceiptHour']),
+    hasReceiptRecord: booleanCell(row['HasReceiptRecord'], false),
+    receiptTimeSource: receiptTimeSourceText && RECEIPT_TIME_SOURCES.includes(receiptTimeSourceText) ? receiptTimeSourceText as DailySourceRecordV2['receiptTimeSource'] : null,
+    promoCode: textCell(row['PromoCode']) ?? textCell(row['PromoName']),
+    promoName: textCell(row['PromoName']),
+    price: priceText === null ? null : numberCell(row['Price'], 0),
+    productName: textCell(row['ProductName']),
+    hasRecord: true,
+    isOpeningAnchor: booleanCell(row['IsOpeningAnchor'], false),
+    isReferenceOnly: booleanCell(row['IsReferenceOnly'], false),
+    isHistoryRecord: booleanCell(row['IsHistoryRecord'], false),
+    isValidationActual: booleanCell(row['IsValidationActual'], false),
+  };
+}
+
+function parseDailyPayload(payload: string, sourceName: string): DailySourceRecordV2[] {
+  if (isJsonPayload(payload)) return parseDailyJson(payload, sourceName);
+  return parseCsvWithHeader(payload, sourceName).map((row, index) => parseDailySourceRow(row, sourceName, index));
+}
+
+function parseDailyJson(payload: string, sourceName: string): DailySourceRecordV2[] {
   const rows = parseJsonArray(payload, sourceName);
-  return rows.map((raw, index) => {
-    const row = raw as Record<string, unknown>;
-    return {
-      sku: textCell(row['SKU'] ?? row['sku']),
-      date: textCell(row['Date'] ?? row['date']),
-      openStock: requiredNumber(row['OpenStock'], `${sourceName} dòng ${index + 1}: OpenStock`),
-      closeStock: requiredNumber(row['CloseStock'], `${sourceName} dòng ${index + 1}: CloseStock`),
-      sales: requiredNumber(row['Sales'], `${sourceName} dòng ${index + 1}: Sales`),
-      // Vắng cột HasRecord (định dạng actual-record cũ) = true.
-      hasRecord: booleanCell(row['HasRecord'], true),
-      receiptHour: textCell(row['ReceiptHour']),
-      promoCode: textCell(row['PromoCode']) ?? textCell(row['PromoName']),
-      price: numberCell(row['Price'], 0),
-      name: textCell(row['ProductName']),
-    };
-  });
+  return rows.map((raw, index) => parseDailySourceRow(raw as Record<string, unknown>, sourceName, index));
 }
 
 function parseProducts(payload: string): Map<string, ProductMeta> {
@@ -408,6 +520,21 @@ function parseProducts(payload: string): Map<string, ProductMeta> {
     });
   }
   return products;
+}
+
+/**
+ * Yêu cầu cập nhật nguồn dữ liệu thật §6 — CSV giờ đọc theo TÊN HEADER (dòng đầu tiên), không còn theo
+ * vị trí cột cố định, để khớp đúng tên cột của hợp đồng DAILY-SOURCE-V2 (SKU/Date/OpenStock/.../
+ * IsValidationActual) bất kể thứ tự cột trong file export.
+ */
+function parseCsvWithHeader(payload: string, sourceName: string): Record<string, string>[] {
+  const rows = parseCsv(payload);
+  if (!rows.length) return [];
+  const header = rows[0].map(cell => cell.trim());
+  return rows.slice(1).map((row, index) => {
+    if (row.length !== header.length) throw new Error(`${sourceName} dòng ${index + 2}: số cột (${row.length}) không khớp header (${header.length}).`);
+    return Object.fromEntries(header.map((name, column) => [name, row[column]]));
+  });
 }
 
 function isJsonPayload(payload: string): boolean {

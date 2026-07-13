@@ -1,0 +1,16 @@
+[
+  { "SKU": "SKU-001", "HachiBusinessRole": "CORE", "_note": "Mẫu minh họa cho catalog giả AX-stable — KHÔNG PHẢI benchmark thật của Hachi." },
+  { "SKU": "SKU-002", "HachiBusinessRole": "SEASONAL", "_note": "Mẫu minh họa — AY-seasonal, dùng để kiểm thử đối chiếu với Chặng 9." },
+  { "SKU": "SKU-003", "HachiBusinessRole": "STANDARD" },
+  { "SKU": "SKU-004", "HachiBusinessRole": "CORE" },
+  { "SKU": "SKU-005", "HachiBusinessRole": "STANDARD" },
+  { "SKU": "SKU-006", "HachiBusinessRole": "MARGIN", "_note": "Mẫu minh họa — landedCostPerUnit hiện luôn null nên đối chiếu MARGIN sẽ ra NOT_COMPARABLE_WITH_CURRENT_DATA." },
+  { "SKU": "SKU-007", "HachiBusinessRole": "NEW" },
+  { "SKU": "SKU-008", "HachiBusinessRole": "STANDARD" },
+  { "SKU": "SKU-009", "HachiBusinessRole": "TRAFFIC" },
+  { "SKU": "SKU-010", "HachiBusinessRole": "STANDARD" },
+  { "SKU": "SKU-011", "HachiBusinessRole": "NEW" },
+  { "SKU": "SKU-012", "HachiBusinessRole": "NEW" },
+  { "SKU": "SKU-013", "HachiBusinessRole": "NEW" },
+  { "SKU": "SKU-014", "HachiBusinessRole": "STANDARD" }
+]

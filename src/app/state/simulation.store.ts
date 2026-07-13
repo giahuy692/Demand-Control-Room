@@ -1,9 +1,52 @@
 import { computed, Injectable, signal } from '@angular/core';
-import { buildCatalog, DataSourceId, parseRealDataset, SimulationDataset } from '../domain/catalog';
+import { buildCatalog, DataSourceId, parseHachiBusinessRoles, parseRealDataset, SimulationDataset } from '../domain/catalog';
 import { SimulationEngine } from '../domain/simulation-engine';
 import { DEFAULT_POLICY, STAGES } from '../domain/policy';
 import { getStageFormulas } from '../domain/formula-registry';
-import { SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, StageViewModel } from '../domain/models';
+import { BusinessRoleComparisonConclusion, BusinessRoleComparisonRow, ExceptionCode, ExceptionTask, HachiBusinessRole, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, StageViewModel } from '../domain/models';
+
+/** §6.2 LỆNH CODEX — hai nhóm mức độ nghiêm trọng để lọc hàng đợi ngoại lệ trong UI. */
+const BLOCKING_EXCEPTION_CODES: readonly ExceptionCode[] = ['ABC_INPUT_BLOCKED', 'CLASSIFICATION_BLOCKED', 'FORECAST_INPUT_BLOCKED', 'CYCLE_EXCEPTION'];
+export function exceptionSeverity(code: ExceptionCode): 'BLOCKING' | 'REVIEW' {
+  return BLOCKING_EXCEPTION_CODES.includes(code) ? 'BLOCKING' : 'REVIEW';
+}
+
+/**
+ * §7.1 LỆNH CODEX — quy tắc đối chiếu HachiBusinessRole (benchmark, KHÔNG dùng làm đầu vào tính toán) với kết
+ * quả hệ thống tính ĐỘC LẬP. CORE/MARGIN/TRAFFIC/STANDARD không thể suy ra trực tiếp từ demand đơn lẻ — chỉ
+ * đối chiếu tham khảo hoặc báo NOT_COMPARABLE_WITH_CURRENT_DATA khi thiếu dữ liệu cần thiết (giá vốn/biên lợi
+ * nhuận cho MARGIN, giỏ hàng/lượt khách cho TRAFFIC).
+ */
+function compareBusinessRole(role: HachiBusinessRole, state: Readonly<SkuPipelineState>): { conclusion: BusinessRoleComparisonConclusion; comparableLevel: string; systemResult: string; reason: string } {
+  const { abc, xyz, classificationStatus } = state.classification;
+  const systemResult = `ABC=${abc} · XYZ/D=${xyz ?? classificationStatus} · Mùa vụ=${state.seasonality} · Mô hình=${state.forecast?.model ?? 'Chưa có'}`;
+  if (role === 'SEASONAL') {
+    const level = 'Đối chiếu được với kết quả mùa vụ Chặng 9';
+    if (state.seasonality === 'confirmed') return { conclusion: 'ALIGNED', comparableLevel: level, systemResult, reason: 'Hệ thống xác nhận mùa vụ (Chặng 9) khớp benchmark SEASONAL.' };
+    if (state.seasonality === 'no-clear-season') return { conclusion: 'POSSIBLE_DIFFERENCE', comparableLevel: level, systemResult, reason: 'Hệ thống không thấy mùa vụ rõ dù benchmark gắn SEASONAL — cần rà soát thêm, không kết luận benchmark sai.' };
+    return { conclusion: 'INVESTIGATION_REQUIRED', comparableLevel: level, systemResult, reason: 'Chưa đủ cấu trúc/chuỗi để hệ thống kết luận mùa vụ (insufficient-structure/not-applicable).' };
+  }
+  if (role === 'NEW') {
+    const level = 'Chỉ đối chiếu được khi có ProductLifecycleRecord (hiện chưa nạp cho SKU này)';
+    return { conclusion: 'NOT_COMPARABLE_WITH_CURRENT_DATA', comparableLevel: level, systemResult, reason: 'Chưa có ProductLifecycleRecord chính thức — không được suy ra vòng đời chỉ từ HachiBusinessRole=NEW.' };
+  }
+  if (role === 'CORE') {
+    const level = 'Không suy ra trực tiếp từ demand — chỉ đối chiếu tham khảo với ABC, mức phục vụ và độ ổn định';
+    if (classificationStatus === 'CLASSIFICATION_BLOCKED' || abc === 'N/A') return { conclusion: 'INVESTIGATION_REQUIRED', comparableLevel: level, systemResult, reason: 'Hệ thống chưa xếp hạng được ABC/XYZ cho SKU này (đứt quãng hoặc thiếu dữ liệu).' };
+    if (abc === 'A') return { conclusion: 'ALIGNED', comparableLevel: level, systemResult, reason: 'ABC=A tham khảo phù hợp với vai trò CORE (chỉ mang tính tham khảo, không phải bằng chứng đầy đủ).' };
+    return { conclusion: 'POSSIBLE_DIFFERENCE', comparableLevel: level, systemResult, reason: `ABC=${abc} không nằm ở nhóm giá trị cao nhất — khác trục phân loại với CORE, không kết luận "sai".` };
+  }
+  if (role === 'MARGIN') {
+    const level = 'Cần giá vốn/biên lợi nhuận (landedCostPerUnit)';
+    if (state.definition.landedCostPerUnit === null) return { conclusion: 'NOT_COMPARABLE_WITH_CURRENT_DATA', comparableLevel: level, systemResult, reason: 'Thiếu landedCostPerUnit — không nhận diện được vai trò MARGIN chỉ từ dữ liệu demand.' };
+    return { conclusion: 'INVESTIGATION_REQUIRED', comparableLevel: level, systemResult, reason: 'Có landedCostPerUnit nhưng hệ thống chưa có ngưỡng biên lợi nhuận chính thức để tự kết luận.' };
+  }
+  if (role === 'TRAFFIC') {
+    return { conclusion: 'NOT_COMPARABLE_WITH_CURRENT_DATA', comparableLevel: 'Cần dữ liệu giỏ hàng/lượt khách (chưa có nguồn nào trong app)', systemResult, reason: 'Không có dữ liệu giỏ hàng/lượt khách — không thể nhận diện vai trò TRAFFIC từ demand SKU đơn lẻ.' };
+  }
+  // STANDARD — vai trò vận hành mặc định, không phải lớp demand pattern nên không đối chiếu.
+  return { conclusion: 'NOT_EVALUATED', comparableLevel: 'Vai trò vận hành mặc định, không phải lớp demand pattern', systemResult, reason: 'STANDARD không mang tín hiệu demand pattern để đối chiếu.' };
+}
 
 // toLocaleString tạo Intl.NumberFormat mới mỗi lần gọi — cache theo số chữ số để tránh chi phí đó trên đường render.
 const NUMBER_FORMATS = new Map<number, Intl.NumberFormat>();
@@ -167,6 +210,7 @@ export class SimulationStore {
       state: outputState,
       summary: snapshot?.summary ?? {},
       audit: snapshot?.audit ?? [],
+      exceptions: snapshot?.exceptions ?? [],
       inputs: createInputs(stage, stage === 1 ? outputState : inputState, this.policy()),
       calculations: createCalculations(stage, outputState),
       outputs: createOutputs(stage, outputState),
@@ -174,7 +218,39 @@ export class SimulationStore {
     };
   });
 
+  // ── §6.1 LỆNH CODEX — hàng đợi ngoại lệ gộp từ mọi chặng đã chạy, dedupe theo id (mỗi StageSnapshot.exceptions
+  // chỉ chứa ngoại lệ MỚI của riêng chặng đó — xem models.ts) ──
+  readonly allExceptions = computed<ExceptionTask[]>(() => {
+    const byId = new Map<string, ExceptionTask>();
+    for (const snapshot of Object.values(this.snapshots())) {
+      for (const task of snapshot!.exceptions) byId.set(task.id, task);
+    }
+    return [...byId.values()];
+  });
+  readonly selectedSkuExceptions = computed(() => this.allExceptions().filter(task => task.skuId === this.selectedSkuId()));
+  readonly activeStageExceptions = computed(() => this.allExceptions().filter(task => task.stage === this.activeStage()));
+  readonly selectedSkuCycleExceptions = computed(() => this.selectedSkuExceptions().filter(task => (task.cycleIndexes?.length ?? 0) > 0));
+
+  // ── §7 LỆNH CODEX — benchmark HachiBusinessRole, nạp riêng khỏi pipeline SQL; chỉ dùng để đối chiếu ──
+  private hachiBusinessRoles: Readonly<Record<string, HachiBusinessRole>> = {};
+  readonly businessRoleComparison = computed<BusinessRoleComparisonRow[]>(() => {
+    const states = this.currentSnapshot()?.states ?? null;
+    if (!states) return [];
+    return Object.values(states).map(state => {
+      const role = this.hachiBusinessRoles[state.definition.id] ?? null;
+      if (!role) return { skuId: state.definition.id, skuName: state.definition.name, hachiRole: null, systemResult: '—', comparableLevel: 'Không có benchmark cho SKU này', conclusion: 'NOT_EVALUATED' as BusinessRoleComparisonConclusion, reason: 'SKU không có trong benchmark HachiBusinessRole.' };
+      const comparison = compareBusinessRole(role, state);
+      return { skuId: state.definition.id, skuName: state.definition.name, hachiRole: role, ...comparison };
+    });
+  });
+
   constructor(private readonly engine: SimulationEngine) {}
+
+  /** §6.3 LỆNH CODEX — "Đi tới Chặng" + "Xem SKU" của một ngoại lệ; điều hướng, không tự thực hiện phương án. */
+  async jumpToException(task: ExceptionTask): Promise<void> {
+    await this.selectStage(task.stage);
+    this.selectSku(task.skuId);
+  }
 
   selectStage(stage: StageNumber): Promise<void> {
     if (this.isRunning() || this.isLoadingDataSource()) return Promise.resolve();
@@ -361,14 +437,20 @@ export class SimulationStore {
 
   private async loadRealDataset(): Promise<SimulationDataset> {
     if (this.realDataset) return this.realDataset;
-    const [daily, products] = await Promise.all([
+    const [daily, products, extractMetadata, businessRoles] = await Promise.all([
       this.fetchText('assets/demand-planning-real.json'),
       // List-product.json là metadata bổ sung không bắt buộc (Price/ProductName giờ
       // đã nằm sẵn trong từng dòng demand-planning-real.json) — thiếu file này
       // không được chặn nạp dữ liệu thật.
       this.fetchTextOptional('assets/List-product.json'),
+      // §9 LỆNH CODEX — ExtractMetadata thật (RESULT SET 3 demand-planing-v3.sql), optional: pipeline
+      // ingest hiện tại (tools/convert-real-data.mjs) chưa sinh file này nên mặc định vắng mặt.
+      this.fetchTextOptional('assets/extract-metadata.json'),
+      // §7 LỆNH CODEX — benchmark HachiBusinessRole, optional, KHÔNG thuộc pipeline SQL.
+      this.fetchTextOptional('assets/hachi-business-roles.json'),
     ]);
-    this.realDataset = parseRealDataset(daily, products);
+    this.hachiBusinessRoles = parseHachiBusinessRoles(businessRoles);
+    this.realDataset = parseRealDataset(daily, products, extractMetadata);
     return this.realDataset;
   }
 
@@ -386,10 +468,21 @@ export class SimulationStore {
     }
   }
 
+  /**
+   * §8 LỆNH CODEX — trước đây `stage>=8: serviceLevel===null ? 'D' : ...` gộp NHẦM mọi lý do serviceLevel=null
+   * (CLASSIFICATION_BLOCKED, ABC=N/A, ô ma trận chưa cấu hình) thành nhãn 'D', dù SKU đó không hề ở nhóm D.
+   * Phân nhánh đúng thứ tự: chặn phân loại → chưa xếp ABC → thật sự là nhóm D (kèm subtype) → còn thiếu
+   * chính sách (POLICY_PENDING, không phải D) → nhãn lớp bình thường.
+   */
   stageLabel(state: Readonly<SkuPipelineState> | null, stage = this.activeStage()): string {
     if (!state || stage < 6) return '—';
     if (stage === 6) return state.classification.abc;
     if (stage === 7) return state.classification.xyz === 'D' ? 'D' : state.classification.xyz === null ? 'BLOCKED' : `${state.classification.abc}${state.classification.xyz}`;
-    return state.serviceLevel === null && stage >= 8 ? 'D' : `${state.classification.abc}${state.classification.xyz ?? 'BLOCKED'}`;
+    const { classification } = state;
+    if (classification.classificationStatus === 'CLASSIFICATION_BLOCKED') return 'BLOCKED';
+    if (classification.abc === 'N/A') return 'N/A';
+    if (classification.xyz === 'D') return classification.dSubtype ?? 'D';
+    if (state.serviceLevel === null) return 'POLICY_PENDING';
+    return `${classification.abc}${classification.xyz ?? 'BLOCKED'}`;
   }
 }

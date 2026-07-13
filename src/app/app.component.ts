@@ -3,14 +3,14 @@ import { ChangeDetectionStrategy, Component, computed, signal, OnInit } from '@a
 import { FormsModule } from '@angular/forms';
 import { STAGES } from './domain/policy';
 import { DataSourceId } from './domain/catalog';
-import { DailyRecord, SkuDefinition, SkuPipelineState, StageNumber } from './domain/models';
+import { DailyRecord, ExceptionTask, SkuDefinition, SkuPipelineState, StageNumber } from './domain/models';
 import { buildStageTrace } from './domain/stage-trace';
 import {
   buildAbcBoard, buildForecastAudit, buildFinalForecastAudit, buildPolicyMatrix, buildPromoAudit,
   buildSafetyAudit, buildSeasonalityAudit, buildSupplyAudit, buildTrendAudit, buildXyzBoard,
 } from './domain/stage-insights';
 import { explainLearningCell, LearningColumn } from './domain/forecast-models';
-import { SimulationStore, viNumberFormat } from './state/simulation.store';
+import { exceptionSeverity, SimulationStore, viNumberFormat } from './state/simulation.store';
 import { JourneyMapComponent } from './ui/journey-map.component';
 import { MathFormulaComponent } from './ui/math-formula.component';
 import { ComparisonReportComponent } from './ui/comparison-report.component';
@@ -34,6 +34,7 @@ export class AppComponent implements OnInit {
   readonly auditDate = signal<string | null>(null);
   readonly journeyOpen = signal(false);
   readonly contextCollapsed = signal(false);
+  readonly exceptionQueueOpen = signal(false);
   readonly currentView = signal<'simulation' | 'report' | 'simulation-report'>('simulation');
 
   setView(view: 'simulation' | 'report' | 'simulation-report'): void {
@@ -205,6 +206,58 @@ export class AppComponent implements OnInit {
     return state ? buildSafetyAudit(state) : null;
   });
 
+  // ── §6 LỆNH CODEX — hàng đợi ngoại lệ: banner tổng, panel theo SKU, jump-to ──
+  readonly exceptionSeverity = exceptionSeverity;
+  readonly exceptionFilter = signal<'all' | 'selected-sku' | 'active-stage' | 'blocking' | 'review'>('all');
+  readonly expandedExceptionIds = signal<Set<string>>(new Set());
+  readonly highlightedCycleIndex = signal<number | null>(null);
+
+  readonly filteredExceptions = computed<ExceptionTask[]>(() => {
+    const filter = this.exceptionFilter();
+    if (filter === 'selected-sku') return this.store.selectedSkuExceptions();
+    if (filter === 'active-stage') return this.store.activeStageExceptions();
+    const all = this.store.allExceptions();
+    if (filter === 'blocking') return all.filter(task => exceptionSeverity(task.code) === 'BLOCKING');
+    if (filter === 'review') return all.filter(task => exceptionSeverity(task.code) === 'REVIEW');
+    return all;
+  });
+
+  readonly exceptionBannerSummary = computed(() => {
+    const all = this.store.allExceptions();
+    const skuCount = new Set(all.map(task => task.skuId)).size;
+    const cycleCount = new Set(all.flatMap(task => task.cycleIndexes?.map(index => `${task.skuId}:${index}`) ?? [])).size;
+    return { total: all.length, skuCount, cycleCount };
+  });
+
+  toggleExceptionExpanded(id: string): void {
+    this.expandedExceptionIds.update(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  isExceptionExpanded(id: string): boolean { return this.expandedExceptionIds().has(id); }
+
+  jumpToExceptionSku(task: ExceptionTask): void { this.selectSkuId(task.skuId); }
+  jumpToExceptionStage(task: ExceptionTask): void { void this.store.jumpToException(task); }
+  jumpToExceptionCycle(task: ExceptionTask): void {
+    const cycleIndex = task.cycleIndexes?.[0] ?? null;
+    void this.store.jumpToException(task).then(() => {
+      this.highlightedCycleIndex.set(cycleIndex);
+      if (task.affectedDateFrom) this.auditDate.set(task.affectedDateFrom);
+      setTimeout(() => document.getElementById(`cycle-${cycleIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    });
+  }
+  async copyResolutionDirection(task: ExceptionTask): Promise<void> {
+    const lines = [
+      `SKU ${task.skuId} · Chặng ${task.stage} · ${task.code}${task.cycleIndexes?.length ? ` · CK${task.cycleIndexes.join(',')}` : ''}`,
+      `Bằng chứng: ${task.evidence}`,
+      ...(task.resolutionOptions ?? []).map(option => `- [${option.type}] ${option.title}: ${option.description}`),
+      'MÔ PHỎNG CHỈ ĐỀ XUẤT — CHƯA THỰC HIỆN.',
+    ];
+    try { await navigator.clipboard.writeText(lines.join('\n')); } catch { /* clipboard không khả dụng — bỏ qua yên lặng, không chặn UI */ }
+  }
+
   constructor(readonly store: SimulationStore) {}
 
   ngOnInit() {
@@ -262,8 +315,8 @@ export class AppComponent implements OnInit {
   toggleMergedContext(event: Event): void {
     this.contextCollapsed.set(!(event.target as HTMLDetailsElement).open);
   }
-  selectSku(sku: SkuDefinition): void { this.store.selectSku(sku.id); this.auditDate.set(null); this.traceStepOverrides.set({}); }
-  selectSkuId(skuId: string): void { this.store.selectSku(skuId); this.auditDate.set(null); this.traceStepOverrides.set({}); }
+  selectSku(sku: SkuDefinition): void { this.store.selectSku(sku.id); this.auditDate.set(null); this.traceStepOverrides.set({}); this.highlightedCycleIndex.set(null); }
+  selectSkuId(skuId: string): void { this.store.selectSku(skuId); this.auditDate.set(null); this.traceStepOverrides.set({}); this.highlightedCycleIndex.set(null); }
   downloadCurrentStageTable(): void {
     const exportData = this.currentTableExport();
     if (!exportData || !exportData.rows.length) return;

@@ -207,6 +207,25 @@ export function fixedCalendarWindow(cycles: readonly CycleRecord[], size: number
   return { window, blocked: false, blockingStatus: null };
 }
 
+/**
+ * §2.1 LỆNH CODEX / RULE-05-006 — cửa sổ ABC là đúng `size` vị trí chu kỳ gần nhất theo lịch, GIỮ NGUYÊN mọi
+ * vị trí (kể cả chu kỳ không khóa) để audit, khác `trailingLockedRun` (chỉ đoạn liên tiếp cuối). Đếm số CK
+ * KHÓA trong cửa sổ bất kể có khoảng khuyết hay không — chỉ CK khóa mới được cộng vào `periodQuantity`, không
+ * bao giờ dùng baseDemand của CK chưa khóa. `fullCoverage` chỉ true khi đủ `size` vị trí VÀ toàn bộ đã khóa.
+ */
+export function calendarWindowAbcMetrics(cycles: readonly CycleRecord[], size: number, minimumLocked: number): {
+  window: CycleRecord[]; lockedCycles: CycleRecord[]; lockedCycleCount: number; periodQuantity: number; eligible: boolean; fullCoverage: boolean;
+} {
+  const window = cycles.slice(-size);
+  const lockedCycles = window.filter(cycle => cycle.locked);
+  const periodQuantity = lockedCycles.reduce((sum, cycle) => sum + cycle.baseDemand, 0);
+  return {
+    window, lockedCycles, lockedCycleCount: lockedCycles.length, periodQuantity,
+    eligible: lockedCycles.length >= minimumLocked,
+    fullCoverage: window.length === size && lockedCycles.length === size,
+  };
+}
+
 export function classifyXyz(values: readonly number[]): {
   xyz: 'X' | 'Y' | 'Z' | 'D' | null; n: number; m: number; adi: number | null;
   positiveMean: number | null; positiveStdev: number | null; cv: number | null; cv2: number | null;

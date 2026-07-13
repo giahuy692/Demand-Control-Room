@@ -2,8 +2,8 @@ import { Injectable } from '@angular/core';
 import { buildCalendarScaffold } from './calendar-scaffold';
 import { buildCatalog, generateDailyRecords, SimulationDataset } from './catalog';
 import { FORECAST_HORIZON, fitBaseForecast } from './forecast-models';
-import { applyPromoFactor, calculateAvailableStock, calculateBias, calculateFreeStock, calculateNrmse, calculateRmse, calculateTrend, calculateWape, classifyPromoRegionPolicy, classifyXyz, fixedCalendarWindow, isStockout, mean, median, meetsSeasonRepeatThreshold, requireObservedSales, stripStandingPromoCodes, trailingLockedRun } from './math';
-import { AbcClass, BalanceStatus, Classification, CycleRecord, CycleStatus, DailyRecord, DSubtype, ExceptionTask, LotReliability, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, XyzClass } from './models';
+import { applyPromoFactor, calculateAvailableStock, calculateBias, calendarWindowAbcMetrics, calculateFreeStock, calculateNrmse, calculateRmse, calculateTrend, calculateWape, classifyPromoRegionPolicy, classifyXyz, fixedCalendarWindow, isStockout, mean, median, meetsSeasonRepeatThreshold, requireObservedSales, stripStandingPromoCodes, trailingLockedRun } from './math';
+import { AbcClass, BalanceStatus, Classification, CycleRecord, CycleStatus, DailyRecord, DSubtype, ExceptionResolutionOption, ExceptionResolutionType, ExceptionTask, LotReliability, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, XyzClass } from './models';
 import { chooseSafetyStock } from './safety-stock';
 import { applySupplierConsolidation, buildOrderPlan } from './order-plan';
 import { allocateBudget } from './budget-allocation';
@@ -191,20 +191,6 @@ function futureActualDemand(rows: readonly DailyRecord[], policy: SimulationPoli
   return actual;
 }
 
-function futurePromotions(rows: readonly DailyRecord[], policy: SimulationPolicy): SkuPipelineState['definition']['futurePromotions'] {
-  const future = rows.filter(row => row.date >= policy.runDate).sort((a, b) => a.date.localeCompare(b.date)).slice(0, policy.cycleLength * 6);
-  const counts = new Map<string, { cycleOffset: number; code: string; promoDays: number }>();
-  future.forEach((row, index) => {
-    if (!row.promoCode) return;
-    const cycleOffset = Math.floor(index / policy.cycleLength) + 1;
-    const key = `${cycleOffset}:${row.promoCode}`;
-    const current = counts.get(key) ?? { cycleOffset, code: row.promoCode, promoDays: 0 };
-    current.promoDays++;
-    counts.set(key, current);
-  });
-  return [...counts.values()].map(item => ({ ...item, confirmed: true }));
-}
-
 /**
  * RULE-06-003 — chuỗi khóa dùng cho Chặng 10 (xu hướng, cần 12 chu kỳ cuối). Đã đổi sang
  * `trailingLockedRun` (dò ngược từ chu kỳ gần nhất theo lịch, dừng ở khoảng trống đầu tiên) thay
@@ -264,7 +250,13 @@ function runStage1(policy: SimulationPolicy, dataset: SimulationDataset | null):
       const definition = {
         ...baseDefinition,
         cycles: Math.floor(daily.length / policy.cycleLength),
-        futurePromotions: futurePromotions(allRows, policy),
+        // §9 LỆNH CODEX/DEC-008/009 — phiên HISTORICAL_VALIDATION KHÔNG được dựng kế hoạch CTKM tương lai
+        // từ giao dịch thực tế quan sát sau runDate (khác `actualDemand` bên dưới — đó là hậu kiểm Chặng
+        // 19, không nuôi ngược vào dự báo Chặng 13). Trước bản này, `futurePromotions()` đọc promoCode từ
+        // các dòng thật sau runDate rồi coi là "kế hoạch đã xác nhận" — rò rỉ dữ liệu tương lai vào chính
+        // dự báo đang được tạo ra. Luôn rỗng cho dữ liệu thật; dữ liệu giả (catalog.ts) không đổi vì chỉ
+        // dùng để kiểm thử luồng CTKM, không mô phỏng hành vi HISTORICAL_VALIDATION thật.
+        futurePromotions: [],
         actualDemand: futureActualDemand(allRows, policy),
         actualEndingStock: allRows.filter(row => row.date >= policy.runDate).at(-1)?.closeStock ?? daily.at(-1)?.closeStock ?? 0,
         portfolioMode: dataset.portfolioMode,
@@ -572,12 +564,93 @@ export function buildCycles(records: DailyRecord[], cycleLength: number, minimum
   return fillAndBuildCycles(records, cycleLength, minimumReferences, maxRadius, enableTier2CycleFallback).cycles;
 }
 
+/**
+ * §4 LỆNH CODEX — catalog phương án xử lý ngoại lệ NGOÀI mô phỏng. `executableInSimulation` luôn `false`:
+ * mô phỏng chỉ đề xuất, không bao giờ tự thực hiện bất kỳ phương án nào trong danh sách này.
+ */
+const RESOLUTION_CATALOG: Record<ExceptionResolutionType, ExceptionResolutionOption> = {
+  RESTORE_DAILY_BASELINE: {
+    type: 'RESTORE_DAILY_BASELINE', title: 'Phục hồi nền theo ngày sạch lân cận',
+    description: 'Tìm ngày sạch quanh (các) ngày thiếu theo đúng quy tắc tham chiếu Chặng 3–5, rồi chạy lại Chặng 3–5. Ngày vừa lấp không được dùng làm tham chiếu cho ngày khác.',
+    requiredInputs: ['Ngày sạch lân cận đủ điều kiện (theo quy tắc ±7/±14/±24)'],
+    requiresApproval: false, responsibleRole: 'BA/Data', applicableTo: 'HISTORICAL_BASELINE', executableInSimulation: false,
+  },
+  REFERENCE_STORE: {
+    type: 'REFERENCE_STORE', title: 'Dùng cửa hàng tham chiếu',
+    description: 'Lấy cùng SKU tại cửa hàng khác làm nền tham chiếu.',
+    requiredInputs: ['StoreCode tham chiếu', 'Bằng chứng cửa hàng tương đồng', 'Hệ số quy đổi'],
+    requiresApproval: true, responsibleRole: 'MD/Thu mua', applicableTo: 'HISTORICAL_BASELINE', executableInSimulation: false,
+  },
+  SIMILAR_SKU: {
+    type: 'SIMILAR_SKU', title: 'Dùng SKU tương tự đã duyệt',
+    description: 'AI/hệ thống chỉ đề xuất ứng viên; con người phê duyệt SKU tham chiếu và hệ số quy đổi trước khi dùng — không tự áp dụng.',
+    requiredInputs: ['SKU tham chiếu đã duyệt', 'Hệ số quy đổi'],
+    requiresApproval: true, responsibleRole: 'MD/Thu mua', applicableTo: 'HISTORICAL_BASELINE', executableInSimulation: false,
+  },
+  MANUAL_HISTORICAL_BASELINE: {
+    type: 'MANUAL_HISTORICAL_BASELINE', title: 'Nhập nền lịch sử thủ công (ngoại lệ)',
+    description: 'Chỉ dùng cho trường hợp đặc biệt để phục hồi lịch sử; không đồng nhất với kế hoạch MD tương lai.',
+    requiredInputs: ['Giá trị nền', 'Lý do', 'Người duyệt', 'Phiên bản quyết định'],
+    requiresApproval: true, responsibleRole: 'MD', applicableTo: 'HISTORICAL_BASELINE', executableInSimulation: false,
+  },
+  MD_FUTURE_PLAN: {
+    type: 'MD_FUTURE_PLAN', title: 'Kế hoạch MD cho dự báo tương lai',
+    description: 'Chỉ dùng cho dự báo tương lai khi lịch sử không đủ để học; không được lấp ngược chu kỳ lịch sử.',
+    requiredInputs: ['Kế hoạch MD đã duyệt cho chu kỳ tương lai'],
+    requiresApproval: true, responsibleRole: 'MD', applicableTo: 'FUTURE_FORECAST', executableInSimulation: false,
+  },
+  KEEP_UNRESOLVED: {
+    type: 'KEEP_UNRESOLVED', title: 'Giữ nguyên chưa giải quyết',
+    description: 'Giữ baseDemand=null, chặn các chặng phụ thuộc; không gán D hay bất kỳ giá trị nào chỉ để pipeline tiếp tục chạy.',
+    requiredInputs: [],
+    requiresApproval: false, responsibleRole: 'BA/Data', applicableTo: 'HISTORICAL_BASELINE', executableInSimulation: false,
+  },
+};
+
+/** §5 LỆNH CODEX — mapping CycleStatus (chưa khóa) → phương án xử lý áp dụng được, theo đúng thứ tự đề nghị. */
+const CYCLE_RESOLUTION_MAP: Partial<Record<CycleStatus, ExceptionResolutionType[]>> = {
+  PARTIAL_BASELINE: ['RESTORE_DAILY_BASELINE', 'REFERENCE_STORE', 'SIMILAR_SKU', 'MANUAL_HISTORICAL_BASELINE', 'KEEP_UNRESOLVED'],
+  BASELINE_UNRESOLVED: ['RESTORE_DAILY_BASELINE', 'REFERENCE_STORE', 'SIMILAR_SKU', 'MANUAL_HISTORICAL_BASELINE', 'KEEP_UNRESOLVED'],
+  // NO_SOURCE_RECORD — trước khi đề nghị phương án, phải kiểm tra trạng thái hoạt động cửa hàng/SKU (chưa có
+  // nguồn StoreDayStatus trong dữ liệu hiện tại — xem evidence); RESTORE_DAILY_BASELINE không áp dụng vì
+  // không có ngày sạch NÀO trong chính chu kỳ để lấy làm tham chiếu lân cận.
+  NO_SOURCE_RECORD: ['REFERENCE_STORE', 'SIMILAR_SKU', 'MANUAL_HISTORICAL_BASELINE', 'KEEP_UNRESOLVED'],
+  // DATA_ERROR — đối soát nguồn trước; không đề nghị fallback demand nào cho tới khi dữ liệu được sửa.
+  DATA_ERROR: ['KEEP_UNRESOLVED'],
+  // OUTSIDE_ACTIVE_PERIOD — không bù; loại hợp lệ khỏi lịch sử hoạt động, không phải "chưa giải quyết".
+  OUTSIDE_ACTIVE_PERIOD: [],
+};
+
+const CYCLE_EXCEPTION_BLOCKING_STAGES: StageNumber[] = [6, 7, 9, 10, 11];
+
+/** §5 LỆNH CODEX / RULE-05-006 — MỘT task gộp theo chu kỳ (không lặp theo từng ngày unresolved bên trong). */
+function buildCycleException(skuId: string, cycle: CycleRecord, policy: SimulationPolicy): ExceptionTask {
+  const resolutionTypes = CYCLE_RESOLUTION_MAP[cycle.status] ?? ['KEEP_UNRESOLVED'];
+  const resolutionOptions = resolutionTypes.map(type => RESOLUTION_CATALOG[type]);
+  const activePeriodNote = cycle.status === 'NO_SOURCE_RECORD' ? ' Kiểm tra trạng thái hoạt động cửa hàng/SKU trước khi chọn phương án (chưa có nguồn StoreDayStatus trong dữ liệu hiện tại).' : '';
+  return {
+    id: `${skuId}:5:CYCLE_EXCEPTION:${cycle.cycleIndex}`,
+    ruleId: 'RULE-05-006', code: 'CYCLE_EXCEPTION', stage: 5, skuId, date: cycle.dateStart,
+    evidence: `[${cycle.status}] CK${cycle.cycleIndex} (${cycle.dateStart} → ${cycle.dateEnd}): sourceRecordDays=${cycle.sourceRecordDays}, observedCleanDays=${cycle.cleanDays}, stockoutAdjustedDays=${cycle.stockoutLiftedDays}, promoAdjustedDays=${cycle.promoNormalizedDays}, technicalFillDays=${cycle.technicalFillDays}, fallbackDays=${cycle.fallbackDays}, unresolvedDays=${cycle.unresolvedDays}.${activePeriodNote}`,
+    suggestedAction: resolutionOptions[0]?.title ?? 'Giữ nguyên chưa giải quyết — chặn các chặng phụ thuộc.',
+    role: 'BA/Data', status: 'OPEN', decisionVersion: policy.version,
+    cycleIndexes: [cycle.cycleIndex], affectedDateFrom: cycle.dateStart, affectedDateTo: cycle.dateEnd,
+    blockingStages: CYCLE_EXCEPTION_BLOCKING_STAGES, resolutionOptions, simulationOnly: true,
+  };
+}
+
 function runStage5(previous: StageSnapshot, policy: SimulationPolicy): StageSnapshot {
   const states = cloneStates(previous);
+  const exceptions: ExceptionTask[] = [];
   for (const state of Object.values(states)) {
     const result = fillAndBuildCycles(state.daily, policy.cycleLength, policy.minimumReferences, policy.maxReferenceRadius, policy.enableTier2CycleFallback);
     state.daily = result.daily;
     state.cycles = result.cycles;
+    // §5 LỆNH CODEX / RULE-05-006 — MỘT task ngoại lệ GỘP theo chu kỳ cho mỗi CK không khóa (không tạo
+    // nhiều dòng lặp theo từng ngày unresolved bên trong chu kỳ đó).
+    for (const cycle of result.cycles) {
+      if (!cycle.locked) exceptions.push(buildCycleException(state.definition.id, cycle, policy));
+    }
   }
   const cycles = Object.values(states).flatMap(state => state.cycles);
   const countByStatus = (status: CycleStatus) => cycles.filter(cycle => cycle.status === status).length;
@@ -586,40 +659,43 @@ function runStage5(previous: StageSnapshot, policy: SimulationPolicy): StageSnap
     'NO_SOURCE_RECORD': countByStatus('NO_SOURCE_RECORD'), 'LOCKED_OBSERVED': countByStatus('LOCKED_OBSERVED'),
     'LOCKED_ADJUSTED': countByStatus('LOCKED_ADJUSTED'), 'LOCKED_FALLBACK': countByStatus('LOCKED_FALLBACK'),
     'Chu kỳ lấp Tầng 2': cycles.filter(cycle => cycle.tier2Filled).length,
+    'Ngoại lệ cấp chu kỳ (RULE-05-006)': exceptions.length,
   }, [
     'Chỉ chu kỳ locked=true được bàn giao cho Chặng 6–11.', 'Số bán CTKM thô không được cộng vào sức mua chu kỳ.',
     `[RULE-05-001] NO_SOURCE_RECORD chỉ gán khi sourceRecordDays=0, không dùng unresolvedDays=15 để kết luận "trống".`,
     `[RULE-05-003][DEC-P03/P04/P05·ĐỀ XUẤT] Lấp Tầng 2 (mức đại diện chu kỳ) đang ${policy.enableTier2CycleFallback ? 'BẬT' : 'TẮT MẶC ĐỊNH — chưa phê duyệt chính thức'}.`,
     `[RULE-05-005] Đã gán đủ trạng thái chu kỳ; OUTSIDE_ACTIVE_PERIOD/DATA_ERROR không có nguồn dữ liệu để phát hiện nên không bao giờ xuất hiện — không giả vờ có khả năng này.`,
-  ]);
+    `[RULE-05-006] ${exceptions.length} ngoại lệ cấp chu kỳ được tạo (1 dòng/CK không khóa, gộp mọi ngày unresolved bên trong) — MÔ PHỎNG CHỈ ĐỀ XUẤT phương án xử lý, CHƯA THỰC HIỆN.`,
+  ], exceptions);
 }
+
+const ABC_WINDOW_SIZE = 24;
+const ABC_MINIMUM_LOCKED_CYCLES = 6;
 
 function runStage6(previous: StageSnapshot, policy: SimulationPolicy): StageSnapshot {
   const states = cloneStates(previous);
   const exceptions: ExceptionTask[] = [];
   const ranked = Object.values(states).map(state => {
-    // RULE-06-003 — đoạn chu kỳ LIÊN TIẾP kết thúc tại chu kỳ đủ điều kiện gần nhất, KHÔNG nối các
-    // chu kỳ khóa rải rác hai bên một khoảng unresolved thành một đoạn liên tiếp giả.
-    const run = trailingLockedRun(state.cycles);
-    const values = run.slice(-24).map(cycle => cycle.baseDemand);
-    const eligible = run.length >= 6;
-    // Có khoảng trống ở đâu đó xa hơn trong lịch sử (khác với SKU thật sự mới/ngắn, nơi
-    // state.cycles.length === run.length vì chưa từng có chu kỳ nào trước đoạn hiện tại).
-    const blockedByGap = !eligible && state.cycles.length > run.length;
-    const periodQuantity = values.reduce((sum, value) => sum + value, 0);
-    const annualizationFactor = eligible ? (run.length >= 24 ? 1 : 24 / run.length) : null;
-    const annualQuantity = annualizationFactor === null ? null : periodQuantity * annualizationFactor;
+    // §2.1 LỆNH CODEX / RULE-05-006 — cửa sổ CỐ ĐỊNH 24 vị trí chu kỳ gần nhất theo lịch, KHÔNG yêu cầu
+    // liên tiếp: đếm mọi CK khóa trong cửa sổ (kể cả rải rác quanh khoảng khuyết), tối thiểu 6 CK khóa mới
+    // được năm hóa. Đây là bản tinh chỉnh của RULE-06-003 theo mô hình 3 mức chất lượng RULE-05-006
+    // (FULL_COVERAGE/ANNUALIZED_WITH_GAPS/NOT_RATED) — khác bản trước dùng `trailingLockedRun` (chỉ đoạn
+    // liên tiếp cuối), vốn từ chối cả trường hợp có ≥6 CK khóa nhưng rải rác quanh MỘT khoảng khuyết.
+    // Chu kỳ CHƯA khóa không bao giờ được cộng vào periodQuantity (calendarWindowAbcMetrics tự loại).
+    const metrics = calendarWindowAbcMetrics(state.cycles, ABC_WINDOW_SIZE, ABC_MINIMUM_LOCKED_CYCLES);
+    const annualizationFactor = metrics.eligible ? ABC_WINDOW_SIZE / metrics.lockedCycleCount : null;
+    const annualQuantity = annualizationFactor === null ? null : metrics.periodQuantity * annualizationFactor;
     const annualValue = annualQuantity === null ? 0 : annualQuantity * state.definition.price;
-    if (blockedByGap) {
+    if (!metrics.eligible) {
       exceptions.push({
         id: `${state.definition.id}:6:ABC_INPUT_BLOCKED`,
         ruleId: 'RULE-06-003', code: 'ABC_INPUT_BLOCKED', stage: 6, skuId: state.definition.id, date: null,
-        evidence: `Đoạn chu kỳ khóa liên tiếp gần nhất chỉ có ${run.length}/6 chu kỳ tối thiểu; còn ${state.cycles.length - run.length} chu kỳ cũ hơn bị chặn bởi một khoảng unresolved, không được nối vào để đủ ngưỡng.`,
-        suggestedAction: 'Rà soát nguyên nhân chu kỳ unresolved gần đây (Chặng 3–5) trước khi coi SKU là chưa đủ dữ liệu ABC.',
+        evidence: `Cửa sổ ${ABC_WINDOW_SIZE} vị trí chu kỳ gần nhất theo lịch chỉ có ${metrics.lockedCycleCount}/${ABC_MINIMUM_LOCKED_CYCLES} chu kỳ khóa tối thiểu (đã xét ${metrics.window.length} vị trí) — NOT_RATED, không được năm hóa.`,
+        suggestedAction: 'Rà soát nguyên nhân các chu kỳ chưa khóa trong cửa sổ 24 chu kỳ gần nhất (Chặng 3–5) trước khi coi SKU là chưa đủ dữ liệu ABC.',
         role: 'BA/Data', status: 'OPEN', decisionVersion: policy.version,
       });
     }
-    return { state, values, run, eligible, blockedByGap, periodQuantity, annualizationFactor, annualQuantity, annualValue };
+    return { state, metrics, eligible: metrics.eligible, periodQuantity: metrics.periodQuantity, annualizationFactor, annualQuantity, annualValue };
   }).sort((a, b) => b.annualValue - a.annualValue);
   const total = ranked.filter(item => item.eligible).reduce((sum, item) => sum + item.annualValue, 0);
   let cumulative = 0;
@@ -640,8 +716,8 @@ function runStage6(previous: StageSnapshot, policy: SimulationPolicy): StageSnap
       abc,
       abcOfficial,
       approvalStatus: 'PROPOSED', // RULE-06-002 — hệ thống chỉ tự sinh PROPOSED; không có quy trình duyệt bền vững trong app này.
-      abcStatus: !item.eligible ? 'not-rated' : item.values.length < 24 ? 'annualized' : 'full',
-      lockedCycles: item.values.length,
+      abcStatus: !item.eligible ? 'not-rated' : item.metrics.fullCoverage ? 'full' : 'annualized',
+      lockedCycles: item.metrics.lockedCycleCount,
       periodQuantity: item.periodQuantity,
       annualizationFactor: item.annualizationFactor,
       annualQuantity: item.annualQuantity,
@@ -652,17 +728,19 @@ function runStage6(previous: StageSnapshot, policy: SimulationPolicy): StageSnap
     };
   }
   const officialCount = ranked.filter(item => item.state.classification.abcOfficial).length;
-  const blockedByGapCount = ranked.filter(item => item.blockedByGap).length;
+  const notRatedCount = ranked.filter(item => !item.eligible).length;
+  const fullCoverageCount = ranked.filter(item => item.state.classification.abcStatus === 'full').length;
+  const withGapsCount = ranked.filter(item => item.state.classification.abcStatus === 'annualized').length;
   return createSnapshot(6, policy, states, {
     'Nhóm A': ranked.filter(item => item.state.classification.abc === 'A').length, 'Nhóm B': ranked.filter(item => item.state.classification.abc === 'B').length,
     'Nhóm C': ranked.filter(item => item.state.classification.abc === 'C').length, 'Chưa xếp hạng': ranked.filter(item => item.state.classification.abc === 'N/A').length,
     'SKU ABC chính thức': officialCount, 'SKU chỉ xếp hạng mô phỏng': ranked.length - officialCount,
-    'SKU bị chặn ABC do đứt quãng': blockedByGapCount,
+    'FULL_COVERAGE (24/24)': fullCoverageCount, 'ANNUALIZED_WITH_GAPS': withGapsCount, 'NOT_RATED (<6 CK khóa)': notRatedCount,
   }, [
     'Điểm cắt C bắt đầu khi lũy kế đạt từ 90% trở lên.', 'Tính trên bảng xếp hạng riêng, không đổi thứ tự dữ liệu gốc.',
     `[RULE-06-001][DEC-010] ${officialCount}/${ranked.length} SKU có ABC chính thức (portfolioMode=FULL_PORTFOLIO/USE_APPROVED_SNAPSHOT); còn lại chỉ là xếp hạng trong tập mô phỏng hiện tại (SELECTED_SKU_SIMULATION), KHÔNG được dùng làm kết luận ABC vận hành thật.`,
     `[RULE-06-002] Mọi ABC ở đây đều approvalStatus='PROPOSED' — công cụ mô phỏng một lượt chạy này không có quy trình phê duyệt/lưu vết bền vững để tự chuyển EFFECTIVE.`,
-    `[RULE-06-003] Chuỗi đầu vào ABC dùng đoạn chu kỳ khóa LIÊN TIẾP kết thúc tại chu kỳ gần nhất, không nối chu kỳ khóa rải rác hai bên khoảng unresolved; ${blockedByGapCount} SKU bị chặn (ABC_INPUT_BLOCKED) vì đoạn liên tiếp gần nhất chưa đủ 6 chu kỳ do một khoảng đứt quãng.`,
+    `[RULE-06-003][RULE-05-006] Cửa sổ ABC là ${ABC_WINDOW_SIZE} vị trí chu kỳ gần nhất theo lịch, giữ nguyên mọi vị trí (kể cả chưa khóa) để audit; đếm CK khóa bất kể khoảng khuyết, tối thiểu ${ABC_MINIMUM_LOCKED_CYCLES} CK khóa mới năm hóa. ${fullCoverageCount} SKU FULL_COVERAGE (24/24), ${withGapsCount} SKU ANNUALIZED_WITH_GAPS (đủ ngưỡng nhưng có khoảng khuyết), ${notRatedCount} SKU NOT_RATED (dưới ${ABC_MINIMUM_LOCKED_CYCLES} CK khóa, ABC_INPUT_BLOCKED).`,
   ], exceptions);
 }
 
@@ -691,7 +769,11 @@ function runStage7(previous: StageSnapshot, policy: SimulationPolicy): StageSnap
     // RULE-07-003 — cửa sổ CỐ ĐỊNH 24 vị trí chu kỳ gần nhất theo lịch, giữ nguyên mọi vị trí kể
     // cả chu kỳ không khóa (khác lockedValues cũ — trích chu kỳ khóa rồi nối lại). Có gap → chặn.
     const fixed = fixedCalendarWindow(state.cycles, 24);
-    const seriesQualityRatio = state.cycles.length ? fixed.window.filter(cycle => cycle.locked).length / state.cycles.length : null;
+    // §2.2 LỆNH CODEX — tỷ lệ chất lượng chuỗi PHẢI chia cho độ dài CỬA SỔ đang xét (lockedCyclesInWindow /
+    // window.length), không chia cho toàn bộ lịch sử `state.cycles.length` (bản trước làm lệch tỷ lệ khi
+    // lịch sử dài hơn nhiều so với cửa sổ 24 CK — ví dụ 20/24 khóa trong cửa sổ nhưng lịch sử có 75 CK sẽ ra
+    // 20/75≈27% thay vì đúng 20/24≈83%). Không đổi chính sách chặn/không chặn của Chặng 7 — chỉ sửa bằng chứng.
+    const seriesQualityRatio = fixed.window.length ? fixed.window.filter(cycle => cycle.locked).length / fixed.window.length : null;
     if (fixed.blocked) {
       const blockReason = fixed.blockingStatus!;
       const totalHistory = state.cycles.length;

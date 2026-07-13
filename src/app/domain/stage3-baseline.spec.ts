@@ -24,17 +24,20 @@ describe('RULE-03-003 — cấp 3 mùa vụ năm trước + task ngoại lệ kh
   const stockoutIndex = 400; // ngày cần nâng nền
   const yearOffset = 24 * DEFAULT_POLICY.cycleLength; // 360
 
+  // Yêu cầu cập nhật nguồn dữ liệu thật §6 — CSV giờ đọc theo header, bắt buộc có cột HasSalesRecord.
+  const HEADER = 'SKU,Date,OpenStock,CloseStock,Sales,HasSalesRecord,ReceiptHour,PromoCode,PromoName,Price,ProductName';
+
   function buildRows(withYearAgoBaseline: boolean): string[] {
-    return Array.from({ length: totalDays }, (_, index) => {
+    return [HEADER, ...Array.from({ length: totalDays }, (_, index) => {
       const date = dateAfter(start, index);
       const distanceFromStockout = Math.abs(index - stockoutIndex);
-      if (index === stockoutIndex) return `P1,${date},0,0,0,NULL,NULL,NULL,100000,NULL`; // trống cả ngày → stockout
+      if (index === stockoutIndex) return `P1,${date},0,0,0,1,NULL,NULL,NULL,100000,NULL`; // trống cả ngày → stockout
       // Cấp 1 dò tuần tự tới tận ±24 nên phải làm bẩn TOÀN BỘ ±24 quanh ngày stockout mới thật sự ép cấp 1 thất bại.
-      if (distanceFromStockout >= 1 && distanceFromStockout <= 24) return `P1,${date},10,9,5,NULL,KM01,NULL,100000,NULL`;
+      if (distanceFromStockout >= 1 && distanceFromStockout <= 24) return `P1,${date},10,9,5,1,NULL,KM01,NULL,100000,NULL`;
       const distanceFromYearAgo = Math.abs(index - (stockoutIndex - yearOffset));
-      if (!withYearAgoBaseline && distanceFromYearAgo <= 24) return `P1,${date},10,9,5,NULL,KM01,NULL,100000,NULL`; // xóa luôn nền năm trước để kiểm tra nhánh BASELINE_UNRESOLVED
-      return `P1,${date},10,9,5,NULL,NULL,NULL,100000,NULL`;
-    });
+      if (!withYearAgoBaseline && distanceFromYearAgo <= 24) return `P1,${date},10,9,5,1,NULL,KM01,NULL,100000,NULL`; // xóa luôn nền năm trước để kiểm tra nhánh BASELINE_UNRESOLVED
+      return `P1,${date},10,9,5,1,NULL,NULL,NULL,100000,NULL`;
+    })];
   }
 
   it('cấp 1 thất bại nhưng cấp 3 (mùa vụ năm trước) đủ căn cứ → nâng nền bằng cấp 3, không rơi về BASELINE_UNRESOLVED', () => {

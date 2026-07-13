@@ -57,6 +57,108 @@
 
   @if (store.error()) { <div class="error-banner" role="alert"><b>Pipeline đã dừng.</b> {{ store.error() }}</div> }
 
+  @if (exceptionBannerSummary().total > 0) {
+    <section class="exception-queue-panel" [class.open]="exceptionQueueOpen()" aria-label="Hàng đợi ngoại lệ">
+      <button type="button" class="exception-banner" (click)="exceptionQueueOpen.set(!exceptionQueueOpen())" [attr.aria-expanded]="exceptionQueueOpen()">
+        <span class="exception-banner-icon" aria-hidden="true">⚠</span>
+        <span class="exception-banner-text">
+          Mô phỏng phát hiện <b>{{ exceptionBannerSummary().total }}</b> ngoại lệ trên <b>{{ exceptionBannerSummary().skuCount }}</b> SKU
+          @if (exceptionBannerSummary().cycleCount > 0) { và <b>{{ exceptionBannerSummary().cycleCount }}</b> chu kỳ }.
+          Các phương án bên dưới <b>chưa được hệ thống thực hiện</b>.
+        </span>
+        <i class="exception-banner-toggle" aria-hidden="true">{{ exceptionQueueOpen() ? '▲' : '▼' }}</i>
+      </button>
+
+      @if (exceptionQueueOpen()) {
+        <div class="exception-queue-body">
+          <div class="exception-filters" role="tablist" aria-label="Lọc ngoại lệ">
+            <button type="button" [class.active]="exceptionFilter() === 'all'" (click)="exceptionFilter.set('all')">Tất cả ({{ store.allExceptions().length }})</button>
+            <button type="button" [class.active]="exceptionFilter() === 'selected-sku'" (click)="exceptionFilter.set('selected-sku')">SKU đang chọn ({{ store.selectedSkuExceptions().length }})</button>
+            <button type="button" [class.active]="exceptionFilter() === 'active-stage'" (click)="exceptionFilter.set('active-stage')">Chặng đang xem ({{ store.activeStageExceptions().length }})</button>
+            <button type="button" [class.active]="exceptionFilter() === 'blocking'" (click)="exceptionFilter.set('blocking')">BLOCKING</button>
+            <button type="button" [class.active]="exceptionFilter() === 'review'" (click)="exceptionFilter.set('review')">REVIEW</button>
+          </div>
+          <div class="exception-table-wrap">
+            <table class="exception-table">
+              <thead><tr><th></th><th>Chặng</th><th>CK</th><th>Khoảng ngày</th><th>Mã ngoại lệ</th><th>Bằng chứng</th><th>Ảnh hưởng</th><th>Trạng thái</th></tr></thead>
+              <tbody>
+                @for (task of filteredExceptions(); track task.id) {
+                  <tr class="exception-row" [class.severity-blocking]="exceptionSeverity(task.code) === 'BLOCKING'" (click)="toggleExceptionExpanded(task.id)">
+                    <td class="exception-expand-toggle">{{ isExceptionExpanded(task.id) ? '▾' : '▸' }}</td>
+                    <td>C{{ task.stage.toString().padStart(2, '0') }}</td>
+                    <td>{{ task.cycleIndexes?.length ? 'CK' + task.cycleIndexes!.join(',') : '—' }}</td>
+                    <td>{{ task.affectedDateFrom ? (task.affectedDateFrom + ' → ' + (task.affectedDateTo ?? task.affectedDateFrom)) : (task.date ?? '—') }}</td>
+                    <td><span class="data-chip" [class.so]="exceptionSeverity(task.code) === 'BLOCKING'" [class.pending]="exceptionSeverity(task.code) === 'REVIEW'">{{ task.code }}</span></td>
+                    <td class="exception-evidence-cell">{{ task.evidence }}</td>
+                    <td>{{ task.blockingStages?.length ? 'Chặn C' + task.blockingStages!.join('/C') : '—' }}</td>
+                    <td>{{ task.status }}</td>
+                  </tr>
+                  @if (isExceptionExpanded(task.id)) {
+                    <tr class="exception-detail-row">
+                      <td [attr.colspan]="8">
+                        <div class="exception-detail">
+                          <div class="exception-detail-actions">
+                            <button type="button" class="btn ghost" (click)="jumpToExceptionSku(task)">Xem SKU</button>
+                            <button type="button" class="btn ghost" (click)="jumpToExceptionStage(task)">Đi tới Chặng {{ task.stage }}</button>
+                            @if (task.cycleIndexes?.length) { <button type="button" class="btn ghost" (click)="jumpToExceptionCycle(task)">Xem CK</button> }
+                            <button type="button" class="btn ghost" (click)="copyResolutionDirection(task)">Sao chép hướng xử lý</button>
+                          </div>
+                          @if (task.resolutionOptions?.length) {
+                            <div class="resolution-option-list">
+                              @for (option of task.resolutionOptions; track option.type) {
+                                <div class="resolution-option">
+                                  <div class="resolution-option-head">
+                                    <b>{{ option.title }}</b>
+                                    <span class="resolution-badge">KHÔNG THỰC HIỆN TRONG MÔ PHỎNG</span>
+                                  </div>
+                                  <p>{{ option.description }}</p>
+                                  <div class="resolution-option-meta">
+                                    <span>Dữ liệu cần bổ sung: {{ option.requiredInputs.length ? option.requiredInputs.join(', ') : 'Không cần thêm dữ liệu' }}</span>
+                                    <span>Người chịu trách nhiệm: {{ option.responsibleRole }}</span>
+                                    <span>Cần phê duyệt: {{ option.requiresApproval ? 'Có' : 'Không' }}</span>
+                                    <span>Phạm vi: {{ option.applicableTo === 'HISTORICAL_BASELINE' ? 'Lịch sử' : 'Dự báo tương lai' }}</span>
+                                  </div>
+                                </div>
+                              }
+                            </div>
+                          } @else {
+                            <div class="muted-cell">Không có phương án xử lý áp dụng được — loại trừ hợp lệ, không phải chưa giải quyết.</div>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                } @empty { <tr><td colspan="8" class="table-empty">Không có ngoại lệ khớp bộ lọc.</td></tr> }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+    </section>
+  }
+
+  @if (store.businessRoleComparison().length > 0) {
+    <details class="business-role-panel">
+      <summary>Đối chiếu Business Role Hachi ({{ store.businessRoleComparison().length }} SKU · chỉ để tham khảo, không dùng làm đầu vào tính toán)</summary>
+      <div class="business-role-table-wrap">
+        <table class="business-role-table">
+          <thead><tr><th>SKU</th><th>Business role Hachi</th><th>Kết quả hệ thống</th><th>Mức có thể đối chiếu</th><th>Kết luận</th></tr></thead>
+          <tbody>
+            @for (row of store.businessRoleComparison(); track row.skuId) {
+              <tr [class.selected]="row.skuId === store.selectedSkuId()" (click)="selectSkuId(row.skuId)" [attr.title]="row.reason">
+                <td class="insight-sku"><b>{{ row.skuId }}</b><small>{{ row.skuName }}</small></td>
+                <td>{{ row.hachiRole ?? '—' }}</td>
+                <td>{{ row.systemResult }}</td>
+                <td><small>{{ row.comparableLevel }}</small></td>
+                <td><span class="balance-chip" [class]="'balance-chip role-' + row.conclusion.toLowerCase()">{{ row.conclusion }}</span></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </details>
+  }
+
   @if (currentView() === 'simulation') {
     <main class="main-grid" [class.audit-collapsed]="auditCollapsed()" [class.process-collapsed]="processCollapsed()" [style.--process-panel-width]="processPanelWidth() ? processPanelWidth() + 'px' : null">
     <section class="panel catalog-panel audit-explorer collapsible-panel" [class.collapsed]="auditCollapsed()" aria-labelledby="audit-explorer-title">
@@ -119,7 +221,7 @@
                   <thead><tr><th>Chu kỳ</th><th>Thời gian</th><th>Sức mua nền Yⱼ</th><th>Nhịp</th></tr></thead>
                   <tbody>
                     @for (cycle of auditCycles(); track cycle.cycleIndex) {
-                      <tr [class.cycle-unlocked]="!cycle.locked">
+                      <tr [id]="'cycle-' + cycle.cycleIndex" [class.cycle-unlocked]="!cycle.locked" [class.cycle-highlighted]="highlightedCycleIndex() === cycle.cycleIndex">
                         <td class="cycle-id">CK {{ cycle.cycleIndex.toString().padStart(2, '0') }}</td>
                         <td>{{ cycle.dateStart }} → {{ cycle.dateEnd }}</td>
                         <td class="base-value" [title]="cycle.locked ? 'Đã khóa: chu kỳ này đã đủ dữ liệu sức mua cơ bản và được dùng cho dự báo.' : cycle.emptyCycle ? 'Trống: không có ngày nào trong chu kỳ này có dữ liệu bán. Hệ thống bỏ qua hoàn toàn chu kỳ này.' : 'Chưa đủ nền: chu kỳ này còn ngày chưa tìm được sức mua cơ bản nên chưa thể dùng để học dự báo.'">{{ cycle.locked ? format(cycle.baseDemand, 1) : (cycle.emptyCycle ? 'TRỐNG' : 'CHƯA ĐỦ NỀN') }}</td>

@@ -244,6 +244,7 @@ export interface Classification {
   abcOfficial: boolean;
   /** RULE-06-002 — hệ thống chỉ tự sinh PROPOSED; không có cơ chế phê duyệt/lưu vết bền vững trong công cụ mô phỏng một lượt chạy này nên KHÔNG BAO GIỜ tự chuyển EFFECTIVE — cần quy trình phê duyệt ngoài phạm vi app này (xem 06-Quy-trinh-phe-duyet-va-xu-ly-ngoai-le.md). */
   approvalStatus: 'PROPOSED' | 'EFFECTIVE';
+  /** §2.1 LỆNH CODEX — chất lượng cửa sổ 24 vị trí gần nhất: 'full'=FULL_COVERAGE (24/24 khóa), 'annualized'=ANNUALIZED_WITH_GAPS (≥6 khóa, có khoảng khuyết), 'not-rated'=NOT_RATED (<6 khóa). */
   abcStatus: 'full' | 'annualized' | 'not-rated';
   lockedCycles: number;
   periodQuantity: number;
@@ -513,12 +514,42 @@ export interface FormulaBlock {
  * D_BASELINE_UNRESOLVED không còn được phát sinh (xem ghi chú DSubtype) — giữ literal, không xóa để không phá kiểu.
  * ABC_INPUT_BLOCKED/CLASSIFICATION_BLOCKED/FORECAST_INPUT_BLOCKED — RULE-06-003/07-003/11-001: chuỗi chu kỳ dùng để
  * tính ABC/XYZ/dự báo bị đứt quãng (có chu kỳ không khóa xen giữa), không được nối lại thành chuỗi liên tục giả.
+ * CYCLE_EXCEPTION — RULE-05-006 (cổng chất lượng chuỗi sau Chặng 5): một task GỘP theo chu kỳ (không phải theo
+ * ngày) cho mỗi CK không khóa; mang `cycleIndexes/affectedDateFrom/affectedDateTo/resolutionOptions` bên dưới.
  */
-export type ExceptionCode = 'BASELINE_NOT_IDENTIFIABLE' | 'PROMO_TYPE_UNKNOWN' | 'STOCK_ANCHOR_MISSING' | 'ABC_SCOPE_INCOMPLETE' | 'D_BASELINE_UNRESOLVED' | 'POLICY_UNRESOLVED' | 'ABC_INPUT_BLOCKED' | 'CLASSIFICATION_BLOCKED' | 'FORECAST_INPUT_BLOCKED';
+export type ExceptionCode = 'BASELINE_NOT_IDENTIFIABLE' | 'PROMO_TYPE_UNKNOWN' | 'STOCK_ANCHOR_MISSING' | 'ABC_SCOPE_INCOMPLETE' | 'D_BASELINE_UNRESOLVED' | 'POLICY_UNRESOLVED' | 'ABC_INPUT_BLOCKED' | 'CLASSIFICATION_BLOCKED' | 'FORECAST_INPUT_BLOCKED' | 'CYCLE_EXCEPTION';
 /** 06-Quy-trinh-phe-duyet-va-xu-ly-ngoai-le.md §3 — trạng thái task xử lý ngoại lệ. */
 export type ExceptionTaskStatus = 'OPEN' | 'CANDIDATE_FOUND' | 'WAITING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'RESOLVED';
 
-/** 04-Dac-ta-trien-khai-Demand-Planning.md §15 — một mục trong hàng đợi ngoại lệ, luôn gắn RuleId để truy vết. */
+/**
+ * Phương án xử lý ngoại lệ NGOÀI phạm vi mô phỏng — hệ thống chỉ liệt kê, KHÔNG bao giờ tự thực hiện
+ * (xem `ExceptionResolutionOption.executableInSimulation`, luôn `false`). MD_FUTURE_PLAN chỉ áp dụng
+ * cho dự báo tương lai, không được lấp ngược chu kỳ lịch sử; các phương án còn lại chỉ dùng cho nền lịch sử.
+ */
+export type ExceptionResolutionType =
+  | 'RESTORE_DAILY_BASELINE'
+  | 'REFERENCE_STORE'
+  | 'SIMILAR_SKU'
+  | 'MANUAL_HISTORICAL_BASELINE'
+  | 'MD_FUTURE_PLAN'
+  | 'KEEP_UNRESOLVED';
+
+export interface ExceptionResolutionOption {
+  readonly type: ExceptionResolutionType;
+  readonly title: string;
+  readonly description: string;
+  readonly requiredInputs: readonly string[];
+  readonly requiresApproval: boolean;
+  readonly responsibleRole: string;
+  readonly applicableTo: 'HISTORICAL_BASELINE' | 'FUTURE_FORECAST';
+  readonly executableInSimulation: false;
+}
+
+/**
+ * 04-Dac-ta-trien-khai-Demand-Planning.md §15 — một mục trong hàng đợi ngoại lệ, luôn gắn RuleId để truy vết.
+ * Các trường `cycleIndexes.../simulationOnly` là mở rộng tương thích ngược (optional) cho ngoại lệ cấp CHU
+ * KỲ (RULE-05-006) — ngoại lệ cấp NGÀY (Chặng 2–4) không cần điền các trường này.
+ */
 export interface ExceptionTask {
   readonly id: string;
   readonly ruleId: string;
@@ -531,6 +562,142 @@ export interface ExceptionTask {
   readonly role: string;
   readonly status: ExceptionTaskStatus;
   readonly decisionVersion: string;
+  /** RULE-05-006 — các chu kỳ (thường một CK duy nhất) mà task này gộp lại; rỗng/undefined cho ngoại lệ cấp ngày. */
+  readonly cycleIndexes?: readonly number[];
+  readonly affectedDateFrom?: string | null;
+  readonly affectedDateTo?: string | null;
+  /** Các chặng sau bị chặn/ảnh hưởng bởi ngoại lệ này (ví dụ ABC=6, XYZ=7, mùa vụ=9, xu hướng=10, dự báo=11). */
+  readonly blockingStages?: readonly StageNumber[];
+  /** Phương án xử lý CÓ THỂ thực hiện NGOÀI mô phỏng — mô phỏng chỉ đề xuất, không tự áp dụng. */
+  readonly resolutionOptions?: readonly ExceptionResolutionOption[];
+  /** true ⇔ ngoại lệ này chỉ có ý nghĩa trong phiên mô phỏng hiện tại — chưa qua quy trình phê duyệt/thực thi thật. */
+  readonly simulationOnly?: boolean;
+}
+
+/**
+ * §7 LỆNH CODEX — vai trò kinh doanh do Hachi gán, nạp từ asset benchmark riêng (KHÔNG phải từ pipeline SQL).
+ * CHỈ dùng để đối chiếu SAU KHI hệ thống đã tính ABC/XYZ/mùa vụ/mô hình độc lập — không bao giờ được dùng làm
+ * đầu vào cho các phép tính đó (xem test bất biến ở `business-role.spec.ts`).
+ */
+export type HachiBusinessRole = 'CORE' | 'SEASONAL' | 'MARGIN' | 'TRAFFIC' | 'NEW' | 'STANDARD';
+
+/** §7.1 — kết luận đối chiếu giữa HachiBusinessRole (benchmark) và kết quả hệ thống tính độc lập. */
+export type BusinessRoleComparisonConclusion =
+  | 'ALIGNED'
+  | 'POSSIBLE_DIFFERENCE'
+  | 'INVESTIGATION_REQUIRED'
+  | 'NOT_COMPARABLE_WITH_CURRENT_DATA'
+  | 'NOT_EVALUATED';
+
+export interface BusinessRoleComparisonRow {
+  readonly skuId: string;
+  readonly skuName: string;
+  readonly hachiRole: HachiBusinessRole | null;
+  readonly systemResult: string;
+  readonly comparableLevel: string;
+  readonly conclusion: BusinessRoleComparisonConclusion;
+  readonly reason: string;
+}
+
+/**
+ * §8 — bằng chứng vòng đời sản phẩm chính thức cho D_NEW/D_SHORT_HISTORY. Nguồn ngoài pipeline demand hiện tại
+ * (asset riêng, optional) — vắng mặt thì KHÔNG được suy ra vòng đời chỉ từ HachiBusinessRole='NEW'.
+ */
+export interface ProductLifecycleRecord {
+  readonly skuId: string;
+  readonly lifecycleStage: 'NEW' | 'GROWTH' | 'MATURE' | 'DECLINE' | 'DISCONTINUED';
+  readonly asOfDate: string;
+  readonly evidence: string;
+}
+
+/**
+ * Yêu cầu cập nhật nguồn dữ liệu thật §4 — hợp đồng dữ liệu thô V2 từ RESULT SET 1 của
+ * `Sql/demand-planing.sql` (demand-planing-v6-pos-real-backtest). Đây là DTO NGUỒN, chưa chuẩn hóa —
+ * không được ép vào `DailyRecord` (đã qua calendar scaffold) quá sớm. Bất biến bắt buộc:
+ *
+ * ```
+ * sales === null  ⇔ hasSalesRecord === false   (không có dòng bán POS thật trong ngày)
+ * sales is number ⇔ hasSalesRecord === true    (có dòng bán thật, kể cả tổng Qty = 0)
+ * ```
+ *
+ * Tương tự cho `returnQty/hasReturnRecord` và `inventoryNetMovement/hasInventoryMovement`.
+ */
+export interface DailySourceRecordV2 {
+  readonly sku: string;
+  readonly date: string;
+  readonly openStock: number;
+  readonly closeStock: number;
+
+  readonly sales: number | null;
+  readonly hasSalesRecord: boolean;
+
+  readonly returnQty: number | null;
+  readonly hasReturnRecord: boolean;
+
+  readonly inventoryNetMovement: number | null;
+  readonly hasInventoryMovement: boolean;
+  readonly totalStockDelta: number;
+
+  readonly receiptHour: string | null;
+  readonly hasReceiptRecord: boolean;
+  readonly receiptTimeSource: 'RECEIPT_DATE' | 'CREATE_TIME_FALLBACK' | 'UNRESOLVED' | null;
+
+  readonly promoCode: string | null;
+  readonly promoName: string | null;
+  readonly price: number | null;
+  readonly productName: string | null;
+
+  readonly hasRecord: true;
+  readonly isOpeningAnchor: boolean;
+  readonly isReferenceOnly: boolean;
+  readonly isHistoryRecord: boolean;
+  readonly isValidationActual: boolean;
+}
+
+/** RESULT SET 2 (`PromotionInterval`) của `Sql/demand-planing.sql` — khoảng hiệu lực CTKM gắn trực tiếp SKU. */
+export interface PromotionInterval {
+  readonly sku: string;
+  readonly promoCode: string;
+  readonly promoName: string | null;
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly promoTypeSource: string | null;
+  readonly isPos: boolean | null;
+  readonly sourceRole: 'DIRECT_PRODUCT' | 'REF_PRODUCT' | 'POS_MARKER';
+}
+
+/**
+ * RESULT SET 3 (`ExtractMetadata`) của `Sql/demand-planing.sql` (demand-planing-v6-pos-real-backtest).
+ * Optional/ingest riêng (asset JSON) — vắng mặt thì giữ mặc định bảo thủ hiện có, KHÔNG suy diễn ngược
+ * từ dữ liệu daily. Khi CÓ mặt, `parseRealDataset` PHẢI chặn nạp dữ liệu nếu `stockReconciliationGate`
+ * khác `'PASS'` — không được fallback âm thầm sang dữ liệu giả.
+ */
+export interface ExtractMetadata {
+  readonly extractId: string;
+  readonly queryVersion: string;
+  readonly dataContractVersion: string;
+  readonly runMode: string;
+  readonly runDate: string;
+  readonly historyCandidateStartDate: string;
+  readonly processingStartDate: string;
+  readonly processingEndDate: string;
+  readonly referenceReadStartDate: string;
+  readonly actualValidationEndDate: string;
+  readonly databaseWatermarkDate: string;
+  readonly cycleLengthDays: number;
+  readonly fullCycleCount: number;
+  readonly droppedLeadingDays: number;
+  readonly storeCode: string;
+  readonly selectedSkuCount: number;
+  readonly portfolioMode: PortfolioMode;
+  readonly extractIsTruncated: boolean;
+  readonly stockAnchorAssumption: string;
+  /** Gate đối soát tồn — `'PASS'` là điều kiện BẮT BUỘC để dữ liệu được nạp vào mô phỏng. */
+  readonly stockReconciliationGate: 'PASS' | 'FAIL';
+  readonly stockMismatchSkuCount: number;
+  readonly dailySourceRecordCount: number;
+  readonly promotionIntervalCount: number;
+  readonly generatedAt: string;
 }
 
 export interface StageSnapshot {
@@ -550,6 +717,8 @@ export interface StageViewModel {
   state: Readonly<SkuPipelineState> | null;
   summary: Readonly<Record<string, string | number>>;
   audit: readonly string[];
+  /** Ngoại lệ MỚI phát sinh riêng ở chặng đang xem (không dồn từ chặng trước) — xem `StageSnapshot.exceptions`. */
+  exceptions: readonly ExceptionTask[];
   inputs: { label: string; value: string }[];
   calculations: { label: string; value: string }[];
   outputs: { label: string; value: string; tone?: 'good' | 'warn' | 'neutral' }[];
