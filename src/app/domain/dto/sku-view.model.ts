@@ -8,7 +8,7 @@ interface SkuViewModelInit {
   readonly category: string;
   readonly supplier: string;
   readonly abc: AbcClass;
-  readonly xyz: XyzClass;
+  readonly xyz: XyzClass | null;
   readonly onHand: number;
   readonly purchasePrice: number;
   readonly moq: number;
@@ -31,7 +31,7 @@ export class SkuViewModel {
   readonly category: string;
   readonly supplier: string;
   readonly abc: AbcClass;
-  readonly xyz: XyzClass;
+  readonly xyz: XyzClass | null;
   readonly onHand: number;
   readonly purchasePrice: number;
   readonly moq: number;

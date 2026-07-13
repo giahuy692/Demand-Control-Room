@@ -1,6 +1,6 @@
 import { buildForecastLearning, ForecastFit } from './forecast-models';
-import { mean, meetsSeasonRepeatThreshold } from './math';
-import { SkuPipelineState } from './models';
+import { mean, meetsSeasonRepeatThreshold, trailingLockedRun } from './math';
+import { SafetyStockMethod, SafetyStockSourceTier, SkuPipelineState } from './models';
 import { CAPITAL_PRIORITIES, SERVICE_LEVELS } from './policy';
 import { buildPromoRegionSamples } from './promo-analysis';
 
@@ -44,18 +44,22 @@ export interface XyzBoardRow {
   rule: string;
 }
 
-const XYZ_ORDER: Record<string, number> = { X: 0, Y: 1, Z: 2, D: 3 };
+const XYZ_ORDER: Record<string, number> = { X: 0, Y: 1, Z: 2, D: 3, BLOCKED: 4 };
 
 export function buildXyzBoard(states: States): XyzBoardRow[] {
   return Object.values(states)
     .map(state => {
-      const { xyz, n, m, adi, positiveMean, positiveStdev, cv, cv2 } = state.classification;
-      const rule = n < 6 ? 'n < 6' : !m ? 'm = 0'
+      const { xyz, n, m, adi, positiveMean, positiveStdev, cv, cv2, classificationStatus, classificationBlockReason } = state.classification;
+      // RULE-07-003/004 — kể từ khi xyz có thể null, đọc lý do trực tiếp từ classificationStatus
+      // trước tiên (n=6/m=0 không còn tự động nghĩa là D nữa).
+      const rule = classificationStatus === 'CLASSIFICATION_BLOCKED' ? `CHẶN (${classificationBlockReason})`
+        : classificationStatus === 'NO_POSITIVE_DEMAND_REVIEW' ? 'NO_POSITIVE_DEMAND_REVIEW (m = 0)'
+        : n < 6 ? 'n < 6'
         : (adi ?? 0) > 1.32 ? 'ADI > 1,32'
         : (cv2 ?? Infinity) <= 0.49 ? 'CV² ≤ 0,49' : 'CV² > 0,49';
       return { id: state.definition.id, name: state.definition.name, xyz, n, m, adi, positiveMean, positiveStdev, cv, cv2, rule };
     })
-    .sort((a, b) => XYZ_ORDER[a.xyz] - XYZ_ORDER[b.xyz] || (a.adi ?? 99) - (b.adi ?? 99) || a.id.localeCompare(b.id));
+    .sort((a, b) => XYZ_ORDER[a.xyz ?? 'BLOCKED'] - XYZ_ORDER[b.xyz ?? 'BLOCKED'] || (a.adi ?? 99) - (b.adi ?? 99) || a.id.localeCompare(b.id));
 }
 
 // ── Chặng 8 · ma trận 9 ô ABC×XYZ với mức phục vụ ──
@@ -74,7 +78,7 @@ export function buildPolicyMatrix(states: States, selectedId: string): PolicyMat
   let selectedCell = '';
   for (const state of Object.values(states)) {
     const { abc, xyz } = state.classification;
-    const excluded = xyz === 'D' || abc === 'N/A';
+    const excluded = xyz === null || xyz === 'D' || abc === 'N/A';
     const cell = excluded ? 'D' : `${abc}${xyz}`;
     if (excluded) exceptions++;
     else counts.set(cell, (counts.get(cell) ?? 0) + 1);
@@ -107,9 +111,9 @@ export interface SeasonalityAudit {
 
 export function buildSeasonalityAudit(state: Readonly<SkuPipelineState>): SeasonalityAudit {
   if (state.classification.xyz !== 'Y') {
-    return { status: state.seasonality, reason: `SKU thuộc nhóm ${state.classification.xyz}, không phải Y — chỉ nhóm Y (dao động) mới kiểm tra mùa vụ.`, roundCount: 0, roundMeans: [], rows: [] };
+    return { status: state.seasonality, reason: `SKU thuộc nhóm ${state.classification.xyz ?? 'BLOCKED'}, không phải Y — chỉ nhóm Y (dao động) mới kiểm tra mùa vụ.`, roundCount: 0, roundMeans: [], rows: [] };
   }
-  const values = state.cycles.filter(cycle => cycle.locked).map(cycle => cycle.baseDemand);
+  const values = trailingLockedRun(state.cycles).map(cycle => cycle.baseDemand);
   if (values.length < 48) {
     return { status: state.seasonality, reason: `Chỉ có ${values.length}/48 chu kỳ khóa — cần tối thiểu 2 vòng mùa vụ đầy đủ (P20) mới kết luận.`, roundCount: 0, roundMeans: [], rows: [] };
   }
@@ -154,12 +158,12 @@ export function buildTrendAudit(state: Readonly<SkuPipelineState>): TrendAudit {
     const handoff = state.classification.xyz === 'X'
       ? ' Với nhóm X, Chặng 11 sẽ tự kiểm tra xu hướng bằng đúng thuật toán này (12 CK / 3 đoạn / ±5%) và chỉ chọn Holt nếu backtest thắng SES [C11 §3].'
       : '';
-    return { ...base, applicable: false, reason: `SKU thuộc nhóm ${state.classification.xyz} — công tắc xu hướng của Chặng 10 chỉ dành cho nhóm Y chưa có mùa vụ.${handoff}` };
+    return { ...base, applicable: false, reason: `SKU thuộc nhóm ${state.classification.xyz ?? 'BLOCKED'} — công tắc xu hướng của Chặng 10 chỉ dành cho nhóm Y chưa có mùa vụ.${handoff}` };
   }
   if (state.seasonality === 'confirmed') {
     return { ...base, applicable: false, reason: 'Đã xác nhận mùa vụ ở Chặng 9 → Chặng 11 ưu tiên Holt-Winters (chỉ khóa khi thắng Holt/SES trên backtest [C11 §4.3]), không xét xu hướng.' };
   }
-  const values = state.cycles.filter(cycle => cycle.locked).slice(-24).map(cycle => cycle.baseDemand);
+  const values = trailingLockedRun(state.cycles).slice(-24).map(cycle => cycle.baseDemand);
   if (values.length < 12) {
     return { ...base, applicable: false, reason: `Chỉ có ${values.length}/12 chu kỳ khóa gần nhất — không đủ chia 3 đoạn × 4.` };
   }
@@ -229,6 +233,12 @@ export interface SupplyAudit {
   milestones: SkuPipelineState['supplyMilestones'];
   excludedInbound: { offsetDays: number; quantity: number; label: string }[];
   freeStock: number | null;
+  /** Chặng 14 §8/§12 — lô bị loại kèm lý do (thay cho chỉ đếm số lượng). */
+  excludedLots: SkuPipelineState['excludedLots'];
+  /** Chặng 14 §5.1 — tồn có thể sử dụng ngay, đã trừ hàng giữ/hư hỏng/khóa/không bán được. */
+  availableStockAudit: SkuPipelineState['availableStockAudit'];
+  /** Chặng 14 §4.1/§10 — trạng thái chờ kiểm tra nguồn hàng (trùng lô, dữ liệu tồn không khớp). */
+  supplyStatus: SkuPipelineState['supplyStatus'];
 }
 
 export function buildSupplyAudit(state: Readonly<SkuPipelineState>): SupplyAudit {
@@ -237,6 +247,9 @@ export function buildSupplyAudit(state: Readonly<SkuPipelineState>): SupplyAudit
     milestones: state.supplyMilestones,
     excludedInbound: state.definition.inboundPlan.filter(item => !item.confirmed),
     freeStock: state.freeStock,
+    excludedLots: state.excludedLots,
+    availableStockAudit: state.availableStockAudit,
+    supplyStatus: state.supplyStatus,
   };
 }
 
@@ -257,6 +270,13 @@ export interface SafetyAudit {
   safetyStock: number | null;
   warnings: string[];
   formula: 'full' | 'policy';
+  /** Chặng 15 §5/§6 — phương pháp và nguồn mẫu thật sự đã dùng. */
+  method: SafetyStockMethod;
+  sourceTier: SafetyStockSourceTier;
+  /** Chặng 15 §7/§8 — mức cần bảo vệ và phần không thể đáp ứng. */
+  protection: number;
+  unmetProtection: number;
+  serviceLevelSearch: { candidate: number; passed: boolean; failedConditions: string[] }[];
 }
 
 export function buildSafetyAudit(state: Readonly<SkuPipelineState>): SafetyAudit {
@@ -269,6 +289,8 @@ export function buildSafetyAudit(state: Readonly<SkuPipelineState>): SafetyAudit
       sigmaDSource: locked?.sigmaDSource ?? 'cycle-std', sigmaDObservationCount: locked?.sigmaDObservationCount ?? 0,
       ltBarCycles: locked?.ltBarCycles ?? 0, sigmaLtCycles: locked?.sigmaLtCycles ?? 0,
       demandTerm: 0, leadTerm: 0, safetyStock: state.safetyStock, warnings: locked?.warnings ?? [], formula: 'policy',
+      method: locked?.method ?? 'policy-buffer', sourceTier: locked?.sourceTier ?? 'policy-fallback',
+      protection: locked?.protection ?? 0, unmetProtection: locked?.unmetProtection ?? 0, serviceLevelSearch: locked?.serviceLevelSearch ?? [],
     };
   }
   return {
@@ -278,5 +300,7 @@ export function buildSafetyAudit(state: Readonly<SkuPipelineState>): SafetyAudit
     demandTerm: locked.ltBarCycles * locked.sigmaD ** 2,
     leadTerm: locked.dBar ** 2 * locked.sigmaLtCycles ** 2,
     safetyStock: state.safetyStock, warnings: locked.warnings, formula: locked.formula,
+    method: locked.method, sourceTier: locked.sourceTier,
+    protection: locked.protection, unmetProtection: locked.unmetProtection, serviceLevelSearch: locked.serviceLevelSearch,
   };
 }

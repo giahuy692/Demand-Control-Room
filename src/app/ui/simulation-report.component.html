@@ -1,0 +1,141 @@
+<div class="report-container">
+  <header class="report-header">
+    <div class="report-title-block">
+      <span class="report-icon" aria-hidden="true">◈</span>
+      <div>
+        <p class="report-eyebrow">BÁO CÁO MÔ PHỎNG · PHIÊN {{ report().runDate }}</p>
+        <h2>Tổng hợp bất thường qua {{ report().stagesRun }}/19 chặng</h2>
+        <p class="report-scope"><span>Phạm vi báo cáo</span><b>{{ reportScopeLabel() }}</b></p>
+      </div>
+    </div>
+    <div class="report-summary-chips">
+      <div class="summary-chip"><b>{{ report().totalSkus }}</b><span>SKU đã chạy</span></div>
+      <div class="summary-chip"><b>{{ report().stagesRun }}</b><span>chặng đã khóa</span></div>
+      <div class="summary-chip critical"><b>{{ criticalCount() }}</b><span>nghiêm trọng</span></div>
+      <div class="summary-chip warn"><b>{{ warnCount() }}</b><span>cần chú ý</span></div>
+    </div>
+    <div class="report-header-actions" aria-label="Xuất báo cáo">
+      <button type="button" class="export-button download" (click)="downloadBrainstormMarkdown()">Tải báo cáo về</button>
+      <button type="button" class="export-button" (click)="copyBrainstormMarkdown()">Sao chép</button>
+      <a class="export-button link" [href]="brainstormUrl" target="_blank" rel="noopener noreferrer">Mở ChatGPT</a>
+    </div>
+  </header>
+
+  <div class="report-toolbar">
+    <div class="report-filters">
+      <label class="toggle-only-issues">
+        <input type="checkbox" [checked]="onlyIssues()" (change)="onlyIssues.set(!onlyIssues())">
+        Chỉ hiện chặng có vấn đề
+      </label>
+      @if (focusedSkuId(); as sku) {
+        <div class="sku-filter-chip">Đang lọc theo SKU: <b>{{ sku }}</b><button type="button" (click)="focusSku(sku)">Bỏ lọc ×</button></div>
+      }
+    </div>
+    <div class="report-actions" aria-label="Điều khiển báo cáo">
+      <button type="button" class="view-button" (click)="setVisibleStagesExpanded(true)">Mở tất cả</button>
+      <button type="button" class="view-button" (click)="setVisibleStagesExpanded(false)">Thu tất cả</button>
+      @if (exportMessage()) {
+        <span class="export-status" [class.failed]="exportStatus() === 'failed'">{{ exportMessage() }}</span>
+      }
+    </div>
+  </div>
+
+  @if (!report().stagesRun) {
+    <div class="report-empty">
+      <span aria-hidden="true">◈</span>
+      <h3>Chưa có chặng nào được chạy</h3>
+      <p>Chạy ít nhất Chặng 1 trong Không gian mô phỏng để bắt đầu tổng hợp báo cáo.</p>
+    </div>
+  } @else {
+    <div class="report-body">
+      @for (section of visibleSections(); track section.stage) {
+        <section class="stage-section" [class.has-issues]="section.issues.length" [class.expanded]="isExpanded(section.stage)">
+          <button type="button" class="stage-section-head" (click)="toggleStage(section.stage)" [attr.aria-expanded]="isExpanded(section.stage)">
+            <span class="stage-num">{{ section.stage.toString().padStart(2, '0') }}</span>
+            <b>{{ section.title }}</b>
+            <span class="stage-counts">
+              <em class="ok">{{ section.normalCount }} bình thường</em>
+              @if (section.issues.length) { <em class="bad">{{ section.issues.length }} nhóm vấn đề</em> }
+              @else { <em class="clean">Không phát hiện bất thường</em> }
+            </span>
+            <i class="chevron" aria-hidden="true">{{ isExpanded(section.stage) ? '▾' : '▸' }}</i>
+          </button>
+
+          @if (isExpanded(section.stage)) {
+            <div class="stage-section-body">
+              @if (!section.issues.length) {
+                <p class="no-issue-note">Toàn bộ {{ section.totalSkus }} SKU đi qua chặng này không phát sinh cảnh báo nào.</p>
+              }
+              @for (issueItem of section.issues; track issueItem.title) {
+                <article class="issue-card" [class]="issueItem.severity">
+                  <div class="issue-head">
+                    <span class="issue-severity">{{ severityLabel[issueItem.severity] }}</span>
+                    <b>{{ issueItem.title }}</b>
+                    <span class="issue-count">{{ issueItem.skuIds.length }} SKU</span>
+                  </div>
+                  <p class="issue-description">{{ issueItem.description }}</p>
+                  @if (issueItem.docReference) {
+                    <p class="issue-doc"><span>Căn cứ tài liệu</span>{{ issueItem.docReference }}</p>
+                  }
+                  @if (issueItem.proposal) {
+                    <p class="issue-proposal"><span>Đề xuất</span>{{ issueItem.proposal }}</p>
+                  }
+                  @if (issueItem.details.length) {
+                    <div class="issue-detail-block">
+                      <div class="issue-detail-title">
+                        <span>Điểm bất thường &amp; cách hệ thống xử lý</span>
+                        <em>{{ issueItem.details.length }} dòng</em>
+                      </div>
+                      <div class="issue-detail-list">
+                        @for (detail of issueItem.details.slice(0, detailPreviewLimit); track detail.skuId + detail.point) {
+                          <div class="issue-detail-row">
+                            <div class="detail-sku">
+                              <b>{{ detail.skuId }}</b>
+                              <span>{{ detail.skuName }}</span>
+                            </div>
+                            <dl>
+                              <div><dt>Điểm bất thường</dt><dd>{{ detail.point }}</dd></div>
+                              <div><dt>Lý do</dt><dd>{{ detail.reason }}</dd></div>
+                              <div><dt>Hệ thống xử lý</dt><dd>{{ detail.systemAction }}</dd></div>
+                              @if (detail.evidence) {
+                                <div><dt>Bằng chứng</dt><dd>{{ detail.evidence }}</dd></div>
+                              }
+                            </dl>
+                          </div>
+                        }
+                      </div>
+                      @if (issueItem.details.length > detailPreviewLimit) {
+                        <p class="issue-detail-more">Còn {{ issueItem.details.length - detailPreviewLimit }} dòng khác. Bấm “Tải báo cáo về” để xem đầy đủ trong file.</p>
+                      }
+                    </div>
+                  }
+                  <div class="issue-skus">
+                    @for (skuId of issueItem.skuIds.slice(0, 20); track skuId) {
+                      <button type="button" class="sku-chip" [class.active]="focusedSkuId() === skuId" (click)="focusSku(skuId)" [title]="skuName(skuId)">{{ skuId }}</button>
+                    }
+                    @if (issueItem.skuIds.length > 20) { <span class="sku-chip-more">+{{ issueItem.skuIds.length - 20 }} SKU khác</span> }
+                  </div>
+                </article>
+              }
+            </div>
+          }
+        </section>
+      } @empty {
+        <div class="report-filter-empty">
+          <span aria-hidden="true">◈</span>
+          <b>Không có chặng nào khớp bộ lọc đang chọn</b>
+          <p>Hãy bỏ lọc SKU hoặc tắt chế độ chỉ hiện chặng có vấn đề để xem lại toàn bộ báo cáo.</p>
+        </div>
+      }
+    </div>
+
+    @if (report().recommendations.length) {
+      <footer class="report-recommendations">
+        <h3>Tổng hợp đề xuất</h3>
+        <ol>
+          @for (item of report().recommendations; track item) { <li>{{ item }}</li> }
+        </ol>
+      </footer>
+    }
+  }
+</div>

@@ -1,4 +1,4 @@
-import { DailyRecord, SkuDefinition } from './models';
+import { DailyRecord, PortfolioMode, SkuDefinition } from './models';
 
 export type DataSourceId = 'mock' | 'real';
 
@@ -9,9 +9,17 @@ export interface SimulationDataset {
   readonly dailyBySku: Readonly<Record<string, readonly DailyRecord[]>>;
   readonly audit: readonly string[];
   readonly dateRange?: { min: string; max: string; recommendedRunDate: string };
+  /**
+   * RULE-01-004/06-001 — ngày nay `ExtractMetadata.PortfolioMode` chưa có trong
+   * pipeline ingest (tools/convert-real-data.mjs không mang theo metadata này) —
+   * mặc định BẢO THỦ 'SELECTED_SKU_SIMULATION'/`true`, KHÔNG tự nhận là toàn danh
+   * mục khi chưa có bằng chứng, để Chặng 6 không tự khóa ABC chính thức [DEC-010].
+   */
+  readonly portfolioMode: PortfolioMode;
+  readonly extractIsTruncated: boolean;
 }
 
-function operationalInputs(id: string, type: string, cycles: number): Pick<SkuDefinition, 'supplier' | 'inboundPlan' | 'commitments' | 'futurePromotions' | 'leadTimeHistoryDays' | 'maxStock' | 'warehouseCapacity' | 'shelfLifeDays' | 'purchasePrice' | 'moq' | 'purchaseTermsComplete' | 'actualDemand' | 'actualEndingStock' | 'actualReceiptDelayDays' | 'actualBudgetUsed'> {
+function operationalInputs(id: string, type: string, cycles: number): Pick<SkuDefinition, 'supplier' | 'inboundPlan' | 'commitments' | 'futurePromotions' | 'leadTimeHistoryDays' | 'maxStock' | 'warehouseCapacity' | 'shelfLifeDays' | 'purchasePrice' | 'moq' | 'purchaseTermsComplete' | 'actualDemand' | 'actualEndingStock' | 'actualReceiptDelayDays' | 'actualBudgetUsed' | 'heldStock' | 'damagedStock' | 'blockedStock' | 'unsellableStock' | 'displayMinimumStock' | 'unitsPerCarton' | 'orderStep' | 'supplierMinOrderValue' | 'receivingLocation' | 'currency' | 'landedCostPerUnit' | 'coreOrStrategicRole' | 'obsolescenceRiskRank' | 'portfolioMode' | 'extractIsTruncated'> {
   const ordinal = Number(id.slice(-3)) || 1;
   const leadMean = 105 + (ordinal % 3) * 15;
   const active = cycles > 0;
@@ -26,12 +34,13 @@ function operationalInputs(id: string, type: string, cycles: number): Pick<SkuDe
         return Math.round(index === 1 || index === 4 ? noisy * promoUplift : noisy);
       })
     : [];
+  const shelfLifeDays = ordinal % 5 === 0 ? 180 : null;
   return {
     supplier: `NCC-${String((ordinal % 7) + 1).padStart(2, '0')}`,
     inboundPlan: active ? [
-      { offsetDays: 45, quantity: 80 + (ordinal % 5) * 20, confirmed: true, label: 'Lô đã xác nhận ETA' },
-      { offsetDays: 105, quantity: 60 + (ordinal % 4) * 15, confirmed: true, label: 'Lô bổ sung kế tiếp' },
-      { offsetDays: 75, quantity: 50, confirmed: false, label: 'Lô đang đàm phán — không cộng' },
+      { offsetDays: 45, quantity: 80 + (ordinal % 5) * 20, confirmed: true, label: 'Lô đã xác nhận ETA', reliability: 'shipped-confirmed', receivedQuantity: 0, cancelledQuantity: 0, lotId: `${id}-LOT-1` },
+      { offsetDays: 105, quantity: 60 + (ordinal % 4) * 15, confirmed: true, label: 'Lô bổ sung kế tiếp', reliability: 'supplier-confirmed', receivedQuantity: 0, cancelledQuantity: 0, lotId: `${id}-LOT-2` },
+      { offsetDays: 75, quantity: 50, confirmed: false, label: 'Lô đang đàm phán — không cộng', reliability: 'planned', receivedQuantity: 0, cancelledQuantity: 0, lotId: `${id}-LOT-3` },
     ] : [],
     commitments: active ? [
       { offsetDays: 15, quantity: 12 + ordinal % 9, label: 'Đơn giữ hàng/điều chuyển' },
@@ -44,7 +53,7 @@ function operationalInputs(id: string, type: string, cycles: number): Pick<SkuDe
     leadTimeHistoryDays: active ? [leadMean - 18, leadMean, leadMean + 18] : [],
     maxStock: 520 + (ordinal % 6) * 80,
     warehouseCapacity: 720 + (ordinal % 5) * 100,
-    shelfLifeDays: ordinal % 5 === 0 ? 180 : null,
+    shelfLifeDays,
     purchasePrice: 28000 + (ordinal % 17) * 12000,
     moq: [12, 24, 36, 48][ordinal % 4],
     purchaseTermsComplete: active && ordinal % 13 !== 0,
@@ -52,6 +61,24 @@ function operationalInputs(id: string, type: string, cycles: number): Pick<SkuDe
     actualEndingStock: active ? 25 + ordinal % 80 : 0,
     actualReceiptDelayDays: active ? [ordinal % 4, (ordinal + 1) % 5, ordinal % 3] : [],
     actualBudgetUsed: active ? (250 + ordinal % 160) * (28000 + (ordinal % 17) * 12000) : 0,
+    // Chặng 14 §5.1 — CHƯA CÓ TRƯỜNG RIÊNG TỪ ERP cho held/damaged/blocked/unsellable;
+    // giữ phần lớn = 0, chỉ đặt vài SKU khác 0 để có ví dụ kiểm toán thật trong dữ liệu giả.
+    heldStock: active && ordinal % 9 === 0 ? 8 : 0,
+    damagedStock: active && ordinal % 13 === 0 ? 5 : 0,
+    blockedStock: 0,
+    unsellableStock: 0,
+    displayMinimumStock: active ? Math.round(6 + (ordinal % 3) * 4) : 0,
+    unitsPerCarton: 1,
+    orderStep: 1,
+    supplierMinOrderValue: null,
+    receivingLocation: 'KGV',
+    currency: 'VND',
+    landedCostPerUnit: null,
+    coreOrStrategicRole: ordinal % 5 === 0 ? 'core' : ordinal % 7 === 0 ? 'strategic' : 'normal',
+    obsolescenceRiskRank: shelfLifeDays ? 1 : 0,
+    // RULE-01-004 — catalog demo 14 SKU cố định, không phải danh mục thật đầy đủ; không tự nhận FULL_PORTFOLIO.
+    portfolioMode: 'SELECTED_SKU_SIMULATION',
+    extractIsTruncated: true,
   };
 }
 
@@ -112,7 +139,11 @@ const EMPTY_DATES = Object.freeze([]) as unknown as string[];
 function dailyRecord(sku: string, date: string, openStock: number, closeStock: number, sales: number, receiptHour: string | null, promoCode: string | null, hasRecord = true): DailyRecord {
   return {
     sku, date, openStock, closeStock, sales, hasRecord, receiptHour, promoCode,
-    isStockout: false, stockoutReason: null, baseDemand: null, baseSource: null,
+    salesStatus: hasRecord ? (sales > 0 ? 'OBSERVED' : 'OBSERVED_ZERO') : 'SOURCE_UNKNOWN', isReferenceOnly: false,
+    // Dữ liệu giả/nguồn thật trước scaffold luôn coi là đã tính được (không có mốc bị thiếu);
+    // buildCalendarScaffold() sẽ tính lại đúng theo bất biến RULE-02-003 khi ghép vào lịch liên tục.
+    stockSource: 'OBSERVED', stockCalculationStatus: openStock < 0 || closeStock < 0 ? 'NEGATIVE_REVIEW' : 'CALCULATED',
+    isStockout: false, stockoutReason: null, stockoutReviewRequired: false, baseDemand: null, baseSource: null,
     referenceDates: EMPTY_DATES, beforeReferenceDates: EMPTY_DATES, afterReferenceDates: EMPTY_DATES, referenceMedian: null,
     balanceStatus: null, selectionReason: '',
   };
@@ -257,6 +288,27 @@ export function parseRealDataset(dailyPayload: string, productPayload: string): 
       actualEndingStock: records.at(-1)?.closeStock ?? 0,
       actualReceiptDelayDays: [],
       actualBudgetUsed: 0,
+      // Dữ liệu ERP thật hiện chưa có cột nguồn cho các trường Chặng 14–17 dưới đây
+      // (Sql/demand-planing-data-source-notes.md §9.2) — giữ mặc định trung tính để
+      // logic mới suy biến về đúng hành vi cũ, không tự loại bỏ SKU nào.
+      heldStock: 0,
+      damagedStock: 0,
+      blockedStock: 0,
+      unsellableStock: 0,
+      displayMinimumStock: 0,
+      unitsPerCarton: 1,
+      orderStep: 1,
+      supplierMinOrderValue: null,
+      receivingLocation: 'KGV',
+      currency: 'VND',
+      landedCostPerUnit: null,
+      coreOrStrategicRole: 'normal' as const,
+      obsolescenceRiskRank: 0,
+      // RULE-01-004 — chưa có ExtractMetadata.PortfolioMode thật trong pipeline ingest hiện tại
+      // (tools/convert-real-data.mjs không mang metadata này) — mặc định bảo thủ, không tự nhận
+      // là toàn danh mục. Sao chép từ dataset-level portfolioMode/extractIsTruncated bên dưới.
+      portfolioMode: 'SELECTED_SKU_SIMULATION' as const,
+      extractIsTruncated: true,
     };
   });
 
@@ -271,6 +323,10 @@ export function parseRealDataset(dailyPayload: string, productPayload: string): 
     catalog,
     dailyBySku,
     dateRange: { min: minDate, max: maxDate, recommendedRunDate },
+    // RULE-01-004 — xem chú thích SimulationDataset.portfolioMode: mặc định bảo thủ vì
+    // demand-planing-v3.sql ExtractMetadata (§02) chưa được ingest bởi pipeline hiện tại.
+    portfolioMode: 'SELECTED_SKU_SIMULATION',
+    extractIsTruncated: true,
     audit: [`Đọc ${catalog.length} SKU và ${Object.values(dailyBySku).reduce((sum, rows) => sum + rows.length, 0)} dòng daily từ ${dailySourceName}.`],
   };
 }

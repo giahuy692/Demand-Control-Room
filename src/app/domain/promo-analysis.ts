@@ -35,17 +35,23 @@ export function buildPromoRegionSamples(daily: readonly DailyRecord[]): PromoReg
   }
 
   return regions.map(region => {
-    const actualSales = region.rows.reduce((sum, row) => sum + row.sales, 0);
+    // RULE-01-001 — ngày CTKM có thể là scaffold (sales=null, chưa có nguồn thật); tổng actualSales
+    // chỉ mang tính hiển thị bằng chứng, KHÔNG dùng để quyết định K vì missingUnknownSales/missingBase
+    // bên dưới đã loại toàn bộ vùng có ngày sales=null khỏi việc tính hệ số K [DEC-006/007].
+    const missingUnknownSales = region.rows.some(row => row.sales === null);
+    const actualSales = region.rows.reduce((sum, row) => sum + (row.sales ?? 0), 0);
     const naturalBase = region.rows.reduce((sum, row) => sum + (row.baseDemand ?? 0), 0);
     const hasStockout = region.rows.some(row => row.isStockout);
     const missingBase = region.rows.some(row => row.baseSource !== 'promo-normalized' || row.baseDemand === null);
     const rejectionReason = hasStockout
       ? 'Vùng có stockout, số bán bị bóp méo.'
-      : missingBase
-        ? 'Có ngày chưa được Chặng 4 khóa nền tự nhiên.'
-        : naturalBase <= 0
-          ? 'Tổng nền tự nhiên của vùng không dương.'
-          : null;
+      : missingUnknownSales
+        ? 'Có ngày chưa có nguồn bán thật (scaffold), không đủ căn cứ tính K.'
+        : missingBase
+          ? 'Có ngày chưa được Chặng 4 khóa nền tự nhiên.'
+          : naturalBase <= 0
+            ? 'Tổng nền tự nhiên của vùng không dương.'
+            : null;
     return {
       startDate: region.rows[0].date,
       endDate: region.rows.at(-1)!.date,

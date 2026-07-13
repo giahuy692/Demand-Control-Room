@@ -18,12 +18,27 @@ export const DEFAULT_POLICY: SimulationPolicy = {
   cycleLength: 15,
   cutoffHour: '10:00',
   referenceRadius: 7,
+  referenceRadiusExtended: 14,
   maxReferenceRadius: 24,
   minimumReferences: 3,
   maxBalancedPerSide: 7,
   version: 'DP-2026.06-v1',
   periodBudget: 4_000_000_000,
   standingPromotionCodes: STANDING_PROMOTION_CODES,
+  clearancePromotionCodes: [],
+  unknownReviewPromotionCodes: [],
+  /** RULE-05-003 — bật lấp Tầng 2 (mức đại diện chu kỳ) theo ngưỡng 12-14/8-11 ngày. DEC-P03/P04/P05 đều còn "ĐỀ XUẤT", CHƯA phê duyệt chính thức → mặc định TẮT để không đổi hành vi khóa chu kỳ hiện có; chỉ bật khi backtest/duyệt xong. */
+  enableTier2CycleFallback: false,
+  operationalDataStatus: 'NOT_APPLICABLE',
+  serviceLevelCandidates: [90, 92, 95, 97, 97.5, 99],
+  minimumLeadTimeWindows: 4,
+  maxLeadTimeBreachRate: 0.05,
+  safetyStockSurplusCapMultiplier: 3,
+  safetyStockCapitalCapPerSku: Infinity,
+  defaultLeadTimeDays: 90,
+  overBudgetProposalWindowCycles: 1,
+  moqSurplusApprovalThresholdRatio: 0.2,
+  abnormalOrderMultiplier: 2,
 };
 
 export const STAGES: readonly StageDefinition[] = [

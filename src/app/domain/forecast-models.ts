@@ -1,4 +1,4 @@
-import { calculateBias, calculateTrend, calculateWape, detectPulse, detectShortCycle, mean } from './math';
+import { calculateBias, calculateTrend, calculateWape, detectPulse, detectShortCycle, mean, trailingLockedRun } from './math';
 import { ForecastResult, SkuPipelineState, XyzClass } from './models';
 
 /**
@@ -399,17 +399,23 @@ function pct(wape: number | null): string {
  */
 export function fitBaseForecast(
   values: readonly number[],
-  xyz: XyzClass,
+  xyz: XyzClass | null,
   seasonality: SkuPipelineState['seasonality'],
   trend: SkuPipelineState['trend'],
 ): ForecastFit {
-  if (xyz === 'D' || !values.length) {
+  if (xyz === 'D' || xyz === null || !values.length) {
+    // RULE-11-001 — xyz=null (CLASSIFICATION_BLOCKED/NO_POSITIVE_DEMAND_REVIEW ở Chặng 7) hoặc
+    // values rỗng (chu kỳ gần nhất theo lịch chính là một khoảng chưa khóa) đều bị CHẶN tự học,
+    // KHÔNG được tự chuyển thành nhóm D — dùng chung khung placeholder với D nhưng khác reason.
+    const reason = xyz === 'D'
+      ? 'Nhóm D chưa có kế hoạch Thu mua hoặc SKU tương tự đã được duyệt; không tự phát hành dự báo.'
+      : 'FORECAST_INPUT_BLOCKED — không có chu kỳ liên tiếp nào tính từ hiện tại để học (chu kỳ gần nhất theo lịch chưa khóa hoặc phân loại đã bị chặn); không nén chuỗi, không tự chuyển nhóm D.';
     return {
       learning: null,
       result: {
         model: 'PurchasePlan', params: {}, baseForecast: [],
         rmse: null, nrmse: null, wape: null, bias: null, hitRate: null, missedPulses: 0, falsePulses: 0, wapePositive: null,
-        lockStatus: 'exception', reason: 'Nhóm D chưa có kế hoạch Thu mua hoặc SKU tương tự đã được duyệt; không tự phát hành dự báo.',
+        lockStatus: 'exception', reason,
         rpScan: null, pStar: null, controlModel: null, controlWape: null, reliability: 'low', futureSources: null,
       },
     };
@@ -517,9 +523,14 @@ export function fitBaseForecast(
   return toFit(incumbent, incumbentReason, gate);
 }
 
-/** Chuỗi khóa ĐẦY ĐỦ cho Chặng 11 (khác cửa sổ 24 CK của C6/C7 — Holt-Winters cần ≥ 2 vòng). */
+/**
+ * Chuỗi khóa cho Chặng 11 (khác cửa sổ 24 CK của C6/C7 — Holt-Winters cần ≥ 2 vòng, không giới
+ * hạn độ dài). RULE-11-001 — dùng `trailingLockedRun` (đoạn chu kỳ khóa LIÊN TIẾP tính từ chu kỳ
+ * gần nhất theo lịch) thay vì `cycles.filter(locked)` cũ (xóa khoảng trống rồi nối 2 đoạn xa nhau
+ * thành chuỗi liên tục giả).
+ */
 export function lockedSeriesAll(state: Readonly<SkuPipelineState>): number[] {
-  return state.cycles.filter(cycle => cycle.locked).map(cycle => cycle.baseDemand);
+  return trailingLockedRun(state.cycles).map(cycle => cycle.baseDemand);
 }
 
 /** Dựng lại toàn bộ diễn biến học của SKU đang chọn — cùng hàm với engine nên khớp số tuyệt đối. */

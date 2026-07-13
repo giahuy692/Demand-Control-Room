@@ -19,6 +19,7 @@
     <div class="run-actions">
       <div class="view-mode-switch" aria-label="Chế độ hiển thị">
         <button type="button" [class.active]="currentView() === 'simulation'" (click)="setView('simulation')">Không gian mô phỏng</button>
+        <button type="button" [class.active]="currentView() === 'simulation-report'" (click)="setView('simulation-report')">Báo cáo mô phỏng</button>
         <button type="button" [class.active]="currentView() === 'report'" (click)="setView('report')">Báo cáo so sánh</button>
       </div>
       <div class="source-switch" aria-label="Nguồn dữ liệu mô phỏng">
@@ -57,7 +58,7 @@
   @if (store.error()) { <div class="error-banner" role="alert"><b>Pipeline đã dừng.</b> {{ store.error() }}</div> }
 
   @if (currentView() === 'simulation') {
-    <main class="main-grid" [class.audit-collapsed]="auditCollapsed()" [class.process-collapsed]="processCollapsed()" [class.context-collapsed]="contextCollapsed()" [style.--process-panel-width]="processPanelWidth() + 'px'">
+    <main class="main-grid" [class.audit-collapsed]="auditCollapsed()" [class.process-collapsed]="processCollapsed()" [style.--process-panel-width]="processPanelWidth() ? processPanelWidth() + 'px' : null">
     <section class="panel catalog-panel audit-explorer collapsible-panel" [class.collapsed]="auditCollapsed()" aria-labelledby="audit-explorer-title">
       @if (auditCollapsed()) {
         <button type="button" class="panel-collapse-rail" (click)="auditCollapsed.set(false)" aria-label="Mở rộng Audit Explorer" title="Mở rộng Audit Explorer"><i aria-hidden="true">»</i><b>AUDIT EXPLORER</b></button>
@@ -65,6 +66,9 @@
       <div class="panel-head audit-panel-head">
         <div><p class="eyebrow">AUDIT EXPLORER</p><h2 id="audit-explorer-title">Dữ liệu qua từng chặng</h2></div>
         <div class="panel-head-actions">
+          @if (currentTableExport(); as tableExport) {
+            <button type="button" class="table-export-button" (click)="downloadCurrentStageTable()" [disabled]="!tableExport.rows.length" [attr.title]="'Tải bảng đang xem: ' + tableExport.rows.length + ' dòng'">Tải bảng</button>
+          }
           <button type="button" class="panel-collapse-toggle" (click)="auditCollapsed.set(true)" aria-label="Thu gọn Audit Explorer" title="Thu gọn Audit Explorer">«</button>
         </div>
       </div>
@@ -88,14 +92,19 @@
           }
           <div class="audit-table-wrap">
             <table class="audit-table daily-table">
-              <thead><tr><th>Ngày</th><th>Tồn đầu</th><th>Tồn cuối</th><th>Bán</th><th>Nhập</th><th>SO</th><th>CTKM</th><th>Nền</th><th>Độ tin cậy</th></tr></thead>
+              <thead><tr><th>Ngày</th><th>Nền</th><th>Độ tin cậy</th><th>Bán</th><th>SO</th><th>CTKM</th><th>Tồn cuối</th><th>Nhập</th><th>Tồn đầu</th></tr></thead>
               <tbody>
                 @for (row of auditDailyRows(); track row.date) {
                   <tr [id]="'audit-' + row.date" [class.row-stockout]="row.isStockout" [class.row-promo]="row.promoCode" [class.row-focus]="auditDate() === row.date" [class.row-reference-before]="isReferenceBefore(row)" [class.row-reference-after]="isReferenceAfter(row)" (click)="selectAuditRow(row)" tabindex="0" (keydown.enter)="selectAuditRow(row)">
-                    <td>{{ row.date }}</td><td>{{ row.openStock }}</td><td>{{ row.closeStock }}</td><td class="value">{{ row.sales }}</td><td>{{ row.receiptHour || '—' }}</td>
+                    <td>{{ row.date }}</td>
+                    <td class="base-value">{{ format(row.baseDemand, 1) }}</td>
+                    <td><span class="balance-chip" [class]="'balance-chip ' + statusClass(row)">{{ statusLabel(row) }}</span></td>
+                    <td class="value">{{ row.sales }}</td>
                     <td>@if (row.isStockout) { <span class="data-chip so">SO</span> } @else { — }</td>
                     <td>@if (row.promoCode) { <span class="data-chip km" [attr.title]="row.promoCode">{{ promoChipLabel(row.promoCode) }}</span> } @else { — }</td>
-                    <td class="base-value">{{ format(row.baseDemand, 1) }}</td><td><span class="balance-chip" [class]="'balance-chip ' + statusClass(row)">{{ statusLabel(row) }}</span></td>
+                    <td>{{ row.closeStock }}</td>
+                    <td>{{ row.receiptHour || '—' }}</td>
+                    <td>{{ row.openStock }}</td>
                   </tr>
                 } @empty { <tr><td colspan="9" class="table-empty">Chặng này chưa có dữ liệu ngày.</td></tr> }
               </tbody>
@@ -113,7 +122,7 @@
                       <tr [class.cycle-unlocked]="!cycle.locked">
                         <td class="cycle-id">CK {{ cycle.cycleIndex.toString().padStart(2, '0') }}</td>
                         <td>{{ cycle.dateStart }} → {{ cycle.dateEnd }}</td>
-                        <td class="base-value">{{ cycle.locked ? format(cycle.baseDemand, 1) : (cycle.emptyCycle ? 'TRỐNG' : 'CHƯA ĐỦ NỀN') }}</td>
+                        <td class="base-value" [title]="cycle.locked ? 'Đã khóa: chu kỳ này đã đủ dữ liệu sức mua cơ bản và được dùng cho dự báo.' : cycle.emptyCycle ? 'Trống: không có ngày nào trong chu kỳ này có dữ liệu bán. Hệ thống bỏ qua hoàn toàn chu kỳ này.' : 'Chưa đủ nền: chu kỳ này còn ngày chưa tìm được sức mua cơ bản nên chưa thể dùng để học dự báo.'">{{ cycle.locked ? format(cycle.baseDemand, 1) : (cycle.emptyCycle ? 'TRỐNG' : 'CHƯA ĐỦ NỀN') }}</td>
                         <td><div class="demand-bar"><i [style.width.%]="Math.min(100, cycle.baseDemand / 2)"></i></div></td>
                       </tr>
                     } @empty { <tr><td colspan="4" class="table-empty">Chạy Chặng 5 để tạo dữ liệu chu kỳ.</td></tr> }
@@ -384,7 +393,23 @@
             }
             @case (14) {
               @if (supplyAudit(); as audit) {
-                <div class="insight-note">Nhà cung cấp <b>{{ audit.supplier }}</b> · <b>I_free = OnHand + ΣInbound xác nhận − ΣCommitted</b> · {{ audit.excludedInbound.length }} lô chưa xác nhận bị loại.</div>
+                <div class="insight-note">Nhà cung cấp <b>{{ audit.supplier }}</b> · <b>I_free = Tồn có thể sử dụng ngay + ΣInbound xác nhận − ΣCommitted</b> · {{ audit.excludedLots.length }} lô bị loại.</div>
+                @if (audit.availableStockAudit?.mismatch || audit.supplyStatus.pendingVerification) {
+                  <div class="insight-note">
+                    @if (audit.availableStockAudit?.mismatch) { <span>⚠ Dữ liệu tồn không khớp: tồn thực tế nhỏ hơn tổng hàng giữ/hư hỏng/khóa/không bán được.</span> }
+                    @for (reason of audit.supplyStatus.reasons; track reason) { <span>⚠ {{ reason }}</span> }
+                  </div>
+                }
+                @if (audit.excludedLots.length) {
+                  <div class="audit-table-wrap">
+                    <table class="audit-table insight-table">
+                      <thead><tr><th>Lô</th><th>Số lượng</th><th>Lý do bị loại</th></tr></thead>
+                      <tbody>
+                        @for (lot of audit.excludedLots; track lot.lotId) { <tr><td class="cycle-id">{{ lot.lotId }}</td><td>{{ format(lot.quantity) }}</td><td>{{ lot.reason }}</td></tr> }
+                      </tbody>
+                    </table>
+                  </div>
+                }
                 <div class="audit-table-wrap">
                   <table class="audit-table insight-table">
                     <thead><tr><th>Mốc</th><th>Diễn giải</th><th>Tồn hiện có</th><th>Inbound xác nhận lũy kế</th><th>Cam kết lũy kế</th><th>I_free</th></tr></thead>
@@ -400,14 +425,16 @@
             @case (15) {
               @if (safetyAudit(); as audit) {
                 @if (audit.applicable) {
-                  <div class="insight-note"><b>SS = Z × √(LT̄×σd² + D̄²×σLT²)</b> · LT̄ = {{ format(audit.ltBarCycles, 2) }} chu kỳ · σLT = {{ format(audit.sigmaLtCycles, 2) }} chu kỳ (quy đổi theo M={{ cycleLength }} ngày).</div>
+                  <div class="insight-note"><b>Phương pháp: {{ audit.method === 'percentile' ? 'Phân vị độ lệch lead time' : audit.method === 'z-formula' ? 'Z × √(LT̄×σd² + D̄²×σLT²)' : 'Đệm chính sách' }}</b> · nguồn = {{ audit.sourceTier }} · LT̄ = {{ format(audit.ltBarCycles, 2) }} chu kỳ · σLT = {{ format(audit.sigmaLtCycles, 2) }} chu kỳ (quy đổi theo M={{ cycleLength }} ngày).</div>
                   <div class="calc-card">
-                    <div class="calc-row"><span>Mức phục vụ (C8) → Z</span><b>{{ audit.serviceLevel }}% → {{ format(audit.z, 2) }}</b></div>
+                    <div class="calc-row"><span>Mức phục vụ đã dò → Z</span><b>{{ audit.serviceLevel }}% → {{ format(audit.z, 2) }}</b></div>
                     <div class="calc-row"><span>D̄ · dự báo cuối trung bình</span><b>{{ format(audit.dBar, 1) }}</b></div>
                     <div class="calc-row"><span>σd · {{ audit.sigmaDSource === 'backtest' ? 'sai số TEST C11' : 'fallback dao động CK' }} (n={{ audit.sigmaDObservationCount }})</span><b>{{ format(audit.sigmaD, 2) }}</b></div>
                     <div class="calc-row"><span>LT̄×σd² · LT̄={{ format(audit.ltBarCycles, 2) }} CK</span><b>{{ format(audit.demandTerm, 1) }}</b></div>
                     <div class="calc-row"><span>D̄²×σLT² · σLT={{ format(audit.sigmaLtCycles, 2) }} CK</span><b>{{ format(audit.leadTerm, 1) }}</b></div>
                     <div class="calc-row total"><span>= Tồn an toàn SS (làm tròn lên)</span><b>{{ format(audit.safetyStock) }}</b></div>
+                    <div class="calc-row total"><span>Mức cần bảo vệ = max(SS, DisplayMin)</span><b>{{ format(audit.protection) }}</b></div>
+                    @if (audit.unmetProtection > 0) { <div class="calc-row minus"><span>Không thể đáp ứng (vượt trần/sức chứa/hạn dùng)</span><b>{{ format(audit.unmetProtection) }}</b></div> }
                   </div>
                   @if (audit.warnings.length) {
                     <div class="insight-note">@for (warning of audit.warnings; track warning) { <span>⚠ {{ warning }}</span> }</div>
@@ -475,6 +502,155 @@
         <button type="button" class="panel-collapse-rail" (click)="processCollapsed.set(false)" aria-label="Mở rộng process panel" title="Mở rộng process panel"><i aria-hidden="true">»</i><b>PROCESS PANEL · C{{ store.activeStage().toString().padStart(2, '0') }}</b></button>
       }
       <div class="process-resizer" role="separator" aria-label="Điều chỉnh độ rộng panel mô phỏng" aria-orientation="vertical" tabindex="0" [attr.aria-valuenow]="processPanelWidth()" aria-valuemin="580" aria-valuemax="1180" title="Kéo để đổi độ rộng · phím ← → để tinh chỉnh" (pointerdown)="startProcessResize($event)" (pointermove)="resizeProcessPanel($event)" (pointerup)="endProcessResize($event)" (pointercancel)="endProcessResize($event)" (lostpointercapture)="endProcessResize($event)" (keydown)="resizeProcessPanelByKeyboard($event)"><span></span></div>
+
+      <details class="merged-context-panel" [open]="!contextCollapsed()" (toggle)="toggleMergedContext($event)">
+        <summary class="merged-context-summary">
+          <div class="sku-identity-mini">
+            <div class="product-mark">{{ selectedDefinition().id.slice(-2) }}</div>
+            <div class="sku-identity-info">
+              <span>{{ selectedDefinition().id }}</span>
+              <h3>{{ selectedDefinition().name }}</h3>
+              <p>{{ selectedDefinition().category }}</p>
+            </div>
+          </div>
+          <div class="context-summary-actions">
+            <span class="context-hint">SKU Catalog & Context <i aria-hidden="true">⌄</i></span>
+          </div>
+        </summary>
+        <div class="merged-context-body">
+          <div class="merged-catalog">
+            <div class="search-box">
+              <span aria-hidden="true">⌕</span>
+              <input type="search" aria-label="Tìm SKU" placeholder="Mã, tên hoặc danh mục…" [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)">
+            </div>
+            <div class="column-context"><span>Snapshot</span><b>{{ store.view().hasRun ? 'Sau chặng ' + store.activeStage() : 'Chưa thực thi' }}</b></div>
+            <div class="sku-list" role="listbox" aria-label="Danh sách SKU">
+              @for (sku of visibleCatalog(); track sku.id) {
+                <button type="button" class="sku-row" [class.selected]="sku.id === store.selectedSkuId()" (click)="selectSku(sku)" [attr.aria-selected]="sku.id === store.selectedSkuId()">
+                  <span class="sku-index">{{ sku.id.slice(-3) }}</span>
+                  <span class="sku-copy">
+                    <b>{{ sku.name }}</b>
+                    <small>
+                      {{ sku.category }} · {{ sku.description }}
+                      @if (getSkuSortValueLabel(sku)) {
+                        · <span class="sku-sort-meta">{{ getSkuSortValueLabel(sku) }}</span>
+                      }
+                    </small>
+                  </span>
+                  <span class="sku-class" [class.pending]="!stateFor(sku.id)">{{ store.stageLabel(stateFor(sku.id)) }}</span>
+                </button>
+              }
+            </div>
+          </div>
+
+          <div class="merged-info">
+            @if (!store.view().state) {
+              <div class="drawer-wait"><span>⌁</span><h3>Không đọc trước tương lai</h3><p>Drawer sẽ nhận đúng snapshot sau khi Chặng {{ store.activeStage() }} chạy xong.</p></div>
+            } @else {
+              @if (store.activeStage() <= 5) {
+                <div class="stage-context-panel">
+                  @if (store.activeStage() === 1) {
+                    <div class="panel-header"><span>Thông tin Chặng 1</span></div>
+                    <div class="panel-body"><div class="muted-cell">Kiểm tra thông số ở bảng chính.</div></div>
+                  }
+                  @if (store.activeStage() === 2) {
+                    <div class="panel-header"><span>Danh sách Stockout ({{ stockouts().length }})</span></div>
+                    <div class="panel-body">
+                      @if (stockouts().length === 0) { <div class="muted-cell">Không có ngày Stockout</div> }
+                      @else {
+                        <div class="context-list">
+                          @for (r of stockouts(); track r.date) {
+                            <button class="context-item" (click)="selectAuditRow(r)">
+                              <span class="data-chip so">SO</span> <b>{{ r.date }}</b>
+                              <span>Tồn đầu: {{ r.openStock }}, Bán: {{ r.sales }}</span>
+                            </button>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                  @if (store.activeStage() === 3) {
+                    <div class="panel-header"><span>Nền tạm / Cần xem xét ({{ temporaryBases().length }})</span></div>
+                    <div class="panel-body">
+                      @if (temporaryBases().length === 0) { <div class="muted-cell">Không có nền tạm</div> }
+                      @else {
+                        <div class="context-list">
+                          @for (r of temporaryBases(); track r.date) {
+                            <button class="context-item" (click)="selectAuditRow(r)">
+                              <span class="data-chip pending">Chú ý</span> <b>{{ r.date }}</b>
+                              <span>Nền: {{ format(r.baseDemand, 1) }}</span>
+                            </button>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                  @if (store.activeStage() === 4) {
+                    <div class="panel-header"><span>Các ngày CTKM ({{ promos().length }})</span></div>
+                    <div class="panel-body">
+                      @if (promos().length === 0) { <div class="muted-cell">Không có CTKM</div> }
+                      @else {
+                        <div class="context-list">
+                          @for (r of promos(); track r.date) {
+                            <button class="context-item" (click)="selectAuditRow(r)">
+                              <span class="data-chip km">KM</span> <b>{{ r.date }}</b>
+                              <span [attr.title]="r.promoCode">{{ promoChipLabel(r.promoCode!) }}</span>
+                            </button>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                  @if (store.activeStage() === 5) {
+                    <div class="panel-header"><span>Chu kỳ không khóa ({{ unlockedCycles().length }})</span></div>
+                    <div class="panel-body">
+                      @if (unlockedCycles().length === 0) { <div class="muted-cell">Tất cả chu kỳ đều khóa</div> }
+                      @else {
+                        <div class="context-list">
+                          @for (c of unlockedCycles(); track c.cycleIndex) {
+                            <button class="context-item" (click)="auditDate.set(c.dateStart)">
+                              <span class="data-chip pending">CK {{ c.cycleIndex }}</span> <b>{{ c.dateStart }}</b>
+                              <span>Rỗng: {{ c.emptyCycle ? 'Có' : 'Không' }}, Chưa nền: {{ c.unresolvedDays }}</span>
+                            </button>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+              } @else {
+                <div class="classification-lockup">
+                  <div><span>Nhãn tại chặng {{ store.activeStage() }}</span><b>{{ store.stageLabel(store.view().state) }}</b></div>
+                  <div><span>Policy version</span><b class="policy-version">{{ store.policy().version }}</b></div>
+                </div>
+                <div class="metric-stack">
+                  <div class="metric-row"><span>ABC</span><b>{{ store.activeStage() >= 6 ? store.view().state!.classification.abc : 'Chưa chạy C6' }}</b></div>
+                  <div class="metric-row"><span>XYZ / D</span><b>{{ store.activeStage() >= 7 ? (store.view().state!.classification.xyz ?? 'BLOCKED') : 'Chưa chạy C7' }}</b></div>
+                  <div class="metric-row"><span>Mức phục vụ</span><b>{{ store.activeStage() >= 8 && store.view().state!.serviceLevel ? store.view().state!.serviceLevel + '%' : 'Chưa khóa' }}</b></div>
+                  <div class="metric-row"><span>Mô hình nền</span><b>{{ store.activeStage() >= 11 ? (store.view().state!.forecast?.model ?? 'Ngoại lệ') : 'Chưa chạy C11' }}</b></div>
+                  <div class="metric-row"><span>Hàng tự do</span><b>{{ store.activeStage() >= 14 ? format(store.view().state!.freeStock) : 'Chưa chạy C14' }}</b></div>
+                  <div class="metric-row accent"><span>Tồn an toàn</span><b>{{ store.activeStage() >= 15 ? format(store.view().state!.safetyStock) : 'Chưa chạy C15' }}</b></div>
+                </div>
+
+                @if (store.activeStage() >= 5) {
+                  <section class="mini-section"><div class="mini-title"><h3>Chu kỳ gần nhất</h3><span>{{ store.view().state!.cycles.length }} CK</span></div>
+                    <div class="cycle-bars">
+                      @for (cycle of store.view().state!.cycles.slice(-12); track cycle.cycleIndex) { <i [class.unlocked]="!cycle.locked" [style.height.%]="cycle.locked ? Math.min(100, 18 + cycle.baseDemand / 2) : 8" [title]="'CK ' + cycle.cycleIndex + ': ' + cycle.baseDemand"></i> }
+                    </div>
+                  </section>
+                }
+
+                <section class="mini-section stage-ledger"><div class="mini-title"><h3>Sổ cái chặng</h3><span>{{ store.completedStage() }} khóa</span></div>
+                  @for (stage of stages.slice(0, store.completedStage()); track stage.number) {
+                    <button type="button" (click)="selectStage(stage.number)" [class.current]="stage.number === store.activeStage()"><span>{{ stage.number.toString().padStart(2, '0') }}</span><b>{{ stage.shortTitle }}</b><i>✓</i></button>
+                  }
+                </section>
+              }
+            }
+          </div>
+        </div>
+      </details>
+
       <div class="stage-hero">
         <div class="stage-number">{{ store.activeStage().toString().padStart(2, '0') }}</div>
         <div class="stage-heading">
@@ -515,7 +691,7 @@
           <div class="trace-head">
             <span class="trace-glyph">Σ</span>
             <div>
-              <p class="eyebrow">MÔ PHỎNG &amp; KIỂM TOÁN 1–1 · {{ selectedDefinition().id }}</p>
+              <p class="eyebrow">MÔ PHỎNG &amp; KIỂM TOÁN · {{ selectedDefinition().id }}</p>
               <h3>{{ trace.heading }}</h3>
               <p class="trace-context">{{ trace.context }}</p>
             </div>
@@ -584,8 +760,8 @@
                     <div class="trace-result"><span>Kết luận</span><b>{{ step.result }}</b></div>
                   }
                   @if (step.substitution) {
-                    <details class="trace-formula" open>
-                      <summary>Phép tính chi tiết</summary>
+                    <details class="trace-formula">
+                      <summary>Xem công thức &amp; phép tính chi tiết (dành cho kiểm toán)</summary>
                       @if (step.expression) {
                         <app-math-formula class="trace-formula-math" [expression]="step.expression" [label]="'Phép tính: ' + step.substitution" />
                       } @else {
@@ -607,160 +783,9 @@
         </section>
       }
     </section>
-
-    <aside class="panel context-panel" [class.collapsed]="contextCollapsed()" aria-label="SKU context">
-      @if (contextCollapsed()) {
-        <button type="button" class="context-expand" (click)="contextCollapsed.set(false)" aria-label="Mở rộng bảng SKU context" title="Mở rộng SKU context">
-          <i aria-hidden="true">«</i><b>SKU CONTEXT · {{ selectedDefinition().id }}</b>
-        </button>
-      } @else {
-      <div class="panel-head sticky-head">
-        <div><p class="eyebrow">SKU CONTEXT</p><h2 id="sku-title">{{ rightMode() === 'catalog' ? 'Danh mục SKU' : 'Thông số SKU' }}</h2></div>
-        <div class="context-head-actions">
-          <div class="view-switch" aria-label="Chế độ cột phải">
-            <button type="button" [class.active]="rightMode() === 'catalog'" (click)="rightMode.set('catalog')">Danh mục</button>
-            <button type="button" [class.active]="rightMode() === 'context'" (click)="rightMode.set('context')">Thông số</button>
-          </div>
-          <button type="button" class="context-toggle" (click)="contextCollapsed.set(true)" aria-label="Thu gọn bảng SKU context" title="Thu gọn">»</button>
-        </div>
-      </div>
-
-      @if (rightMode() === 'catalog') {
-        <div class="search-box">
-          <span aria-hidden="true">⌕</span>
-          <input type="search" aria-label="Tìm SKU" placeholder="Mã, tên hoặc danh mục…" [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)">
-        </div>
-        <div class="column-context"><span>Snapshot</span><b>{{ store.view().hasRun ? 'Sau chặng ' + store.activeStage() : 'Chưa thực thi' }}</b></div>
-        <div class="sku-list" role="listbox" aria-label="Danh sách SKU">
-          @for (sku of visibleCatalog(); track sku.id) {
-            <button type="button" class="sku-row" [class.selected]="sku.id === store.selectedSkuId()" (click)="selectSku(sku)" [attr.aria-selected]="sku.id === store.selectedSkuId()">
-              <span class="sku-index">{{ sku.id.slice(-3) }}</span>
-              <span class="sku-copy">
-                <b>{{ sku.name }}</b>
-                <small>
-                  {{ sku.category }} · {{ sku.description }}
-                  @if (getSkuSortValueLabel(sku)) {
-                    · <span class="sku-sort-meta">{{ getSkuSortValueLabel(sku) }}</span>
-                  }
-                </small>
-              </span>
-              <span class="sku-class" [class.pending]="!stateFor(sku.id)">{{ store.stageLabel(stateFor(sku.id)) }}</span>
-            </button>
-          }
-        </div>
-      } @else {
-        <div class="sku-identity">
-          <div class="product-mark">{{ selectedDefinition().id.slice(-2) }}</div>
-          <div><span>{{ selectedDefinition().id }}</span><h3>{{ selectedDefinition().name }}</h3><p>{{ selectedDefinition().category }}</p></div>
-        </div>
-
-      @if (!store.view().state) {
-        <div class="drawer-wait"><span>⌁</span><h3>Không đọc trước tương lai</h3><p>Drawer sẽ nhận đúng snapshot sau khi Chặng {{ store.activeStage() }} chạy xong.</p></div>
-      } @else {
-        @if (store.activeStage() <= 5) {
-          <div class="stage-context-panel">
-            @if (store.activeStage() === 1) {
-              <div class="panel-header"><span>Thông tin Chặng 1</span></div>
-              <div class="panel-body"><div class="muted-cell">Kiểm tra thông số ở bảng chính.</div></div>
-            }
-            @if (store.activeStage() === 2) {
-              <div class="panel-header"><span>Danh sách Stockout ({{ stockouts().length }})</span></div>
-              <div class="panel-body">
-                @if (stockouts().length === 0) { <div class="muted-cell">Không có ngày Stockout</div> }
-                @else {
-                  <div class="context-list">
-                    @for (r of stockouts(); track r.date) {
-                      <button class="context-item" (click)="selectAuditRow(r)">
-                        <span class="data-chip so">SO</span> <b>{{ r.date }}</b>
-                        <span>Tồn đầu: {{ r.openStock }}, Bán: {{ r.sales }}</span>
-                      </button>
-                    }
-                  </div>
-                }
-              </div>
-            }
-            @if (store.activeStage() === 3) {
-              <div class="panel-header"><span>Nền tạm / Cần xem xét ({{ temporaryBases().length }})</span></div>
-              <div class="panel-body">
-                @if (temporaryBases().length === 0) { <div class="muted-cell">Không có nền tạm</div> }
-                @else {
-                  <div class="context-list">
-                    @for (r of temporaryBases(); track r.date) {
-                      <button class="context-item" (click)="selectAuditRow(r)">
-                        <span class="data-chip pending">Chú ý</span> <b>{{ r.date }}</b>
-                        <span>Nền: {{ format(r.baseDemand, 1) }}</span>
-                      </button>
-                    }
-                  </div>
-                }
-              </div>
-            }
-            @if (store.activeStage() === 4) {
-              <div class="panel-header"><span>Các ngày CTKM ({{ promos().length }})</span></div>
-              <div class="panel-body">
-                @if (promos().length === 0) { <div class="muted-cell">Không có CTKM</div> }
-                @else {
-                  <div class="context-list">
-                    @for (r of promos(); track r.date) {
-                      <button class="context-item" (click)="selectAuditRow(r)">
-                        <span class="data-chip km">KM</span> <b>{{ r.date }}</b>
-                        <span [attr.title]="r.promoCode">{{ promoChipLabel(r.promoCode!) }}</span>
-                      </button>
-                    }
-                  </div>
-                }
-              </div>
-            }
-            @if (store.activeStage() === 5) {
-              <div class="panel-header"><span>Chu kỳ không khóa ({{ unlockedCycles().length }})</span></div>
-              <div class="panel-body">
-                @if (unlockedCycles().length === 0) { <div class="muted-cell">Tất cả chu kỳ đều khóa</div> }
-                @else {
-                  <div class="context-list">
-                    @for (c of unlockedCycles(); track c.cycleIndex) {
-                      <button class="context-item" (click)="auditDate.set(c.dateStart)">
-                        <span class="data-chip pending">CK {{ c.cycleIndex }}</span> <b>{{ c.dateStart }}</b>
-                        <span>Rỗng: {{ c.emptyCycle ? 'Có' : 'Không' }}, Chưa nền: {{ c.unresolvedDays }}</span>
-                      </button>
-                    }
-                  </div>
-                }
-              </div>
-            }
-          </div>
-        } @else {
-          <div class="classification-lockup">
-            <div><span>Nhãn tại chặng {{ store.activeStage() }}</span><b>{{ store.stageLabel(store.view().state) }}</b></div>
-            <div><span>Policy version</span><b class="policy-version">{{ store.policy().version }}</b></div>
-          </div>
-          <div class="metric-stack">
-            <div class="metric-row"><span>ABC</span><b>{{ store.activeStage() >= 6 ? store.view().state!.classification.abc : 'Chưa chạy C6' }}</b></div>
-            <div class="metric-row"><span>XYZ / D</span><b>{{ store.activeStage() >= 7 ? store.view().state!.classification.xyz : 'Chưa chạy C7' }}</b></div>
-            <div class="metric-row"><span>Mức phục vụ</span><b>{{ store.activeStage() >= 8 && store.view().state!.serviceLevel ? store.view().state!.serviceLevel + '%' : 'Chưa khóa' }}</b></div>
-            <div class="metric-row"><span>Mô hình nền</span><b>{{ store.activeStage() >= 11 ? (store.view().state!.forecast?.model ?? 'Ngoại lệ') : 'Chưa chạy C11' }}</b></div>
-            <div class="metric-row"><span>Hàng tự do</span><b>{{ store.activeStage() >= 14 ? format(store.view().state!.freeStock) : 'Chưa chạy C14' }}</b></div>
-            <div class="metric-row accent"><span>Tồn an toàn</span><b>{{ store.activeStage() >= 15 ? format(store.view().state!.safetyStock) : 'Chưa chạy C15' }}</b></div>
-          </div>
-
-          @if (store.activeStage() >= 5) {
-            <section class="mini-section"><div class="mini-title"><h3>Chu kỳ gần nhất</h3><span>{{ store.view().state!.cycles.length }} CK</span></div>
-              <div class="cycle-bars">
-                @for (cycle of store.view().state!.cycles.slice(-12); track cycle.cycleIndex) { <i [class.unlocked]="!cycle.locked" [style.height.%]="cycle.locked ? Math.min(100, 18 + cycle.baseDemand / 2) : 8" [title]="'CK ' + cycle.cycleIndex + ': ' + cycle.baseDemand"></i> }
-              </div>
-            </section>
-          }
-
-          <section class="mini-section stage-ledger"><div class="mini-title"><h3>Sổ cái chặng</h3><span>{{ store.completedStage() }} khóa</span></div>
-            @for (stage of stages.slice(0, store.completedStage()); track stage.number) {
-              <button type="button" (click)="selectStage(stage.number)" [class.current]="stage.number === store.activeStage()"><span>{{ stage.number.toString().padStart(2, '0') }}</span><b>{{ stage.shortTitle }}</b><i>✓</i></button>
-            }
-          </section>
-        }
-      }
-      }
-      }
-    </aside>
   </main>
+  } @else if (currentView() === 'simulation-report') {
+    <app-simulation-report class="main-grid report-grid" />
   } @else {
     <app-comparison-report class="main-grid report-grid" />
   }

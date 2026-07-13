@@ -14,11 +14,13 @@ import { SimulationStore, viNumberFormat } from './state/simulation.store';
 import { JourneyMapComponent } from './ui/journey-map.component';
 import { MathFormulaComponent } from './ui/math-formula.component';
 import { ComparisonReportComponent } from './ui/comparison-report.component';
+import { SimulationReportComponent } from './ui/simulation-report.component';
+import { buildStageTableExport, encodeStageTableCsv } from './domain/stage-table-export';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [FormsModule, KeyValuePipe, JourneyMapComponent, MathFormulaComponent, ComparisonReportComponent],
+  imports: [FormsModule, KeyValuePipe, JourneyMapComponent, MathFormulaComponent, ComparisonReportComponent, SimulationReportComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,9 +34,9 @@ export class AppComponent implements OnInit {
   readonly auditDate = signal<string | null>(null);
   readonly journeyOpen = signal(false);
   readonly contextCollapsed = signal(false);
-  readonly currentView = signal<'simulation' | 'report'>('simulation');
+  readonly currentView = signal<'simulation' | 'report' | 'simulation-report'>('simulation');
 
-  setView(view: 'simulation' | 'report'): void {
+  setView(view: 'simulation' | 'report' | 'simulation-report'): void {
     this.currentView.set(view);
     if (view === 'report') {
       void this.store.generateReportData();
@@ -42,7 +44,7 @@ export class AppComponent implements OnInit {
   }
   readonly auditCollapsed = signal(false);
   readonly processCollapsed = signal(false);
-  readonly processPanelWidth = signal(760);
+  readonly processPanelWidth = signal<number | null>(650);
   readonly traceStepOverrides = signal<Record<number, boolean>>({});
   private processResize: { pointerId: number; startX: number; startWidth: number } | null = null;
   readonly phases = [
@@ -75,6 +77,7 @@ export class AppComponent implements OnInit {
   readonly summaryEntries = computed(() => Object.entries(this.store.view().summary));
   readonly selectedDefinition = computed(() => this.store.catalog.find(sku => sku.id === this.store.selectedSkuId())!);
   readonly currentStageStates = computed(() => this.store.currentSnapshot()?.states ?? null);
+  readonly currentTableExport = computed(() => buildStageTableExport(this.store.currentSnapshot(), this.store.selectedSkuId(), this.store.policy()));
   readonly auditState = computed(() => this.store.view().state ?? this.store.inputState());
   readonly auditDailyRows = computed(() => this.auditState()?.daily ?? []);
   readonly auditCycles = computed(() => this.auditState()?.cycles ?? []);
@@ -233,27 +236,47 @@ export class AppComponent implements OnInit {
   startProcessResize(event: PointerEvent): void {
     if (event.button !== 0) return;
     const handle = event.currentTarget as HTMLElement;
-    this.processResize = { pointerId: event.pointerId, startX: event.clientX, startWidth: this.processPanelWidth() };
+    const currentWidth = this.processPanelWidth() ?? handle.parentElement!.getBoundingClientRect().width;
+    this.processResize = { pointerId: event.pointerId, startX: event.clientX, startWidth: currentWidth };
     handle.setPointerCapture(event.pointerId);
     event.preventDefault();
   }
   resizeProcessPanel(event: PointerEvent): void {
     if (!this.processResize || this.processResize.pointerId !== event.pointerId) return;
-    this.processPanelWidth.set(Math.max(580, Math.min(1180, this.processResize.startWidth + event.clientX - this.processResize.startX)));
+    this.processPanelWidth.set(Math.max(300, Math.min(1180, this.processResize.startWidth + (this.processResize.startX - event.clientX))));
   }
   endProcessResize(event: PointerEvent): void {
     if (this.processResize?.pointerId === event.pointerId) this.processResize = null;
   }
   resizeProcessPanelByKeyboard(event: KeyboardEvent): void {
-    const increments: Record<string, number> = { ArrowLeft: -24, ArrowRight: 24 };
-    if (event.key === 'Home') this.processPanelWidth.set(580);
+    const increments: Record<string, number> = { ArrowLeft: 24, ArrowRight: -24 };
+    if (event.key === 'Home') this.processPanelWidth.set(300);
     else if (event.key === 'End') this.processPanelWidth.set(1180);
-    else if (event.key in increments) this.processPanelWidth.update(width => Math.max(580, Math.min(1180, width + increments[event.key])));
+    else if (event.key in increments) {
+      const currentWidth = this.processPanelWidth() ?? 650;
+      this.processPanelWidth.set(Math.max(300, Math.min(1180, currentWidth + increments[event.key])));
+    }
     else return;
     event.preventDefault();
   }
+  toggleMergedContext(event: Event): void {
+    this.contextCollapsed.set(!(event.target as HTMLDetailsElement).open);
+  }
   selectSku(sku: SkuDefinition): void { this.store.selectSku(sku.id); this.auditDate.set(null); this.traceStepOverrides.set({}); }
   selectSkuId(skuId: string): void { this.store.selectSku(skuId); this.auditDate.set(null); this.traceStepOverrides.set({}); }
+  downloadCurrentStageTable(): void {
+    const exportData = this.currentTableExport();
+    if (!exportData || !exportData.rows.length) return;
+    const blob = new Blob([`\ufeff${encodeStageTableCsv(exportData)}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = exportData.fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
   isTraceStepOpen(index: number, total: number, tone: string | undefined): boolean {
     const overrides = this.traceStepOverrides();
     return Object.prototype.hasOwnProperty.call(overrides, index)

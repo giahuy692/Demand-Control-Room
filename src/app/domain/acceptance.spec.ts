@@ -8,8 +8,9 @@ import { buildPromoRegionSamples } from './promo-analysis';
 function dailyRecord(index: number, baseDemand: number | null, baseSource: DailyRecord['baseSource']): DailyRecord {
   return {
     sku: 'TEST', date: `2026-01-${String(index + 1).padStart(2, '0')}`, openStock: 10, closeStock: 9, sales: baseDemand ?? 5,
+    salesStatus: 'OBSERVED', isReferenceOnly: false, stockSource: 'OBSERVED', stockCalculationStatus: 'CALCULATED',
     hasRecord: true,
-    receiptHour: null, promoCode: null, isStockout: false, stockoutReason: null, baseDemand, baseSource, referenceDates: [],
+    receiptHour: null, promoCode: null, isStockout: false, stockoutReviewRequired: false, stockoutReason: null, baseDemand, baseSource, referenceDates: [],
     beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null, balanceStatus: null, selectionReason: '',
   };
 }

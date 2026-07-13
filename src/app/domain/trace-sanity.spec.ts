@@ -40,7 +40,8 @@ describe('stage-trace sanity', () => {
       if (!lifted) continue;
       const trace = buildStageTrace(3, state, DEFAULT_POLICY, lifted.date);
       const final = trace.steps.at(-1)!;
-      expect(final.substitution).toContain(`max(${lifted.sales.toLocaleString('vi-VN', { maximumFractionDigits: 1 })}`);
+      // baseSource='stockout-lifted' chỉ được gán qua requireObservedSales() (Chặng 3) nên sales luôn khác null ở đây.
+      expect(final.substitution).toContain(`max(${lifted.sales!.toLocaleString('vi-VN', { maximumFractionDigits: 1 })}`);
       expect(final.tone).toBe('good');
     }
   });
@@ -68,7 +69,10 @@ describe('stage-trace sanity', () => {
   });
 
   it('trace Chặng 7 đủ các mục 4.4.1–4.4.9 và khớp μ/σ/CV² engine', () => {
+    // RULE-07-003/004 — SKU bị CLASSIFICATION_BLOCKED/NO_POSITIVE_DEMAND_REVIEW có trace 1 bước
+    // riêng (không phải 9 bước 4.4.1–4.4.9, vốn chỉ áp dụng khi đã CLASSIFIED thành X/Y/Z/D).
     for (const state of Object.values(snapshots[7]!.states)) {
+      if (state.classification.classificationStatus !== 'CLASSIFIED') continue;
       const trace = buildStageTrace(7, state, DEFAULT_POLICY, null);
       expect(trace.steps).toHaveLength(9);
       expect(trace.steps.map(step => step.title)).toEqual(expect.arrayContaining([
@@ -85,8 +89,8 @@ describe('stage-trace sanity', () => {
   it('process-panel giữ đủ số bước chuẩn của tài liệu cho các chặng có quy trình cố định', () => {
     const firstState = (stage: StageNumber) => Object.values(snapshots[stage]!.states)[0];
     const expected: Partial<Record<StageNumber, number>> = {
-      1: 10, 2: 4, 3: 8, 4: 8, 5: 8, 6: 8, 7: 9, 8: 8, 12: 7, 13: 6, 14: 5, 15: 8,
-      16: 12, 17: 10, 18: 9, 19: 11,
+      1: 10, 2: 4, 3: 8, 4: 8, 5: 8, 6: 8, 7: 9, 8: 8, 12: 7, 13: 6, 14: 5, 15: 10,
+      16: 13, 17: 10, 18: 9, 19: 12,
     };
     for (const [stageText, count] of Object.entries(expected)) {
       const stage = Number(stageText) as StageNumber;
@@ -162,17 +166,24 @@ describe('stage-trace sanity', () => {
     }
   });
 
-  it('panel nêu thẳng các trường tài liệu yêu cầu nhưng bộ mô phỏng chưa lưu, không suy diễn là đã đủ', () => {
+  it('panel Chặng 14–19 nêu rõ khi một trường dùng giá trị mặc định vì ERP chưa có cột nguồn, và hiển thị đủ các trường mới đã triển khai', () => {
     const firstState = (stage: StageNumber) => Object.values(snapshots[stage]!.states)[0];
     const text = (stage: StageNumber) => {
       const trace = buildStageTrace(stage, firstState(stage), DEFAULT_POLICY, null);
       return trace.steps.flatMap(step => [step.title, step.detail, step.substitution ?? '', ...(step.values ?? []).flatMap(value => [value.label, value.value])]).join(' ');
     };
+    // Chặng 14: hàng giữ/hư hỏng/khóa/không bán được nay là trường thật, nhưng ERP chưa có cột nguồn nên vẫn mặc định 0 — panel phải nói rõ điều này, không im lặng suy diễn là đã đủ.
     expect(text(14)).toContain('CHƯA CÓ TRƯỜNG RIÊNG');
+    // Chặng 15: mức cần bảo vệ = max(SS, DisplayMin) phải hiển thị rõ cả hai vế.
     expect(text(15)).toContain('DisplayMin');
+    // Chặng 16: vùng cần bao phủ (CoverWindow) nay tính theo lead time thật của SKU, không còn cứng toàn bộ tầm dự báo.
     expect(text(16)).toContain('CoverWindow');
+    // Chặng 17: giá vốn kế hoạch (landed cost) chưa có cấu hình nguồn nên tạm dùng giá mua và phải cảnh báo là ước tính.
     expect(text(17)).toContain('bucket = CHƯA CẤU HÌNH');
+    // Chặng 18: chưa có kênh ghi nhận người dùng tự sửa số đề xuất nên Q_approved_over luôn bằng 0, panel phải nêu rõ lý do thay vì suy diễn là đã kiểm tra đủ.
     expect(text(18)).toContain('Q_approved_over=0');
-    expect(text(19)).toContain('WAPE_base = CHƯA LƯU');
+    // Chặng 19: sai số dự báo NỀN và dự báo CUỐI nay được tách riêng và tính đủ — cả hai nhãn phải xuất hiện.
+    expect(text(19)).toContain('WAPE_base');
+    expect(text(19)).toContain('WAPE_final');
   });
 });

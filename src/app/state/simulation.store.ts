@@ -39,8 +39,8 @@ function createInputs(stage: StageNumber, state: Readonly<SkuPipelineState> | nu
     case 5: return [{ label: 'Ngày có nền', value: formatNumber(state.daily.filter(row => row.baseDemand !== null).length) }, { label: 'Độ dài M', value: `${policy.cycleLength} ngày` }];
     case 6: return [{ label: 'Chu kỳ khóa', value: formatNumber(locked.length) }, { label: 'Đơn giá chuẩn', value: `${formatNumber(state.definition.price)} ₫` }];
     case 7: return [{ label: 'Chuỗi khóa n', value: formatNumber(locked.length) }, { label: 'Chu kỳ dương m', value: formatNumber(locked.filter(cycle => cycle.baseDemand > 0).length) }];
-    case 8: return [{ label: 'ABC đã khóa', value: state.classification.abc }, { label: 'XYZ/D đã khóa', value: state.classification.xyz }];
-    case 9: return [{ label: 'Nhóm nhu cầu', value: state.classification.xyz }, { label: 'Số vòng đủ', value: formatNumber(Math.floor(locked.length / 24)) }];
+    case 8: return [{ label: 'ABC đã khóa', value: state.classification.abc }, { label: 'XYZ/D đã khóa', value: state.classification.xyz ?? 'BLOCKED' }];
+    case 9: return [{ label: 'Nhóm nhu cầu', value: state.classification.xyz ?? 'BLOCKED' }, { label: 'Số vòng đủ', value: formatNumber(Math.floor(locked.length / 24)) }];
     case 10: return [{ label: '12 CK gần nhất', value: locked.length >= 12 ? 'Đủ' : 'Thiếu' }, { label: 'Mùa vụ', value: state.seasonality }];
     case 11: return [{ label: 'ABC × XYZ', value: `${state.classification.abc}${state.classification.xyz}` }, { label: 'Mùa vụ / xu hướng', value: `${state.seasonality} / ${state.trend}` }];
     case 12: return [{ label: 'Ngày KM đủ nền', value: formatNumber(state.daily.filter(row => row.promoCode && row.baseDemand !== null).length) }, { label: 'Nguồn bán', value: 'sales gốc' }];
@@ -110,7 +110,7 @@ function createOutputs(stage: StageNumber, state: Readonly<SkuPipelineState> | n
     case 4: return [{ label: 'Cột bàn giao', value: 'baseDemand ngày CTKM', tone: 'good' }];
     case 5: return [{ label: 'Chu kỳ locked', value: formatNumber(state.cycles.filter(cycle => cycle.locked).length), tone: 'good' }, { label: 'Chu kỳ không dùng', value: formatNumber(state.cycles.filter(cycle => !cycle.locked).length), tone: 'warn' }];
     case 6: return [{ label: 'Nhóm ABC', value: state.classification.abc, tone: state.classification.abc === 'N/A' ? 'warn' : 'good' }];
-    case 7: return [{ label: 'Nhóm XYZ/D', value: state.classification.xyz, tone: state.classification.xyz === 'D' ? 'warn' : 'good' }];
+    case 7: return [{ label: 'Nhóm XYZ/D', value: state.classification.xyz ?? 'BLOCKED', tone: state.classification.xyz === 'D' || state.classification.xyz === null ? 'warn' : 'good' }];
     case 8: return [{ label: 'Ô chính sách', value: state.serviceLevel ? `${state.classification.abc}${state.classification.xyz}` : 'D / ngoại lệ', tone: state.serviceLevel ? 'good' : 'warn' }, { label: 'Mức phục vụ', value: state.serviceLevel ? `${state.serviceLevel}%` : 'Duyệt riêng' }];
     case 9: return [{ label: 'Kết luận', value: state.seasonality, tone: state.seasonality === 'insufficient-structure' ? 'warn' : 'good' }];
     case 10: return [{ label: 'Công tắc', value: state.trend === 'up' || state.trend === 'down' ? 'Holt' : 'SES', tone: 'good' }];
@@ -389,7 +389,7 @@ export class SimulationStore {
   stageLabel(state: Readonly<SkuPipelineState> | null, stage = this.activeStage()): string {
     if (!state || stage < 6) return '—';
     if (stage === 6) return state.classification.abc;
-    if (stage === 7) return state.classification.xyz === 'D' ? 'D' : `${state.classification.abc}${state.classification.xyz}`;
-    return state.serviceLevel === null && stage >= 8 ? 'D' : `${state.classification.abc}${state.classification.xyz}`;
+    if (stage === 7) return state.classification.xyz === 'D' ? 'D' : state.classification.xyz === null ? 'BLOCKED' : `${state.classification.abc}${state.classification.xyz}`;
+    return state.serviceLevel === null && stage >= 8 ? 'D' : `${state.classification.abc}${state.classification.xyz ?? 'BLOCKED'}`;
   }
 }

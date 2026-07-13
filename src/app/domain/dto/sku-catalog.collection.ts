@@ -17,7 +17,8 @@ export interface CatalogAggregateDto {
   readonly totalStockValue: number;
   readonly stockoutRiskCount: number;
   readonly countByAbc: Readonly<Record<AbcClass, number>>;
-  readonly countByXyz: Readonly<Record<XyzClass, number>>;
+  /** BLOCKED gồm CLASSIFICATION_BLOCKED/NO_POSITIVE_DEMAND_REVIEW (xyz=null, RULE-07-003/004). */
+  readonly countByXyz: Readonly<Record<XyzClass | 'BLOCKED', number>>;
 }
 
 /**
@@ -93,14 +94,14 @@ export class SkuCatalogCollection {
   /** Tổng hợp toàn danh mục — tính bằng 1 lượt duyệt, không lặp lại filter cho từng chỉ số. */
   aggregate(): CatalogAggregateDto {
     const countByAbc: Record<AbcClass, number> = { A: 0, B: 0, C: 0, 'N/A': 0 };
-    const countByXyz: Record<XyzClass, number> = { X: 0, Y: 0, Z: 0, D: 0 };
+    const countByXyz: Record<XyzClass | 'BLOCKED', number> = { X: 0, Y: 0, Z: 0, D: 0, BLOCKED: 0 };
     let totalForecast = 0;
     let totalStockValue = 0;
     let stockoutRiskCount = 0;
     for (const id of this.ids) {
       const sku = this.byId[id];
       countByAbc[sku.abc]++;
-      countByXyz[sku.xyz]++;
+      countByXyz[sku.xyz ?? 'BLOCKED']++;
       totalForecast += sku.totalForecast;
       totalStockValue += sku.stockValue;
       if (sku.isStockoutRisk) stockoutRiskCount++;

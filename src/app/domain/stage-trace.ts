@@ -1,5 +1,5 @@
 import { DailyRecord, ForecastResult, SimulationPolicy, SkuPipelineState, StageNumber } from './models';
-import { calculateTrend, mean, median, meetsSeasonRepeatThreshold, populationStdev } from './math';
+import { calculateTrend, mean, median, meetsSeasonRepeatThreshold, populationStdev, trailingLockedRun } from './math';
 import { CAPITAL_PRIORITIES, SERVICE_LEVELS } from './policy';
 import { buildPromoRegionSamples } from './promo-analysis';
 import { buildForecastLearning, ModelLearning, SEASON_LENGTH, fitSes, fitHolt, fitHoltWinters, fitCroston, runPulse, runSeasonalNaive, splitSizes, testMetrics, lockedSeriesAll } from './forecast-models';
@@ -47,14 +47,16 @@ function list(values: readonly number[], digits = 1): string {
 }
 
 function lockedSeries(state: Readonly<SkuPipelineState>): number[] {
-  return state.cycles.filter(cycle => cycle.locked).slice(-24).map(cycle => cycle.baseDemand);
+  return trailingLockedRun(state.cycles).slice(-24).map(cycle => cycle.baseDemand);
 }
 
 function referenceValues(state: Readonly<SkuPipelineState>, dates: readonly string[]): number[] {
   const byDate = new Map(state.daily.map(record => [record.date, record]));
   return dates.map(date => {
     const record = byDate.get(date);
-    return record ? record.baseDemand ?? record.sales : 0;
+    // Chỉ dựng lại TRACE hiển thị cho các ngày đã được chọn làm tham chiếu (luôn hasRecord=true
+    // theo isObservedClean), nên sales không thể null trên thực tế — `?? 0` chỉ là chốt hiển thị.
+    return record ? record.baseDemand ?? record.sales ?? 0 : 0;
   });
 }
 
@@ -80,6 +82,15 @@ function promoRegions(daily: readonly DailyRecord[]): { rows: DailyRecord[]; cod
     regions.push({ rows, codes: [code], clustered: false });
   }
   return regions;
+}
+
+/** Rút gọn nhãn điểm mốc CTKM về dạng "Tên CTKM[từ ngày - đến ngày]" để không tràn dòng khi mã chương trình dài hoặc bị gộp nhiều mã. */
+function formatPromoPointLabel(codes: readonly string[], startDate: string, endDate: string, maxNameLen = 22): string {
+  const primary = codes[0] ?? '';
+  const truncated = primary.length > maxNameLen ? `${primary.slice(0, maxNameLen)}…` : primary;
+  const extra = codes.length > 1 ? ` +${codes.length - 1} mã` : '';
+  const range = startDate === endDate ? startDate : `${startDate} - ${endDate}`;
+  return `${truncated}${extra}[${range}]`;
 }
 
 function stage1(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
@@ -332,7 +343,7 @@ function stage4(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
   const regions = promoRegions(state.daily);
   const points: TracePoint[] = regions.slice(0, 14).map(region => ({
     date: region.rows[0].date,
-    label: `${region.codes.join('+')} · ${region.rows[0].date}`,
+    label: formatPromoPointLabel(region.codes, region.rows[0].date, region.rows.at(-1)!.date),
     kind: region.rows[0].baseSource === 'insufficient' ? 'warn' : 'km',
   }));
   const totalPromoDays = state.daily.filter(record => record.promoCode).length;
@@ -349,7 +360,7 @@ function stage4(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
         values: [
           { label: 'Mã chương trình', value: region.codes.join(', ') },
           { label: 'Vùng méo', value: `${first.date} → ${last.date} (${region.rows.length} ngày)` },
-          { label: 'Bán ghi nhận trong vùng', value: fmt(region.rows.reduce((sum, row) => sum + row.sales, 0), 0) },
+          { label: 'Bán ghi nhận trong vùng', value: fmt(region.rows.reduce((sum, row) => sum + (row.sales ?? 0), 0), 0) },
         ],
         tone: 'warn',
       },
@@ -421,7 +432,9 @@ function stage5(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
       {
         title: 'B3 · Kiểm tra nhánh chu kỳ trống',
         detail: sufficientDays === 0 ? 'Không có ngày nào đủ nền → chu kỳ trống; không được lấp toàn bộ chu kỳ.' : 'Có ít nhất một ngày đủ nền → được phép xét lấp từng ngày còn thiếu.',
-        substitution: `sufficientDays = ${sufficientDays} → ${cycle.emptyCycle ? 'EMPTY · KHÔNG LẤP' : 'TIẾP TỤC'}`,
+        substitution: cycle.emptyCycle
+          ? `Chu kỳ này có 0/${cycle.days} ngày đã có nền → chu kỳ trống, không lấp`
+          : `Chu kỳ này có ${sufficientDays}/${cycle.days} ngày đã có nền → được phép xét lấp từng ngày còn thiếu`,
         tone: cycle.emptyCycle ? 'warn' : 'info',
       },
       {
@@ -447,18 +460,24 @@ function stage5(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
           : cycle.emptyCycle
             ? 'Chu kỳ trống hoàn toàn → không lấp, không dùng trong phiên học.'
             : 'Vẫn còn ngày chưa đủ căn cứ nền → chu kỳ không được khóa, không đi vào chuỗi học.',
-        substitution: `locked ⇔ unresolved = 0 ∧ ¬empty → (${fmt(cycle.unresolvedDays, 0)} = 0 ∧ ${cycle.emptyCycle ? 'empty' : '¬empty'}) → ${cycle.locked ? 'LOCKED' : 'KHÔNG DÙNG'}`,
+        substitution: cycle.locked
+          ? `Tất cả ${cycle.days} ngày đã có sức mua cơ bản → chu kỳ này được khóa để dùng trong phiên học`
+          : cycle.emptyCycle
+            ? `Cả ${cycle.days} ngày đều không có dữ liệu bán → chu kỳ trống, không dùng`
+            : `Còn ${cycle.unresolvedDays}/${cycle.days} ngày chưa có nền → chu kỳ này chưa được khóa, không đưa vào phiên học`,
         tone: cycle.locked ? 'good' : 'warn',
       },
       {
         title: 'B7 · Ghi thành phần kiểm toán của chu kỳ',
         detail: 'Giữ số ngày CTKM đã đưa về nền, ngày stockout nâng nền, ngày lấp kỹ thuật và nền chưa cân bằng; ngày CTKM/lấp kỹ thuật không biến thành nguồn sạch.',
-        substitution: `clean=${cycle.cleanDays} · stockout=${cycle.stockoutLiftedDays} · promo=${cycle.promoNormalizedDays} · fill=${cycle.technicalFillDays} · unresolved=${cycle.unresolvedDays}`,
+        substitution: `Trong ${cycle.days} ngày: ${cycle.cleanDays} ngày sạch, ${cycle.stockoutLiftedDays} ngày đã nâng nền SO, ${cycle.promoNormalizedDays} ngày KM đã chuẩn hóa, ${cycle.technicalFillDays} ngày lấp kỹ thuật, ${cycle.unresolvedDays} ngày chưa có nền`,
       },
       {
         title: 'B8 · Tổng hợp Yⱼ và bàn giao trạng thái',
         detail: 'Chỉ cộng cột sức mua cơ bản; số bán CTKM thô không bao giờ đi vào tổng chu kỳ. Chỉ LOCKED được bàn giao cho Chặng 6–11.',
-        substitution: cycle.locked ? `Y(${cycle.cycleIndex}) = ΣBₜ (${cycle.days} ngày) = ${fmt(cycle.baseDemand)}` : `Y(${cycle.cycleIndex}) không được bàn giao`,
+        substitution: cycle.locked
+          ? `Tổng sức mua cơ bản CK${cycle.cycleIndex.toString().padStart(2, '0')} = ${list(state.daily.filter(row => row.date >= cycle.dateStart && row.date <= cycle.dateEnd).map(row => row.baseDemand ?? 0), 0).replaceAll('; ', ' + ')} = ${fmt(cycle.baseDemand)} sản phẩm → được bàn giao cho chặng sau`
+          : `Chu kỳ CK${cycle.cycleIndex.toString().padStart(2, '0')} chưa khóa → không có tổng Yⱼ để bàn giao`,
         tone: cycle.locked ? 'good' : 'warn',
       },
     );
@@ -541,6 +560,33 @@ function stage6(state: Readonly<SkuPipelineState>): StageTrace {
 }
 
 function stage7(state: Readonly<SkuPipelineState>): StageTrace {
+  const { classificationStatus, classificationBlockReason } = state.classification;
+  if (classificationStatus === 'CLASSIFICATION_BLOCKED') {
+    return {
+      heading: 'Thế số phân loại XYZ/D của SKU này',
+      context: 'RULE-07-003 — cửa sổ 24 vị trí chu kỳ gần nhất theo lịch có ít nhất một chu kỳ chưa khóa; không được nối các chu kỳ khóa còn lại thành chuỗi liên tục giả.',
+      steps: [{
+        title: 'Chặn phân loại (CLASSIFICATION_BLOCKED)',
+        detail: `Cửa sổ 24 vị trí gần nhất có chu kỳ ở trạng thái ${classificationBlockReason} — không phân loại được X/Y/Z/D cho tới khi khoảng này được xử lý ở Chặng 3–5.`,
+        substitution: `classificationBlockReason = ${classificationBlockReason}`,
+        result: 'XYZ/D = CHẶN — không truyền X/Y/Z/D hợp lệ sang Chặng 8–11',
+        tone: 'warn',
+      }],
+    };
+  }
+  if (classificationStatus === 'NO_POSITIVE_DEMAND_REVIEW') {
+    return {
+      heading: 'Thế số phân loại XYZ/D của SKU này',
+      context: 'RULE-07-004 — cửa sổ liên tục và đủ dài (n ≥ 6) nhưng toàn bộ chu kỳ bằng 0.',
+      steps: [{
+        title: 'Không có nhu cầu dương (NO_POSITIVE_DEMAND_REVIEW)',
+        detail: `${state.classification.n} chu kỳ liên tục đều khóa nhưng bằng 0 — không gán D (D dành cho lịch sử thật sự ngắn), không tính ADI bằng phép chia cho 0.`,
+        substitution: `n = ${state.classification.n} ≥ 6 · m = 0`,
+        result: 'XYZ/D = NO_POSITIVE_DEMAND_REVIEW',
+        tone: 'warn',
+      }],
+    };
+  }
   const values = lockedSeries(state);
   const positive = values.filter(value => value > 0);
   const { n, m, adi, positiveMean, positiveStdev, cv, cv2, xyz } = state.classification;
@@ -612,8 +658,8 @@ function stage7(state: Readonly<SkuPipelineState>): StageTrace {
 
 function stage8(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
   const { abc, xyz } = state.classification;
-  const excluded = xyz === 'D' || abc === 'N/A';
-  const cell = `${abc}${xyz}`;
+  const excluded = xyz === null || xyz === 'D' || abc === 'N/A';
+  const cell = `${abc}${xyz ?? state.classification.classificationStatus}`;
   return {
     heading: 'Tra ma trận chính sách cho SKU này',
     context: 'Chặng 8 chỉ tra bảng từ hai nhãn đã khóa — không tính toán lại bất kỳ số liệu nào.',
@@ -661,13 +707,13 @@ function stage9(state: Readonly<SkuPipelineState>): StageTrace {
       context: 'Chỉ nhóm Y (dao động) mới được kiểm tra mùa vụ.',
       steps: [{
         title: 'Lọc điều kiện áp dụng',
-        detail: `SKU thuộc nhóm ${state.classification.xyz}, không phải Y → bỏ qua kiểm tra mùa vụ, kết luận NOT-APPLICABLE. Nhóm X đi thẳng SES/Holt, nhóm Z đi Croston/nhịp phát sinh, nhóm D dùng kế hoạch riêng.`,
-        substitution: `XYZ = ${state.classification.xyz} ≠ Y → seasonality = not-applicable`,
+        detail: `SKU thuộc nhóm ${state.classification.xyz ?? 'BLOCKED'}, không phải Y → bỏ qua kiểm tra mùa vụ, kết luận NOT-APPLICABLE. Nhóm X đi thẳng SES/Holt, nhóm Z đi Croston/nhịp phát sinh, nhóm D dùng kế hoạch riêng.`,
+        substitution: `XYZ = ${state.classification.xyz ?? 'BLOCKED'} ≠ Y → seasonality = not-applicable`,
         tone: 'info',
       }],
     };
   }
-  const values = state.cycles.filter(cycle => cycle.locked).map(cycle => cycle.baseDemand);
+  const values = trailingLockedRun(state.cycles).map(cycle => cycle.baseDemand);
   if (values.length < 48) {
     return {
       heading: 'Kiểm tra mùa vụ nhóm Y — thiếu cấu trúc',
@@ -747,12 +793,12 @@ function stage9(state: Readonly<SkuPipelineState>): StageTrace {
 function stage10(state: Readonly<SkuPipelineState>): StageTrace {
   if (state.classification.xyz !== 'Y' || state.seasonality === 'confirmed') {
     const reason = state.classification.xyz !== 'Y'
-      ? `SKU thuộc nhóm ${state.classification.xyz}, không phải Y → không kiểm tra xu hướng tại chặng này.`
+      ? `SKU thuộc nhóm ${state.classification.xyz ?? 'BLOCKED'}, không phải Y → không kiểm tra xu hướng tại chặng này.`
       : 'SKU đã xác nhận mùa vụ ở Chặng 9 → đi thẳng nhánh Holt-Winters, không cần công tắc xu hướng.';
     return {
       heading: 'Kiểm tra xu hướng — không áp dụng',
       context: 'Công tắc xu hướng chỉ dành cho nhóm Y chưa có mùa vụ.',
-      steps: [{ title: 'Lọc điều kiện áp dụng', detail: reason, substitution: `XYZ = ${state.classification.xyz} · seasonality = ${state.seasonality}`, tone: 'info' }],
+      steps: [{ title: 'Lọc điều kiện áp dụng', detail: reason, substitution: `XYZ = ${state.classification.xyz ?? 'BLOCKED'} · seasonality = ${state.seasonality}`, tone: 'info' }],
     };
   }
   const values = lockedSeries(state);
@@ -1011,7 +1057,11 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
   }
 
   let decisionPath = '';
-  if (state.classification.xyz === 'D') {
+  if (state.classification.xyz === null) {
+    // RULE-11-001 — phân loại đã bị chặn ở Chặng 7 (CLASSIFICATION_BLOCKED/NO_POSITIVE_DEMAND_REVIEW);
+    // dự báo cũng bị chặn theo, KHÔNG tự chuyển thành nhóm D.
+    decisionPath = `Phân loại đã bị chặn ở Chặng 7 (${state.classification.classificationStatus}): không có nhãn X/Y/Z/D hợp lệ để chọn nhánh mô hình. Chặng 11 không tự suy diễn thành nhóm D — dự báo giữ nguyên trạng thái FORECAST_INPUT_BLOCKED cho tới khi Chặng 7 được xử lý xong.`;
+  } else if (state.classification.xyz === 'D') {
     decisionPath = 'Nhóm D (Bán thưa đặc biệt hoặc Thiếu chuỗi): Do tính chất đặc thù hoặc thiếu dữ liệu lịch sử chuẩn, hệ thống KHÔNG thực hiện dự báo thống kê tự động. Kết quả được chuyển luồng ngoại lệ để chờ kế hoạch mua hàng thủ công từ Thu mua hoặc mượn nền từ một mã hàng tương tự đã duyệt [C11 §10].';
   } else if (state.classification.xyz === 'Z') {
     decisionPath = `Nhóm Z (Bán thưa): Do chuỗi bán thưa có nhiều chu kỳ trống, các mô hình SES/Holt/Holt-Winters thông thường sẽ bị nhiễu nặng và không hiệu quả. Quy tắc chọn mô hình của hệ thống như sau:\n` +
@@ -1040,7 +1090,7 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
   const rawSteps: RawStep[] = [
     {
       title: 'Chọn nhánh mô hình từ nhãn đã khóa',
-      detail: `Đầu vào: XYZ = ${state.classification.xyz}, mùa vụ = ${state.seasonality}, xu hướng = ${state.trend}. C11 không tự phân loại lại SKU.\n\n${decisionPath}\n\nKết quả phân luồng thực tế của SKU này: ${forecast.reason}`,
+      detail: `Đầu vào: XYZ = ${state.classification.xyz ?? 'BLOCKED'}, mùa vụ = ${state.seasonality}, xu hướng = ${state.trend}. C11 không tự phân loại lại SKU.\n\n${decisionPath}\n\nKết quả phân luồng thực tế của SKU này: ${forecast.reason}`,
       substitution: `Model = ${forecast.model}`,
       tone: 'info',
     },
@@ -1125,7 +1175,7 @@ function stage12(state: Readonly<SkuPipelineState>, focus: DailyRecord | null): 
   const regions = buildPromoRegionSamples(state.daily);
   const eligible = regions.filter(region => region.eligible);
   const rejected = regions.length - eligible.length;
-  const points: TracePoint[] = eligible.slice(0, 14).map(region => ({ date: region.startDate, label: `${region.codes.join('+')} · ${region.startDate}`, kind: 'km' }));
+  const points: TracePoint[] = eligible.slice(0, 14).map(region => ({ date: region.startDate, label: formatPromoPointLabel(region.codes, region.startDate, region.endDate), kind: 'km' }));
   const focused = focus ? eligible.find(region => region.rows.some(record => record.date === focus.date)) ?? null : null;
   const sortedK = eligible.map(region => region.factor!).sort((a, b) => a - b);
   const rawMedian = sortedK.length ? median(sortedK) : null;
@@ -1265,40 +1315,48 @@ function stage13(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
 }
 
 function stage14(state: Readonly<SkuPipelineState>): StageTrace {
-  const onHand = state.daily.at(-1)?.closeStock ?? 0;
   const finalMilestone = state.supplyMilestones.at(-1);
+  const audit = state.availableStockAudit;
   const milestoneValues: TraceValue[] = state.supplyMilestones.map(item => ({
     label: `${item.date} · ${item.label}`,
     value: `${fmt(item.onHand, 0)} + ${fmt(item.confirmedInbound, 0)} − ${fmt(item.committed, 0)} = ${fmt(item.freeStock, 0)}`,
   }));
   return {
-    heading: 'Dựng lịch nguồn hàng và thế số I_free tại từng mốc',
-    context: 'Chặng 14 tính theo trục thời gian thật của nguồn hàng; không suy ra inbound hoặc cam kết từ forecast.',
+    heading: 'Dựng lịch nguồn hàng và thế số hàng tự do tại từng mốc',
+    context: 'Chặng 14 tính theo trục thời gian thật của nguồn hàng; không suy ra hàng về hoặc cam kết từ dự báo.',
     steps: [
       {
-        title: 'Chọn mã hàng và nhà cung cấp',
-        detail: 'Khóa đúng cấp SKU — nhà cung cấp trước khi dựng lịch nguồn hàng. CHƯA CÓ TRƯỜNG RIÊNG',
-        values: [{ label: 'SKU', value: state.definition.id }, { label: 'Nhà cung cấp', value: state.definition.supplier }, { label: 'Tồn hiện có', value: fmt(onHand, 0) }],
+        title: 'Mục đích chặng · Chọn SKU và tính tồn có thể sử dụng ngay',
+        detail: '"Chuẩn hóa nguồn hàng và tính vị thế tồn khả dụng" — Chặng này trước hết trừ khỏi tồn thực tế mọi phần đang giữ/hư hỏng/khóa/không bán được để ra tồn có thể sử dụng ngay (luôn ≥ 0), sau đó dùng con số này làm gốc để tính hàng tự do tại mọi mốc thời gian. Kết quả là đầu vào bắt buộc để Chặng 15–16 tính tồn kho an toàn và số cần đặt thêm.',
+        substitution: audit
+          ? `Tồn có thể sử dụng ngay = Tồn thực tế ${fmt(audit.actualStock, 0)} − Đang giữ ${fmt(audit.heldStock, 0)} − Hư hỏng ${fmt(audit.damagedStock, 0)} − Đang khóa ${fmt(audit.blockedStock, 0)} − Không bán được ${fmt(audit.unsellableStock, 0)} = ${fmt(audit.availableStock, 0)} sản phẩm${audit.mismatch ? ' → DỮ LIỆU TỒN KHÔNG KHỚP, cần kiểm tra lại' : ''}`
+          : 'Chưa có dữ liệu tồn',
+        values: [{ label: 'SKU', value: state.definition.id }, { label: 'Nhà cung cấp', value: state.definition.supplier }],
+        tone: audit?.mismatch ? 'warn' : 'info',
       },
       {
-        title: 'Sắp xếp các mốc nguồn hàng theo thời gian',
-        detail: 'Dùng ngày chạy, ngày cam kết và ngày ETA của từng lô. Lô chưa xác nhận vẫn hiện trong kiểm toán nhưng không được cộng.',
-        values: state.definition.inboundPlan.map(item => ({ label: `+${item.offsetDays} ngày · ${item.label}`, value: `${fmt(item.quantity, 0)} · ${item.confirmed ? 'ĐÃ XÁC NHẬN' : 'KHÔNG CỘNG'}` })),
+        title: 'Sắp xếp mốc nguồn hàng và phân loại độ tin cậy từng lô',
+        detail: 'Dùng ngày chạy, ngày cam kết và ngày dự kiến về hàng (ETA) của từng lô. CHƯA CÓ TRƯỜNG RIÊNG TỪ ERP cho hàng giữ/hư hỏng/khóa/không bán được nên các giá trị trên mặc định 0 trừ khi được nhập tay trong dữ liệu mô phỏng; chỉ lô đã xác nhận (đã giao hoặc nhà cung cấp xác nhận) được cộng vào hàng tự do, các lô khác giữ trong kiểm toán kèm lý do loại.',
+        values: [
+          ...state.definition.inboundPlan.map(item => ({ label: `+${item.offsetDays} ngày · ${item.label}`, value: `${fmt(item.quantity, 0)} · ${item.reliability}` })),
+          ...state.excludedLots.map(item => ({ label: `Lô bị loại · ${item.lotId}`, value: `${fmt(item.quantity, 0)} · ${item.reason}` })),
+        ],
+        tone: state.supplyStatus.pendingVerification ? 'warn' : 'info',
       },
       {
         title: 'Cộng lô xác nhận về trước từng mốc',
-        detail: 'Tại mỗi mốc t, cộng lũy kế duy nhất các lô confirmed=true có ETA ≤ t.',
-        substitution: `Q_confirmed(≤t_cuối) = ${fmt(finalMilestone?.confirmedInbound, 0)}`,
+        detail: 'Tại mỗi mốc thời gian, cộng dồn số lượng còn lại (đã trừ phần thực nhận/đã hủy) của mọi lô đã xác nhận có ngày về không muộn hơn mốc đó.',
+        substitution: `Tổng lô đã xác nhận đến mốc cuối = ${fmt(finalMilestone?.confirmedInbound, 0)} sản phẩm`,
       },
       {
         title: 'Trừ cam kết trước từng mốc',
-        detail: 'Đơn giữ hàng, điều chuyển và cam kết kênh bán có ngày ≤ t được trừ lũy kế.',
-        substitution: `Q_committed(≤t_cuối) = ${fmt(finalMilestone?.committed, 0)}`,
+        detail: 'Đơn giữ hàng, điều chuyển nội bộ và cam kết kênh bán có ngày không muộn hơn mốc đang xét đều bị trừ khỏi tổng lũy kế.',
+        substitution: `Tổng đã cam kết đến mốc cuối = ${fmt(finalMilestone?.committed, 0)} sản phẩm`,
       },
       {
         title: 'Tính hàng tự do tại từng mốc',
-        detail: 'Không chặn I_free về 0: giá trị âm phải được giữ để thể hiện thiếu hàng theo thời điểm.',
-        substitution: finalMilestone ? `I_free(t_cuối) = ${fmt(onHand, 0)} + ${fmt(finalMilestone.confirmedInbound, 0)} − ${fmt(finalMilestone.committed, 0)} = ${fmt(finalMilestone.freeStock, 0)}` : 'Chưa có mốc nguồn hàng',
+        detail: 'Hàng tự do có thể âm — hệ thống không chặn về 0 vì giá trị âm chính là tín hiệu cho biết SKU sẽ thiếu hàng vào đúng thời điểm đó. Khác với tồn có thể sử dụng ngay ở bước đầu (luôn ≥ 0), hàng tự do phản ánh cả những cam kết chưa đến hạn.',
+        substitution: finalMilestone ? `Hàng tự do tại mốc cuối = Tồn có thể sử dụng ngay ${fmt(finalMilestone.onHand, 0)} + Lô đã xác nhận ${fmt(finalMilestone.confirmedInbound, 0)} − Đã cam kết ${fmt(finalMilestone.committed, 0)} = ${fmt(finalMilestone.freeStock, 0)} sản phẩm` : 'Chưa có mốc nguồn hàng',
         values: milestoneValues,
         tone: 'good',
       },
@@ -1309,20 +1367,24 @@ function stage14(state: Readonly<SkuPipelineState>): StageTrace {
 function stage15(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
   const audit = state.safetyStockAudit;
   const z = audit?.z ?? 0;
-  const demandTerm = audit ? audit.ltBarCycles * audit.sigmaD ** 2 : 0;
-  const leadTerm = audit ? audit.dBar ** 2 * audit.sigmaLtCycles ** 2 : 0;
-  const sufficient = audit?.formula === 'full';
+  const sufficient = audit ? audit.method !== 'policy-buffer' : false;
+  const methodLabel = audit?.method === 'percentile' ? 'phân vị độ lệch actual−forecast trong lead time' : audit?.method === 'z-formula' ? 'công thức Z×√(LT×σd²+D̄²×σLT²)' : 'mức đệm chính sách';
   return {
-    heading: sufficient ? 'Thế số tồn kho an toàn đầy đủ' : 'Kiểm tra dữ liệu và chuyển luồng chính sách',
-    context: 'Thực hiện đúng thứ tự Chặng 15: chọn SKU → đồng nhất đơn vị → D̄ → σd → Z → kiểm tra đủ dữ liệu → tính SS → cảnh báo ràng buộc.',
+    heading: sufficient ? 'Thế số dò mức phục vụ và tồn kho an toàn' : 'Kiểm tra dữ liệu và chuyển luồng chính sách',
+    context: 'Thực hiện đúng thứ tự Chặng 15: chọn SKU → đồng nhất đơn vị → nhu cầu bình quân → độ lệch nhu cầu → dò mức phục vụ → tính tồn an toàn → mức cần bảo vệ → cảnh báo ràng buộc.',
     steps: [
       {
-        title: 'Chọn SKU và đọc đủ năm nhóm đầu vào',
-        detail: 'Đọc dự báo cuối C13, sai số dự báo/dao động nhu cầu C11, mức phục vụ C8, lịch sử lead time C14/Mua hàng và các ràng buộc tồn/kho/hạn dùng.',
+        title: 'Mục đích chặng',
+        detail: '"Tính tồn kho an toàn và mức cần bảo vệ" — Chặng này ưu tiên đo trực tiếp độ lệch giữa thực tế và dự báo trong khoảng thời gian chờ hàng (phương pháp phân vị), chỉ dùng công thức Z×√(...) làm phương án dự phòng khi thiếu dữ liệu. Kết quả là đầu vào bắt buộc cho Chặng 16 khi tính số lượng cần đặt thêm.',
+        tone: 'info',
+      },
+      {
+        title: 'Chọn SKU và đọc đủ các nhóm đầu vào',
+        detail: 'Đọc dự báo cuối C13, sai số dự báo/dao động nhu cầu C11, mức phục vụ sàn C8, lịch sử lead time C14/Mua hàng và các ràng buộc tồn/kho/hạn dùng.',
         values: [
           { label: 'SKU', value: state.definition.id },
           { label: 'Dự báo cuối', value: state.finalForecast.length ? `${state.finalForecast.length} chu kỳ` : 'THIẾU' },
-          { label: 'Mức phục vụ', value: state.serviceLevel ? `${state.serviceLevel}%` : 'THIẾU' },
+          { label: 'Mức phục vụ sàn (C8)', value: state.serviceLevel ? `${state.serviceLevel}%` : 'THIẾU' },
           { label: 'Mẫu lead time', value: `${state.definition.leadTimeHistoryDays.length}` },
           { label: 'Trần tồn / sức chứa', value: `${state.definition.maxStock} / ${state.definition.warehouseCapacity}` },
         ],
@@ -1338,28 +1400,38 @@ function stage15(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
         substitution: audit ? `D̄ = ΣF_final/|C| = mean([${list(state.finalForecast, 1)}]) = ${fmt(audit.dBar, 2)}` : 'D̄ chưa xác định',
       },
       {
-        title: 'Tính độ lệch chuẩn σd theo chu kỳ',
-        detail: audit?.sigmaDSource === 'backtest'
-          ? `Ưu tiên ${audit.sigmaDObservationCount} sai số TEST e=Y−F từ Chặng 11.`
-          : `Chưa đủ backtest; dùng ${audit?.sigmaDObservationCount ?? 0} sức mua cơ bản chu kỳ C5 và phải ghi độ tin cậy thấp.`,
-        substitution: audit ? `σd = ${fmt(audit.sigmaD, 2)} sản phẩm/chu kỳ · nguồn = ${audit.sigmaDSource}` : 'σd chưa xác định',
-        tone: audit?.sigmaDSource === 'backtest' ? 'good' : 'warn',
+        title: 'Lấy mẫu độ lệch trong lead time theo đúng thứ bậc nguồn',
+        detail: audit?.sourceTier === 'sku-history'
+          ? `Đủ ${audit.percentileSample?.length ?? 0} cửa sổ độ lệch riêng của SKU này (gộp từ sai số TEST Chặng 11) → dùng ngay, không cần fallback.`
+          : audit?.sourceTier === 'abc-xyz-group'
+            ? 'SKU chưa đủ cửa sổ độ lệch riêng → mượn tạm độ lệch của các SKU cùng ô ABC×XYZ; độ tin cậy thấp hơn.'
+            : 'Không đủ dữ liệu SKU lẫn nhóm ABC×XYZ → chuyển sang công thức Z×√(...) làm phương án dự phòng.',
+        substitution: audit ? `Nguồn mẫu = ${audit.sourceTier} · σd = ${fmt(audit.sigmaD, 2)} sản phẩm/chu kỳ (${audit.sigmaDSource})` : 'σd chưa xác định',
+        tone: audit?.sourceTier === 'sku-history' ? 'good' : 'warn',
       },
       {
-        title: 'Chọn hệ số Z từ mức phục vụ mục tiêu đã khóa',
-        detail: 'Không tự chọn Z khi thiếu mức phục vụ hoặc mức phục vụ chưa có trong bảng chính sách.',
-        substitution: state.serviceLevel && z ? `ServiceLevel = ${state.serviceLevel}% → Z = ${fmt(z, 2)}` : 'Không có Z hợp lệ',
-        tone: z ? 'good' : 'warn',
+        title: 'Dò mức phục vụ thấp nhất đạt đủ 4 điều kiện chính sách',
+        detail: audit?.unfeasiblePolicy
+          ? 'Không mức phục vụ nào trong danh sách dò đạt đủ cả 4 điều kiện (thiếu hụt, tỷ lệ vượt, dư thừa, vốn khóa) → giữ nguyên mức sàn đã khóa ở Chặng 8 và cần duyệt ngoại lệ.'
+          : `Mức ${audit?.serviceLevel ?? state.serviceLevel}% là mức thấp nhất (từ sàn Chặng 8 trở lên) đạt đủ cả 4 điều kiện mô phỏng.`,
+        values: (audit?.serviceLevelSearch ?? []).map(entry => ({ label: `Mức ${entry.candidate}%`, value: entry.passed ? 'ĐẠT — dừng dò tại đây' : entry.failedConditions.join('; ') || 'Chưa đạt' })),
+        tone: audit?.unfeasiblePolicy ? 'warn' : 'good',
       },
       {
-        title: 'Kiểm tra đủ dữ liệu và áp công thức phù hợp',
+        title: 'Tính tồn kho an toàn theo phương pháp đã chọn',
         detail: sufficient
-          ? 'Đủ D̄, σd, LT̄, σLT và Z → dùng công thức đầy đủ; không dùng công thức rút gọn vì σLT có dữ liệu.'
-          : 'Thiếu dữ liệu bắt buộc → không tự bịa số; chuyển công thức/mức đệm chính sách và ghi cảnh báo.',
+          ? `Dùng phương pháp ${methodLabel} tại mức phục vụ ${audit?.serviceLevel}% (Z=${fmt(z, 2)}).`
+          : 'Thiếu dữ liệu bắt buộc → không tự bịa số; chuyển mức đệm chính sách và ghi cảnh báo.',
         substitution: sufficient
-          ? `SS = ⌈${fmt(z, 2)}×√(${fmt(audit!.ltBarCycles, 2)}×${fmt(audit!.sigmaD, 2)}² + ${fmt(audit!.dBar, 2)}²×${fmt(audit!.sigmaLtCycles, 2)}²)⌉ = ⌈${fmt(z * Math.sqrt(demandTerm + leadTerm), 2)}⌉ = ${fmt(state.safetyStock, 0)}`
-          : 'SS = null · formula = policy · cần duyệt ngoại lệ',
+          ? `Tồn kho an toàn = ${fmt(state.safetyStock, 0)} sản phẩm (phương pháp ${methodLabel})`
+          : 'Không đủ dữ liệu bắt buộc → không tính được tồn kho an toàn, chuyển sang mức đệm chính sách và cần duyệt ngoại lệ',
         tone: sufficient ? 'good' : 'warn',
+      },
+      {
+        title: 'Tính mức cần bảo vệ và phần không thể đáp ứng',
+        detail: 'Mức cần bảo vệ luôn lấy giá trị lớn hơn giữa tồn kho an toàn tính được và tồn trưng bày tối thiểu (DisplayMin — CHƯA CÓ TRƯỜNG RIÊNG, mặc định 0 khi ERP chưa cung cấp). Nếu vượt trần tồn/sức chứa/hạn dùng, phần vượt được ghi lại chứ không tự bị cắt.',
+        substitution: audit ? `Mức cần bảo vệ = max(SS ${fmt(state.safetyStock, 0)}; DisplayMin ${fmt(state.definition.displayMinimumStock, 0)}) = ${fmt(audit.protection, 0)} sản phẩm${audit.unmetProtection > 0 ? ` · Không thể đáp ứng ${fmt(audit.unmetProtection, 0)} sản phẩm` : ''}` : 'Chưa xác định',
+        tone: audit && audit.unmetProtection > 0 ? 'warn' : 'good',
       },
       {
         title: 'Kiểm tra trần tồn, hạn dùng, vốn và sức chứa',
@@ -1369,8 +1441,8 @@ function stage15(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
       },
       {
         title: 'Khóa đầu ra Chặng 15',
-        detail: 'Bàn giao SS, Z, D̄, σd, LT̄, σLT, công thức đã dùng, nguồn dữ liệu và cảnh báo cho các chặng sau. Protection=max(SS,DisplayMin)',
-        substitution: `SS = ${fmt(state.safetyStock, 0)} · formula = ${audit?.formula ?? '—'} · warnings = ${audit?.warnings.length ?? 0}`,
+        detail: 'Bàn giao mức tồn kho an toàn cùng toàn bộ căn cứ tính (nhu cầu bình quân, độ lệch, thời gian chờ, phương pháp đã dùng, nguồn dữ liệu và cảnh báo) cho các chặng sau.',
+        substitution: `Tồn kho an toàn = ${fmt(state.safetyStock, 0)} sản phẩm · phương pháp = ${audit?.method ?? '—'} · số cảnh báo = ${audit?.warnings.length ?? 0}`,
         tone: sufficient ? 'good' : 'warn',
       },
     ],
@@ -1380,21 +1452,26 @@ function stage15(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
 function stage16(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
   const p = state.orderPlan;
   return {
-    heading: 'Tính số đặt trước ngân sách và làm tròn MOQ',
+    heading: 'Tính số đặt trước ngân sách và làm tròn theo quy cách mua',
     context: 'Chặng 16 chỉ tính nhu cầu mua và quy cách; tuyệt đối chưa cắt theo ngân sách.',
     steps: [
-      { title: 'Đọc dự báo cuối từ Chặng 13', detail: 'Giữ nguyên dãy dự báo cuối đã khóa.', substitution: `F_final = [${list(state.finalForecast, 1)}]` },
-      { title: 'Đọc vị thế tồn từ Chặng 14', detail: 'Dùng hàng tự do tại mốc cuối vùng bao phủ.', substitution: `I_free = ${fmt(p?.freeStock, 1)}` },
-      { title: 'Đọc tồn kho an toàn từ Chặng 15', detail: 'Không tự giảm SS để vừa số đặt.', substitution: `SS = ${fmt(state.safetyStock, 1)}` },
-      { title: 'Đọc MOQ và quy cách mua', detail: 'MOQ là dữ kiện mua hàng, không phải ngưỡng tự đặt.', substitution: `MOQ = ${fmt(p?.moq, 0)}` },
-      { title: 'Xác định vùng thời gian cần bao phủ', detail: 'Vùng bao phủ bằng chân trời dự báo cuối của phiên. CoverWindow = LeadTime + ReviewPeriod', substitution: `${p?.coverageCycles ?? 0} chu kỳ` },
-      { title: 'Tính nhu cầu trong vùng bao phủ', detail: 'Cộng dự báo cuối trong vùng bảo vệ.', substitution: `D_cover = ${fmt(p?.demandCover, 1)}` },
-      { title: 'Tính hàng tự do dự kiến trong vùng', detail: 'Nhận I_free đã tính theo mốc, không dùng tồn hiện tại đơn lẻ.', substitution: `I_free = ${fmt(p?.freeStock, 1)}` },
-      { title: 'Tính số cần trước làm tròn', detail: 'Chặn dưới tại 0.', substitution: `Q_raw = max(0, ${fmt(p?.demandCover, 1)} + ${fmt(state.safetyStock, 1)} − ${fmt(p?.freeStock, 1)}) = ${fmt(p?.rawQuantity, 1)}` },
-      { title: 'Kiểm tra Q_raw > 0', detail: (p?.rawQuantity ?? 0) > 0 ? 'Có nhu cầu đặt, chuyển bước làm tròn.' : 'Không có nhu cầu đặt; số đề xuất bằng 0.', tone: (p?.rawQuantity ?? 0) > 0 ? 'good' : 'warn' },
-      { title: 'Làm tròn theo MOQ', detail: 'Làm tròn lên, không cắt sai quy cách.', substitution: `Q_order = ceil(${fmt(p?.rawQuantity, 1)}/${fmt(p?.moq, 0)})×${fmt(p?.moq, 0)} = ${fmt(p?.orderQuantity, 0)}` },
-      { title: 'Tính phần dư do MOQ', detail: 'Giữ riêng phần dư để kiểm tra ngoại lệ ở Chặng 18.', substitution: `Surplus = ${fmt(p?.orderQuantity, 1)} − ${fmt(p?.rawQuantity, 1)} = ${fmt(p?.moqSurplus, 1)}` },
-      { title: 'Khóa đầu ra Chặng 16', detail: 'Bàn giao Q_raw, Q_order, phần dư MOQ, vùng bao phủ và cảnh báo.', values: (p?.warnings ?? []).map((value, i) => ({ label: `Cảnh báo ${i + 1}`, value })), tone: p?.warnings.length ? 'warn' : 'good' },
+      {
+        title: 'Mục đích chặng',
+        detail: '"Tính số cần đặt trước ngân sách" — Chặng này lấy dự báo cần bán cộng tồn kho an toàn, trừ đi hàng đang tự do, rồi làm tròn theo quy cách mua tối thiểu (MOQ) để ra số đề xuất đặt hàng. Ngân sách thực tế chưa được xét ở đây — việc cấp vốn thuộc về Chặng 17.',
+        tone: 'info',
+      },
+      { title: 'Đọc dự báo cuối từ Chặng 13', detail: 'Giữ nguyên dãy dự báo cuối đã khóa, không tính lại.', substitution: `Dự báo cuối = [${list(state.finalForecast, 1)}]` },
+      { title: 'Đọc vị thế tồn từ Chặng 14', detail: 'Dùng đúng hàng tự do đã tính tại mốc cuối vùng cần bao phủ.', substitution: `Hàng tự do = ${fmt(p?.freeStock, 1)} sản phẩm` },
+      { title: 'Đọc mức cần bảo vệ từ Chặng 15', detail: 'Nhận nguyên trạng, không tự giảm mức cần bảo vệ để vừa số đặt mong muốn.', substitution: `Mức cần bảo vệ = ${fmt(state.safetyStockAudit?.protection ?? state.safetyStock, 1)} sản phẩm` },
+      { title: 'Đọc quy cách mua (MOQ / carton / order-step)', detail: 'MOQ, số đơn vị mỗi carton và bước làm tròn đơn hàng đều là dữ kiện mua hàng từ nhà cung cấp, không phải ngưỡng hệ thống tự đặt ra.', substitution: `MOQ = ${fmt(p?.moq, 0)} · Đơn vị/carton = ${fmt(state.definition.unitsPerCarton, 0)} · Order-step = ${fmt(state.definition.orderStep, 0)} carton` },
+      { title: 'Xác định vùng thời gian cần bao phủ (CoverWindow)', detail: 'Vùng cần bao phủ (CoverWindow) bằng lead time thật của SKU (hoặc mặc định chính sách nếu SKU chưa có lịch sử) cộng với chu kỳ lập kế hoạch — đây là khoảng thời gian mà số hàng đặt lần này phải đủ dùng.', substitution: `CoverWindow = ${fmt(p?.coverageDays, 0)} ngày ≈ ${p?.coverageCycles ?? 0} chu kỳ` },
+      { title: 'Tính nhu cầu trong vùng bao phủ', detail: 'Cộng đủ dự báo các chu kỳ nằm trọn trong vùng cần bao phủ; phần lẻ chu kỳ cuối được tính theo tỷ lệ ngày dư (không làm tròn cả chu kỳ).', substitution: `Nhu cầu cần bao phủ = ${fmt(p?.demandCover, 1)} sản phẩm` },
+      { title: 'Mô phỏng tồn từng chu kỳ để phát hiện thiếu hàng trước lô mới', detail: 'Cộng lô đang về, trừ dự báo bán từng chu kỳ để dự đoán tồn — nếu tồn dự kiến xuống âm trước khi lô mới kịp về, đây là tín hiệu cần xử lý sớm hơn số đặt thông thường.', substitution: p?.daysToStockout !== null && p?.daysToStockout !== undefined ? `Dự kiến hết hàng vào ngày +${p.daysToStockout} · Thiếu trước lô mới = ${fmt(p.shortageBeforeNewLot, 0)} sản phẩm` : 'Không phát hiện chu kỳ nào dự kiến âm trong tầm dự báo', tone: (p?.shortageBeforeNewLot ?? 0) > 0 ? 'warn' : 'good' },
+      { title: 'Tính số cần đặt trước khi làm tròn', detail: 'Số cần đặt không được âm — nếu hàng tự do và mức cần bảo vệ đã đủ, số cần đặt trước làm tròn sẽ bằng 0.', substitution: `Số cần đặt (trước làm tròn) = max(0; Nhu cầu ${fmt(p?.demandCover, 1)} + Mức cần bảo vệ ${fmt(state.safetyStockAudit?.protection ?? state.safetyStock, 1)} − Hàng tự do ${fmt(p?.freeStock, 1)}) = ${fmt(p?.rawQuantity, 1)} sản phẩm` },
+      { title: 'Kiểm tra có thực sự cần đặt hàng', detail: (p?.rawQuantity ?? 0) > 0 ? 'Có nhu cầu đặt hàng thật sự → chuyển sang bước làm tròn theo quy cách mua.' : 'Không có nhu cầu đặt hàng ở chu kỳ này; số đề xuất giữ nguyên bằng 0.', tone: (p?.rawQuantity ?? 0) > 0 ? 'good' : 'warn' },
+      { title: 'Làm tròn theo quy cách mua: carton → MOQ → order-step → đơn vị', detail: 'Quy đổi ra carton, làm tròn lên bội số MOQ (tính theo carton), rồi làm tròn tiếp theo bước order-step, cuối cùng đổi ngược ra đơn vị — tuyệt đối không làm tròn xuống để tránh mua sai quy cách của nhà cung cấp.', substitution: `Số đặt sau làm tròn = ${fmt(p?.cartonsOrdered, 0)} carton × ${fmt(state.definition.unitsPerCarton, 0)} đơn vị/carton = ${fmt(p?.orderQuantity, 0)} sản phẩm` },
+      { title: 'Tính phần dư MOQ và cờ rủi ro hạn dùng/sức chứa/gộp đơn', detail: 'Phần chênh lệch giữa số đặt sau làm tròn và số cần đặt thực tế được giữ lại riêng để Chặng 17/18 kiểm tra; đồng thời gắn cờ nếu số đặt vượt nhu cầu bán được trước hạn dùng, vượt sức chứa kho còn trống, hoặc chưa đạt giá trị đơn tối thiểu khi gộp theo nhà cung cấp.', substitution: `Phần dư do làm tròn = ${fmt(p?.orderQuantity, 1)} − ${fmt(p?.rawQuantity, 1)} = ${fmt(p?.moqSurplus, 1)} sản phẩm · Rủi ro hạn dùng: ${p?.expiryRisk ? 'CÓ' : 'không'} · Rủi ro sức chứa: ${p?.capacityRisk ? 'CÓ' : 'không'} · Gộp đơn NCC: ${p?.consolidationStatus ?? 'not-applicable'}`, tone: p?.expiryRisk || p?.capacityRisk || p?.consolidationStatus === 'below-supplier-minimum' ? 'warn' : 'good' },
+      { title: 'Khóa đầu ra Chặng 16', detail: 'Bàn giao số cần đặt trước làm tròn, số đặt sau làm tròn, phần dư MOQ, vùng cần bao phủ, thiếu hàng trước lô mới và mọi cảnh báo phát sinh cho Chặng 17.', values: (p?.warnings ?? []).map((value, i) => ({ label: `Cảnh báo ${i + 1}`, value })), tone: p?.warnings.length ? 'warn' : 'good' },
     ],
   };
 }
@@ -1403,18 +1480,22 @@ function stage17(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
   const a = state.budgetAllocation;
   return {
     heading: 'Phân bổ vốn theo ưu tiên đã khóa',
-    context: 'Chặng 17 không sửa dự báo, SS hoặc Q_order; chỉ cấp vốn theo thứ tự và bội số MOQ.',
+    context: 'Chặng 17 không sửa dự báo, tồn kho an toàn hay số đặt từ Chặng 16; chỉ cấp vốn theo thứ tự ưu tiên và theo đúng bội số quy cách mua.',
     steps: [
-      { title: 'Đọc số đặt sau MOQ', detail: 'Nhận nguyên trạng từ Chặng 16.', substitution: `Q_order = ${fmt(state.orderPlan?.orderQuantity, 0)}` },
-      { title: 'Đọc giá mua và giá trị đặt', detail: 'Dùng giá mua, không dùng giá bán/giá khuyến mãi.', substitution: `V = ${fmt(state.orderPlan?.orderQuantity, 0)}×${fmt(state.definition.purchasePrice, 0)} = ${fmt(a?.orderValue, 0)} ₫` },
-      { title: 'Đọc ngân sách kỳ', detail: 'Ngân sách là đầu vào phiên đã khóa.', substitution: `B = ${fmt(policy.periodBudget, 0)} ₫` },
-      { title: 'Đọc chính sách ưu tiên từ Chặng 8', detail: 'Không tự đặt trọng số w₁…w₄ khi tài liệu chưa ban hành. bucket = CHƯA CẤU HÌNH', substitution: `${state.capitalPriority} · hạng ${a?.priorityRank ?? 'chưa khóa'}` },
-      { title: 'Tính tổng giá trị đề xuất', detail: 'Engine tính trên toàn danh mục trước khi cấp từng dòng.', substitution: `V_i = ${fmt(a?.orderValue, 0)} ₫` },
-      { title: 'Kiểm tra ngân sách đủ hay thiếu', detail: a?.cutQuantity ? 'Dòng không được cấp toàn bộ.' : 'Dòng được cấp đủ hoặc không phát sinh nhu cầu.', tone: a?.cutQuantity ? 'warn' : 'good' },
-      { title: 'Sắp xếp ưu tiên giảm dần', detail: 'Thứ tự: Rất cao → Cao → Trung bình → Trung bình thấp → Thấp → Rất thấp.' },
-      { title: 'Cấp vốn theo thứ tự đến khi hết ngân sách', detail: 'Chỉ cấp số lượng là bội số MOQ.', substitution: `Q_funded = ${fmt(a?.fundedQuantity, 0)} · V_funded = ${fmt(a?.fundedValue, 0)} ₫` },
-      { title: 'Ghi dòng bị cắt/hoãn', detail: a?.reason ?? 'Chưa có kết quả.', substitution: `Q_cut = ${fmt(a?.cutQuantity, 0)}`, tone: a?.cutQuantity ? 'warn' : 'good' },
-      { title: 'Khóa đầu ra Chặng 17', detail: 'Bàn giao số được cấp vốn, lý do cắt, hạng ưu tiên và ngân sách đã dùng.' },
+      {
+        title: 'Mục đích chặng',
+        detail: '"Chọn dòng được cấp tiền khi ngân sách không đủ" — Chặng này sắp xếp toàn bộ các dòng đặt hàng trong kỳ theo mức độ ưu tiên vốn, rồi cấp tiền lần lượt từ ưu tiên cao nhất cho đến khi hết ngân sách kỳ. Những dòng không còn đủ ngân sách sẽ bị cắt hoặc hoãn và được ghi rõ lý do để Chặng 18 xem xét.',
+        tone: 'info',
+      },
+      { title: 'Đọc số đặt sau khi làm tròn MOQ', detail: 'Nhận nguyên trạng số lượng đề xuất đặt hàng từ Chặng 16, không tính lại.', substitution: `Số đặt = ${fmt(state.orderPlan?.orderQuantity, 0)} sản phẩm` },
+      { title: 'Đọc giá vốn kế hoạch và tính giá trị đơn đặt', detail: 'Ưu tiên giá vốn kế hoạch đã gồm cước/thuế nhập khẩu; nếu chưa có, tạm dùng giá mua và đánh dấu là ước tính (chưa gồm đầy đủ chi phí).', substitution: a?.landedCostIsEstimate ? `Giá vốn kế hoạch: bucket = CHƯA CẤU HÌNH → tạm dùng giá mua ${fmt(state.definition.purchasePrice, 0)} ₫ · Giá trị đặt = ${fmt(a?.orderValue, 0)} ₫ (ước tính)` : `Giá trị đặt = ${fmt(state.orderPlan?.orderQuantity, 0)} × giá vốn kế hoạch = ${fmt(a?.orderValue, 0)} ₫`, tone: a?.landedCostIsEstimate ? 'warn' : 'info' },
+      { title: 'Đọc ngân sách của kỳ', detail: 'Ngân sách là con số đã được khóa sẵn từ đầu phiên, không thay đổi trong lúc phân bổ.', substitution: `Ngân sách kỳ = ${fmt(policy.periodBudget, 0)} ₫` },
+      { title: 'Đọc chính sách ưu tiên vốn và vai trò danh mục', detail: 'Mỗi SKU đã được gán một mức ưu tiên vốn cố định từ Chặng 8; vai trò danh mục (cốt lõi/chiến lược/thường) chỉ ảnh hưởng thứ tự sắp xếp, không tự đổi mức ưu tiên.', substitution: `Mức ưu tiên = ${state.capitalPriority} · hạng ${a?.priorityRank ?? 'chưa khóa'} · Vai trò = ${state.definition.coreOrStrategicRole}` },
+      { title: 'Chia số đặt thành 3 rổ theo mục đích', detail: 'Rổ 1 là phần tối thiểu để tránh hết hàng, Rổ 2 là phần bổ sung để đạt đầy đủ mức bảo vệ, Rổ 3 là phần rủi ro phát sinh do làm tròn MOQ/hạn dùng/sức chứa — một SKU có thể có số lượng ở nhiều rổ cùng lúc.', substitution: `Rổ 1 (tránh hết hàng) = ${fmt(a?.minimumToAvoidShortage, 0)} · Rổ 2 (bảo vệ) = ${fmt(a?.additionalForProtection, 0)} · Rổ 3 (rủi ro MOQ) = ${fmt(a?.atRiskQuantity, 0)} sản phẩm` },
+      { title: 'Sắp xếp theo đúng 7 tiêu chí của tài liệu', detail: 'Thứ tự: số ngày đến khi hết hàng → mức thiếu hụt → hạng ưu tiên vốn → vai trò cốt lõi/chiến lược → lead time dài hơn → rủi ro lỗi thời thấp hơn → mã SKU. Tuyệt đối KHÔNG dùng giá trị đơn hàng làm tiêu chí ưu tiên như trước đây.' },
+      { title: 'Cấp vốn lần lượt Rổ 1 → Rổ 2 → Rổ 3 đến khi hết ngân sách', detail: 'Cấp hết Rổ 1 cho toàn danh mục theo đúng thứ tự trước, rồi mới đến Rổ 2, cuối cùng là Rổ 3; mỗi lần cấp chỉ được một số lượng là bội số hợp lệ của quy cách mua.', substitution: `Số lượng được cấp vốn = ${fmt(a?.fundedQuantity, 0)} sản phẩm (rổ đại diện: Rổ ${a?.basket ?? '—'}) · Giá trị được cấp vốn = ${fmt(a?.fundedValue, 0)} ₫` },
+      { title: 'Ghi lại phần bị cắt/hoãn hoặc đề xuất duyệt vượt ngân sách', detail: a?.overBudgetProposal ? `SKU vai trò ${state.definition.coreOrStrategicRole} sắp hết hàng → tạo đề xuất duyệt vượt ngân sách thay vì chỉ ghi hoãn.` : (a?.reason ?? 'Dòng này chưa có kết quả phân bổ.'), substitution: a?.overBudgetProposal ? `Đề xuất vượt ngân sách: cần thêm ${fmt(a.overBudgetProposal.shortfallValue, 0)} ₫ cho ${fmt(a.overBudgetProposal.requiredQuantity, 0)} sản phẩm, dự kiến hết hàng ${a.overBudgetProposal.stockoutDate ?? 'chưa xác định'}` : `Số lượng bị cắt = ${fmt(a?.cutQuantity, 0)} sản phẩm`, tone: a?.overBudgetProposal ? 'warn' : a?.cutQuantity ? 'warn' : 'good' },
+      { title: 'Khóa đầu ra Chặng 17', detail: 'Bàn giao số lượng được cấp vốn theo từng rổ, trạng thái cấp vốn, lý do bị cắt hoặc đề xuất vượt ngân sách, hạng ưu tiên và phần ngân sách đã dùng cho Chặng 18 quyết định phát hành.', substitution: `Trạng thái = ${a?.status ?? '—'}` },
     ],
   };
 }
@@ -1425,15 +1506,19 @@ function stage18(state: Readonly<SkuPipelineState>): StageTrace {
     heading: 'Cổng ngoại lệ trước khi phát hành',
     context: 'Chặng 18 chỉ quyết định phát hành, giữ lại hoặc chờ bổ sung; không tính lại số đặt.',
     steps: [
-      { title: 'Đọc số được cấp vốn', detail: 'Nhận từ Chặng 17.', substitution: `Q_funded = ${fmt(state.budgetAllocation?.fundedQuantity, 0)}` },
-      { title: 'Đọc điều kiện mua hàng', detail: 'ETA, MOQ, giá mua, nhà cung cấp và điều kiện đơn mua phải đầy đủ.' },
-      { title: 'Đọc danh sách ngoại lệ Chặng 8–16', detail: 'Giữ nguyên mọi cảnh báo, không xóa để phát hành.' },
-      { title: 'Chọn dòng SKU − nhà cung cấp', detail: 'Đánh giá đúng một dòng mua.', substitution: `${state.definition.id} − ${state.definition.supplier}` },
-      { title: 'Kiểm tra số được cấp vốn > 0', detail: (state.budgetAllocation?.fundedQuantity ?? 0) > 0 ? 'Có số được cấp vốn.' : 'Không phát hành.', tone: (state.budgetAllocation?.fundedQuantity ?? 0) > 0 ? 'good' : 'warn' },
-      { title: 'Kiểm tra đủ thông tin mua hàng', detail: state.definition.purchaseTermsComplete ? 'Điều kiện đơn mua đã đủ.' : 'Chuyển chờ bổ sung thông tin.', tone: state.definition.purchaseTermsComplete ? 'good' : 'warn' },
-      { title: 'Kiểm tra ngoại lệ cần duyệt', detail: d?.reasons.length ? 'Có ngoại lệ; không tự phát hành.' : 'Không có ngoại lệ được xác định.', values: (d?.reasons ?? []).map((value, i) => ({ label: `Lý do ${i + 1}`, value })), tone: d?.reasons.length ? 'warn' : 'good' },
-      { title: 'Phân luồng phát hành/chờ duyệt', detail: `Trạng thái = ${d?.status ?? '—'}`, substitution: `Q_release = ${fmt(d?.releasedQuantity, 0)}` },
-      { title: 'Khóa đầu ra Chặng 18', detail: 'Lưu số phát hành, trạng thái, lý do ngoại lệ; không giả lập quyết định của người duyệt. Q_approved_over=0' },
+      {
+        title: 'Mục đích chặng',
+        detail: '"Chốt số lượng đặt cuối cùng và phát hành hoặc chờ duyệt" — Chặng này là cửa kiểm tra ngoại lệ cuối cùng trước khi đơn mua hàng thực sự được tạo ra. Nếu còn thiếu thông tin mua hàng hoặc có cảnh báo chưa xử lý từ các chặng trước, đơn sẽ không được tự động phát hành mà chuyển sang chờ người duyệt xem xét.',
+        tone: 'info',
+      },
+      { title: 'Đọc số lượng được cấp vốn cho đúng dòng SKU — nhà cung cấp', detail: 'Nhận nguyên trạng số lượng đã được cấp vốn từ Chặng 17, dùng làm số lượng trước khi qua cổng duyệt.', substitution: `${state.definition.id} − ${state.definition.supplier} · Số lượng trước duyệt = ${fmt(d?.quantityBeforeApproval, 0)} sản phẩm · Q_approved_over=0 (ứng dụng chưa có kênh ghi nhận người dùng tự sửa số đề xuất)` },
+      { title: 'Đọc điều kiện mua hàng', detail: 'Ngày dự kiến về hàng, quy cách mua, giá mua, nhà cung cấp và điều kiện đơn mua đều phải có đầy đủ mới được phát hành.' },
+      { title: 'Đọc danh sách ngoại lệ và các điều kiện bắt buộc chuyển duyệt', detail: 'Ngoài cảnh báo giữ nguyên từ Chặng 8–16, Chặng 18 tự kiểm tra thêm: MOQ tạo tồn dư quá lớn so với số đặt, số lượng đặt tăng bất thường so với nhu cầu bình quân gần đây, có nguy cơ thiếu hàng trước khi lô mới về, và nguồn hàng có dấu hiệu tính trùng chưa được xác minh.', values: (d?.reasons ?? []).map((value, i) => ({ label: `Lý do ${i + 1}`, value })), tone: d?.reasons.length ? 'warn' : 'good' },
+      { title: 'Kiểm tra đã đủ thông tin mua hàng', detail: state.definition.purchaseTermsComplete ? 'Điều kiện đơn mua đã đầy đủ, đủ điều kiện để phát hành.' : 'Còn thiếu điều kiện đơn mua → chuyển sang trạng thái chờ bổ sung thông tin.', tone: state.definition.purchaseTermsComplete ? 'good' : 'warn' },
+      { title: 'Kiểm tra có ngoại lệ cần người duyệt hay không', detail: d?.reasons.length ? 'Có ít nhất một ngoại lệ đang mở → hệ thống không tự phát hành, phải chờ người duyệt.' : 'Không phát hiện ngoại lệ nào cần duyệt.', tone: d?.reasons.length ? 'warn' : 'good' },
+      { title: 'Gộp đơn theo nhà cung cấp/tiền tệ/kho nhận và kiểm tra lại giá trị tối thiểu', detail: 'Các dòng đủ điều kiện phát hành được gộp thành một đơn mua theo nhà cung cấp; nếu tổng giá trị của cả nhóm chưa đạt mức tối thiểu của nhà cung cấp, toàn bộ nhóm bị hạ về chờ duyệt — không phát hành riêng lẻ từng dòng để né điều kiện gộp.', substitution: d?.purchaseOrderGroupKey ? `Nhóm PO: ${d.purchaseOrderGroupKey}` : 'Chưa gộp nhóm (dòng không đủ điều kiện phát hành)' },
+      { title: 'Quyết định phát hành hoặc chuyển chờ duyệt', detail: `Trạng thái cuối cùng của dòng này là: ${d?.status ?? '—'}.`, substitution: `Số lượng sau duyệt = ${fmt(d?.quantityAfterApproval, 0)} sản phẩm · Số lượng được phát hành = ${fmt(d?.releasedQuantity, 0)} sản phẩm` },
+      { title: 'Khóa đầu ra Chặng 18', detail: 'Lưu lại số lượng trước/sau duyệt, trạng thái, nhóm đơn mua và lý do ngoại lệ (nếu có); hệ thống không tự giả lập quyết định thay cho người duyệt.' },
     ],
   };
 }
@@ -1444,17 +1529,26 @@ function stage19(state: Readonly<SkuPipelineState>): StageTrace {
     heading: 'Hậu kiểm và đề xuất cho phiên tương lai',
     context: 'Kết quả cũ được giữ nguyên; Chặng 19 chỉ đo, tách nguyên nhân và tạo đề xuất.',
     steps: [
-      { title: 'Đọc dự báo cuối và số đặt phát hành', detail: 'Đọc snapshot đã khóa, không hồi tố.', substitution: `ΣF = ${fmt(state.finalForecast.reduce((s, v) => s + v, 0), 1)} · Q_release = ${fmt(state.releaseDecision?.releasedQuantity, 0)}` },
-      { title: 'Đọc bán, tồn, thiếu hàng và hàng nhận thực tế', detail: 'Dùng dữ liệu actual riêng biệt với dữ liệu dự báo.', substitution: `ΣA = ${fmt(a?.actualDemand, 1)} · Ending stock = ${fmt(a?.endingStock, 0)}` },
-      { title: 'Đọc ngân sách thực tế và quyết định duyệt', detail: 'Đối chiếu vốn cấp, vốn dùng và trạng thái phát hành.' },
-      { title: 'Đo sai số dự báo nền và dự báo cuối', detail: 'WAPE dùng mẫu số tổng thực tế. WAPE_base = CHƯA LƯU', substitution: `WAPE = ${a?.forecastWape === null || a?.forecastWape === undefined ? '—' : fmt(a.forecastWape * 100, 2) + '%'}` },
-      { title: 'Đo mức phục vụ, thiếu hàng và dư tồn', detail: 'Không quy lỗi chỉ từ một chỉ tiêu.', substitution: `Thiếu = ${fmt(a?.stockoutUnits, 0)} · Tồn cuối = ${fmt(a?.endingStock, 0)}` },
-      { title: 'Đo hàng về đúng hoặc trễ kế hoạch', detail: 'Đo trực tiếp lịch sử nhận hàng.', substitution: `Trễ TB = ${fmt(a?.averageReceiptDelayDays, 2)} ngày` },
-      { title: 'Đo tác động ngân sách và ngoại lệ duyệt', detail: 'Giữ dấu chênh lệch để truy vết.', substitution: `Vốn cấp − vốn thực dùng = ${fmt(a?.budgetVariance, 0)} ₫` },
-      { title: 'Tách nguyên nhân theo chặng phát sinh', detail: a?.primaryCause ?? 'Chưa có kết luận.' },
-      { title: 'Kiểm tra dấu hiệu cần thay đổi', detail: a?.proposalStatus === 'future-version' ? 'Có dấu hiệu cần kiểm chứng thay đổi.' : 'Chưa đủ dấu hiệu; tiếp tục theo dõi.', tone: a?.proposalStatus === 'future-version' ? 'warn' : 'good' },
-      { title: 'Tạo đề xuất hoặc giữ chính sách', detail: a?.proposal ?? 'Chưa có đề xuất.' },
-      { title: 'Khóa báo cáo Chặng 19', detail: 'Đề xuất chỉ áp dụng cho phiên bản tương lai, không sửa ngược C1–C18.' },
+      {
+        title: 'Mục đích chặng',
+        detail: '"Hậu kiểm kết quả và tạo đề xuất kỳ sau" — Chặng này so sánh những gì hệ thống đã dự báo/đặt hàng với những gì thực tế xảy ra, đo các loại sai số, tách xem sai số phát sinh từ chặng nào (dự báo sai, tồn kho an toàn chưa đủ, hàng về trễ, hay thiếu ngân sách…), rồi đề xuất cải tiến áp dụng cho phiên chạy trong tương lai. Chặng 19 không sửa ngược bất kỳ kết quả nào của Chặng 1–18.',
+        tone: 'info',
+      },
+      { title: 'Đọc dự báo cuối và số lượng đã phát hành', detail: 'Đọc đúng số liệu đã khóa (snapshot) tại thời điểm phát hành, không tính lại bằng thông tin mới hơn.', substitution: `Tổng dự báo cuối = ${fmt(state.finalForecast.reduce((s, v) => s + v, 0), 1)} sản phẩm · Số lượng đã phát hành = ${fmt(state.releaseDecision?.releasedQuantity, 0)} sản phẩm` },
+      { title: 'Đọc số bán, tồn, thiếu hàng và hàng nhận thực tế', detail: 'Dùng dữ liệu thực tế sau khi phiên đã chạy, tách biệt hoàn toàn với số liệu dự báo.', substitution: `Tổng bán thực tế = ${fmt(a?.actualDemand, 1)} sản phẩm · Tồn cuối kỳ = ${fmt(a?.endingStock, 0)} sản phẩm` },
+      { title: 'Đọc ngân sách thực tế và quyết định duyệt', detail: 'Đối chiếu vốn đã cấp ở Chặng 17, vốn thực sự đã dùng và trạng thái phát hành ở Chặng 18.' },
+      {
+        title: 'Đo sai số TÁCH RIÊNG dự báo nền và dự báo cuối',
+        detail: 'Dự báo nền (WAPE_base) chỉ đo trên các chu kỳ KHÔNG có CTKM xác nhận, để không lẫn sai số mô hình với sai số học hệ số CTKM; dự báo cuối (WAPE_final) đo trên toàn bộ chu kỳ đã phát hành. Cả hai đều tính đủ RMSE/nRMSE/WAPE/Bias.',
+        substitution: `WAPE_base = ${a?.baseForecastWape === null || a?.baseForecastWape === undefined ? 'CHƯA LƯU (không có chu kỳ nào ngoài CTKM để đo)' : fmt(a.baseForecastWape * 100, 2) + '%'} · WAPE_final = ${a?.forecastWape === null || a?.forecastWape === undefined ? '—' : fmt(a.forecastWape * 100, 2) + '%'}`,
+      },
+      { title: 'Đo mức phục vụ, thiếu hàng và dư tồn', detail: 'Không quy kết lỗi chỉ dựa vào một chỉ tiêu duy nhất — cần nhìn đồng thời cả thiếu hàng lẫn dư tồn.', substitution: `Số lượng thiếu hàng = ${fmt(a?.stockoutUnits, 0)} sản phẩm · Tồn cuối kỳ = ${fmt(a?.endingStock, 0)} sản phẩm` },
+      { title: 'Đo hàng về đúng hẹn hay trễ so với kế hoạch', detail: 'Đo trực tiếp trên lịch sử nhận hàng thực tế, không suy diễn từ kế hoạch.', substitution: `Trễ trung bình = ${fmt(a?.averageReceiptDelayDays, 2)} ngày · MOQ dư còn lại = ${fmt(a?.moqSurplusResidual, 0)} sản phẩm · Giảm do duyệt thủ công = ${fmt(a?.manualReductionUnits, 0)} sản phẩm` },
+      { title: 'Đo tác động ngân sách và ngoại lệ đã duyệt', detail: 'Giữ nguyên dấu dương/âm của chênh lệch để truy vết được là cấp thiếu hay cấp thừa so với thực tế đã dùng.', substitution: `Vốn đã cấp − vốn thực dùng = ${fmt(a?.budgetVariance, 0)} ₫ · Ngân sách bị cắt = ${fmt(a?.budgetCutUnits, 0)} sản phẩm` },
+      { title: 'Tách nguyên nhân chính và nguyên nhân góp phần theo bảng tra', detail: a?.contributingCauses.length ? `Nguyên nhân chính: ${a.primaryCause}${a.contributingCauses.length > 1 ? ` · Còn ${a.contributingCauses.length - 1} nguyên nhân góp phần khác — xem chi tiết bên dưới.` : ''}` : (a?.primaryCause ?? 'Chưa có đủ dữ liệu để kết luận nguyên nhân.'), values: (a?.evidence ?? []).map((value, i) => ({ label: `Bằng chứng ${i + 1}`, value })) },
+      { title: 'Kiểm tra mức độ nghiêm trọng để cân nhắc thay đổi chính sách', detail: a?.proposalStatus === 'future-version' ? 'Mức thiếu hàng hoặc sai số đủ lớn để đề xuất kiểm chứng một thay đổi chính sách. Lưu ý: bộ mô phỏng chỉ chạy một phiên nên đây là cổng mức độ nghiêm trọng, chưa phải phát hiện lặp lại thật qua nhiều kỳ.' : 'Chưa đủ dấu hiệu để thay đổi; tiếp tục theo dõi thêm ở các phiên sau.', tone: a?.proposalStatus === 'future-version' ? 'warn' : 'good' },
+      { title: 'Tạo đề xuất hoặc giữ nguyên chính sách hiện tại', detail: a?.proposal ?? 'Chưa có đề xuất nào được tạo cho SKU này.' },
+      { title: 'Khóa báo cáo Chặng 19', detail: 'Mọi đề xuất chỉ được áp dụng cho phiên chạy trong tương lai, tuyệt đối không sửa ngược kết quả đã khóa của Chặng 1–18.' },
     ],
   };
 }

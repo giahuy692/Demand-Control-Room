@@ -820,7 +820,7 @@ export class JourneyMapComponent implements AfterViewInit, OnDestroy {
     switch (stage) {
       case 5: this.pushLog(`<b>Chặng 5</b> — Gộp chu kỳ hoàn tất, ${state.cycles.filter(c => c.locked).length} chu kỳ khoá.`); break;
       case 6: this.pushLog(`<b>Chặng 6</b> — Phân loại ABC: nhóm <b>${state.classification.abc}</b>.`); break;
-      case 7: this.pushLog(`<b>Chặng 7</b> — Phân loại XYZ/D: nhóm <b>${state.classification.xyz}</b>.`); break;
+      case 7: this.pushLog(`<b>Chặng 7</b> — Phân loại XYZ/D: nhóm <b>${state.classification.xyz ?? 'BLOCKED'}</b>.`); break;
       case 8: this.pushLog(`<b>Chặng 8</b> — Chính sách: ${state.serviceLevel ? `mức phục vụ ${state.serviceLevel}%` : state.capitalPriority}.`); break;
       case 9: if (state.classification.xyz === 'Y') this.pushLog(`<b>Gate Y-SEASON</b> — ${state.seasonality === 'confirmed' ? 'Đạt: mở Holt-Winters.' : 'Không đạt.'}`); break;
       case 10: if (state.classification.xyz === 'Y' && state.seasonality !== 'confirmed') this.pushLog(`<b>Gate Y-TREND</b> — ${state.trend === 'up' || state.trend === 'down' ? 'Đạt: mở Holt.' : 'Không đạt: dùng SES.'}`); break;

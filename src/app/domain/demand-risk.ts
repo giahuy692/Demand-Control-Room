@@ -1,5 +1,5 @@
 import { buildForecastLearning } from './forecast-models';
-import { mean, sampleStdev } from './math';
+import { mean, sampleStdev, trailingLockedRun } from './math';
 import { SimulationPolicy, SkuPipelineState } from './models';
 
 export interface DemandRiskInputs {
@@ -19,7 +19,7 @@ export function demandRiskInputs(state: Readonly<SkuPipelineState>, policy: Simu
   const backtestErrors = fit.learning?.rows
     .filter(row => row.phase === 'test' && row.error !== null)
     .map(row => row.error!) ?? [];
-  const fallbackValues = state.cycles.filter(cycle => cycle.locked).slice(-12).map(cycle => cycle.baseDemand);
+  const fallbackValues = trailingLockedRun(state.cycles).slice(-12).map(cycle => cycle.baseDemand);
   const useBacktest = backtestErrors.length >= 2;
   const values = useBacktest ? backtestErrors : fallbackValues;
   const leadTimes = state.definition.leadTimeHistoryDays;

@@ -27,7 +27,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
     const snapshot = runTo(8);
     for (const state of Object.values(snapshot.states)) {
       const { abc, xyz } = state.classification;
-      if (abc === 'N/A' || xyz === 'D') continue;
+      if (abc === 'N/A' || xyz === 'D' || xyz === null) continue;
       expect(state.capitalPriority).toBe(CAPITAL_PRIORITIES[`${abc}${xyz}`]);
     }
   });

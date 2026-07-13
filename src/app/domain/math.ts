@@ -1,4 +1,4 @@
-import { DailyRecord, ShortCycleScanEntry } from './models';
+import { CycleRecord, CycleStatus, DailyRecord, PolicyClassification, ShortCycleScanEntry, StockCalculationStatus } from './models';
 
 export function mean(values: readonly number[]): number {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
@@ -23,7 +23,26 @@ export function sampleStdev(values: readonly number[]): number {
   return Math.sqrt(values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1));
 }
 
-export function isStockout(record: Pick<DailyRecord, 'openStock' | 'closeStock' | 'sales' | 'receiptHour' | 'hasRecord'>, cutoffHour = '10:00'): boolean {
+/**
+ * RULE-01-001 — `sales` chỉ là `null` khi `hasRecord=false` (ngày scaffold, xem
+ * calendar-scaffold.ts). Dùng ở những nhánh đã tự chứng minh `hasRecord=true`
+ * (ví dụ sau khi đã loại nhánh `!hasRecord` bằng return sớm) để lấy `number` an
+ * toàn kiểu dữ liệu mà KHÔNG coi null là 0 — nếu bất biến bị vi phạm, báo lỗi rõ
+ * ràng thay vì âm thầm tính sai.
+ */
+export function requireObservedSales(record: Pick<DailyRecord, 'sales' | 'hasRecord'>): number {
+  if (record.sales === null) throw new Error('Bất biến vỡ: sales=null nhưng hasRecord=true — không được coi ngày này là đã quan sát.');
+  return record.sales;
+}
+
+/**
+ * RULE-02-001 — `stockCalculationStatus` mặc định 'CALCULATED' để giữ nguyên hành vi cũ ở mọi
+ * lời gọi chưa truyền tham số này (test cũ, dữ liệu giả); chỉ khi gọi từ Chặng 2 thật với trạng
+ * thái ANCHOR_MISSING/UNRESOLVED thì mới chặn đánh dấu stockout tự động.
+ */
+export function isStockout(record: Pick<DailyRecord, 'openStock' | 'closeStock' | 'sales' | 'receiptHour' | 'hasRecord'>, cutoffHour = '10:00', stockCalculationStatus: StockCalculationStatus = 'CALCULATED'): boolean {
+  // RULE-02-001 — không đủ căn cứ tính tồn thì không được kết luận stockout tự động.
+  if (stockCalculationStatus === 'ANCHOR_MISSING' || stockCalculationStatus === 'UNRESOLVED') return false;
   // lateReceipt chỉ cần tồn đầu/cuối/giờ nhập (nguồn sổ tồn kho, tin được kể cả
   // ngày không có giao dịch bán) nên không cần gate theo hasRecord.
   const lateReceipt = record.openStock === 0 && record.closeStock > 0 && !!record.receiptHour && record.receiptHour > cutoffHour;
@@ -44,6 +63,25 @@ export function stripStandingPromoCodes(promoCode: string | null, standingCodes:
   const standing = new Set(standingCodes);
   const remaining = promoCode.split('|').filter(code => !standing.has(code));
   return remaining.length ? remaining.join('|') : null;
+}
+
+/**
+ * RULE-04-001 — phân loại một mã CTKM (đã qua stripStandingPromoCodes, không còn khả năng là
+ * STANDING_PRICE) thành CAMPAIGN/CLEARANCE/UNKNOWN_REVIEW theo hai danh sách chính sách đã duyệt.
+ * Mặc định CAMPAIGN khi không khớp danh sách nào — giữ nguyên hành vi hiện có, không tự đoán.
+ */
+export function classifyPromoPolicy(code: string, unknownReviewCodes: readonly string[], clearanceCodes: readonly string[]): PolicyClassification {
+  if (unknownReviewCodes.includes(code)) return 'UNKNOWN_REVIEW';
+  if (clearanceCodes.includes(code)) return 'CLEARANCE';
+  return 'CAMPAIGN';
+}
+
+/** RULE-04-001 — một vùng/cụm có nhiều mã: UNKNOWN_REVIEW nếu BẤT KỲ mã nào trong vùng chưa xác định loại (an toàn, không tự quyết một phần vùng). */
+export function classifyPromoRegionPolicy(codes: readonly string[], unknownReviewCodes: readonly string[], clearanceCodes: readonly string[]): PolicyClassification {
+  const classifications = codes.map(code => classifyPromoPolicy(code, unknownReviewCodes, clearanceCodes));
+  if (classifications.includes('UNKNOWN_REVIEW')) return 'UNKNOWN_REVIEW';
+  if (classifications.includes('CLEARANCE')) return 'CLEARANCE';
+  return 'CAMPAIGN';
 }
 
 export function stockoutBaseline(sales: number, references: readonly number[]): number | null {
@@ -90,14 +128,97 @@ export function calculateFreeStock(onHand: number, confirmedInbound: number, com
   return onHand + confirmedInbound - committed;
 }
 
+/**
+ * Chặng 14 §5.1 — tồn có thể sử dụng ngay = tồn thực tế trừ hàng giữ/hư hỏng/khóa/
+ * không bán được, chặn dưới tại 0. Khác hoàn toàn calculateFreeStock/I_free (§9),
+ * vốn được PHÉP âm để làm tín hiệu sớm cho thiếu hàng — không được gộp hai khái
+ * niệm này lại với nhau.
+ */
+export function calculateAvailableStock(actualStock: number, heldStock: number, damagedStock: number, blockedStock: number, unsellableStock: number): { availableStock: number; mismatch: boolean } {
+  const raw = actualStock - heldStock - damagedStock - blockedStock - unsellableStock;
+  return { availableStock: Math.max(0, raw), mismatch: raw < 0 };
+}
+
+/** Nội suy tuyến tính phân vị p (0..1) trên mảng đã sắp xếp tăng dần; mảng rỗng trả về 0. */
+export function percentile(sortedAscending: readonly number[], p: number): number {
+  if (!sortedAscending.length) return 0;
+  if (sortedAscending.length === 1) return sortedAscending[0];
+  const clamped = Math.min(1, Math.max(0, p));
+  const index = clamped * (sortedAscending.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sortedAscending[lower];
+  const weight = index - lower;
+  return sortedAscending[lower] * (1 - weight) + sortedAscending[upper] * weight;
+}
+
+/**
+ * Chặng 16 §8 — quy đổi số cần đặt (đơn vị lẻ) qua đúng 4 bước: đơn vị → carton,
+ * áp sàn MOQ theo carton, làm tròn lên bội số order-step, rồi đổi ngược ra đơn vị.
+ * Với unitsPerCarton=orderStep=1 (mặc định khi chưa có dữ liệu quy cách), công
+ * thức này cho kết quả giống hệt ceil(raw/moq)*moq trước đây — không có regression.
+ */
+export function roundToPurchaseUnits(rawQuantity: number, unitsPerCarton: number, moqUnits: number, orderStepCartons: number): { orderedUnits: number; cartonsOrdered: number; moqSurplus: number } {
+  if (rawQuantity <= 0) return { orderedUnits: 0, cartonsOrdered: 0, moqSurplus: 0 };
+  const perCarton = Math.max(1, unitsPerCarton);
+  const step = Math.max(1, orderStepCartons);
+  const cartonsNeeded = Math.ceil(rawQuantity / perCarton);
+  const moqCartons = Math.max(1, Math.ceil(Math.max(0, moqUnits) / perCarton));
+  // Làm tròn LÊN tới bội số MOQ (không chỉ đạt sàn MOQ) — với unitsPerCarton=orderStep=1
+  // công thức này cho kết quả giống hệt ceil(raw/moq)*moq trước đây.
+  const cartonsAtMoqMultiple = Math.ceil(cartonsNeeded / moqCartons) * moqCartons;
+  const cartonsOrdered = Math.ceil(cartonsAtMoqMultiple / step) * step;
+  const orderedUnits = cartonsOrdered * perCarton;
+  return { orderedUnits, cartonsOrdered, moqSurplus: orderedUnits - rawQuantity };
+}
+
+/** Chặng 15 §8 / Chặng 16 §10 — lượng tối đa bán được trước khi hết hạn dùng, quy đổi theo nhu cầu bình quân chu kỳ. Trả về Infinity khi SKU không có hạn dùng. */
+export function sellableBeforeExpiry(averageDemandPerCycle: number, shelfLifeDays: number | null, cycleLength: number): number {
+  if (!shelfLifeDays) return Infinity;
+  return averageDemandPerCycle * shelfLifeDays / cycleLength;
+}
+
+/**
+ * RULE-06-003/07-003 — chạy ngược từ chu kỳ gần nhất theo lịch, gom chu kỳ khóa liên tiếp, DỪNG
+ * ngay khi gặp chu kỳ không khóa. KHÔNG bao giờ nối 2 đoạn khóa cách nhau bởi một khoảng
+ * unresolved thành một chuỗi liên tục giả — khác hẳn `cycles.filter(cycle => cycle.locked)`
+ * (xóa hẳn khoảng trống rồi ghép hai bên lại, vi phạm trực tiếp RULE-06-003/07-003).
+ */
+export function trailingLockedRun(cycles: readonly CycleRecord[]): CycleRecord[] {
+  const run: CycleRecord[] = [];
+  for (let index = cycles.length - 1; index >= 0; index--) {
+    if (!cycles[index].locked) break;
+    run.unshift(cycles[index]);
+  }
+  return run;
+}
+
+/**
+ * RULE-07-003 — cửa sổ CỐ ĐỊNH đúng `size` vị trí chu kỳ gần nhất theo lịch (không phải `size`
+ * chu kỳ khóa gần nhất) — giữ nguyên mọi vị trí kể cả chu kỳ không khóa, để phát hiện đứt quãng.
+ * `blocked=true` ngay khi có ít nhất một vị trí trong cửa sổ không khóa; `blockingStatus` là
+ * trạng thái của vị trí không khóa gần nhất theo lịch (vị trí đầu tiên gặp khi dò ngược từ cuối).
+ */
+export function fixedCalendarWindow(cycles: readonly CycleRecord[], size: number): { window: CycleRecord[]; blocked: boolean; blockingStatus: CycleStatus | null } {
+  const window = cycles.slice(-size);
+  for (let index = window.length - 1; index >= 0; index--) {
+    if (!window[index].locked) return { window, blocked: true, blockingStatus: window[index].status };
+  }
+  return { window, blocked: false, blockingStatus: null };
+}
+
 export function classifyXyz(values: readonly number[]): {
-  xyz: 'X' | 'Y' | 'Z' | 'D'; n: number; m: number; adi: number | null;
+  xyz: 'X' | 'Y' | 'Z' | 'D' | null; n: number; m: number; adi: number | null;
   positiveMean: number | null; positiveStdev: number | null; cv: number | null; cv2: number | null;
 } {
   const n = values.length;
   const positive = values.filter(value => value > 0);
   const m = positive.length;
-  if (n < 6 || !m) return { xyz: 'D', n, m, adi: null, positiveMean: null, positiveStdev: null, cv: null, cv2: null };
+  if (n < 6) return { xyz: 'D', n, m, adi: null, positiveMean: null, positiveStdev: null, cv: null, cv2: null };
+  // RULE-07-004 — cửa sổ đủ dài (n≥6) nhưng không có chu kỳ dương nào: KHÔNG được gán D (đó là lý
+  // do dành cho lịch sử thật sự ngắn), và KHÔNG tính ADI bằng phép chia cho 0. Caller (runStage7)
+  // đọc xyz=null + n≥6 để gán classificationStatus='NO_POSITIVE_DEMAND_REVIEW'.
+  if (!m) return { xyz: null, n, m, adi: null, positiveMean: null, positiveStdev: null, cv: null, cv2: null };
   const adi = n / m;
   const positiveMean = mean(positive);
   const positiveStdev = populationStdev(positive);
@@ -131,6 +252,18 @@ export function calculateBias(actual: readonly number[], forecast: readonly numb
   const denominator = actual.reduce((sum, value) => sum + value, 0);
   if (!denominator) return null;
   return actual.reduce((sum, value, index) => sum + ((forecast[index] ?? 0) - value), 0) / denominator;
+}
+
+export function calculateRmse(actual: readonly number[], forecast: readonly number[]): number | null {
+  if (!actual.length) return null;
+  const errors = actual.map((value, index) => value - (forecast[index] ?? 0));
+  return Math.sqrt(errors.reduce((sum, error) => sum + error ** 2, 0) / errors.length);
+}
+
+export function calculateNrmse(actual: readonly number[], forecast: readonly number[]): number | null {
+  const rmse = calculateRmse(actual, forecast);
+  const actualMean = mean(actual);
+  return rmse !== null && actualMean > 0 ? rmse / actualMean : null;
 }
 
 export function safetyStock(z: number, averageDemand: number, demandSigma: number, leadTimeCycles: number, leadTimeSigmaCycles: number): number {
