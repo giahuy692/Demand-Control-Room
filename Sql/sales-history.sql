@@ -1,833 +1,465 @@
-USE [POS];
-SET NOCOUNT ON;
+SELECT 
+    tbl_SALPoSDetails.Product,
+    tbl_LSProduct.Barcode,
+    tbl_LSProduct.VName, 
+    SUM(tbl_SALPoSDetails.Qty) AS TotalQty, 
+    (SUM(tbl_SALPoSDetails.Amount) / NULLIF(SUM(tbl_SALPoSDetails.Qty), 0)) AS AvgPrice,
+    tbl_SALPoSMaster.EffDate,
+    tbl_SALPoSDetails.Discount,
+    tbl_POLPromotion.Promotion
+FROM tbl_SALPoSDetails
+/* Dùng mấu nối chặt chẽ cho dữ liệu giao dịch cốt lõi */
+JOIN tbl_SALPoSMaster ON tbl_SALPoSDetails.PoSMaster = tbl_SALPoSMaster.Code
+JOIN tbl_LSProduct ON tbl_LSProduct.Code = tbl_SALPoSDetails.Product
 
-DECLARE @ToDate date;
-DECLARE @TopProducts int;
+/* Dùng mấu nối mở rộng (LEFT JOIN) cho dữ liệu khuyến mãi */
+LEFT JOIN tbl_POLBundle ON tbl_POLBundle.Code = tbl_SALPoSDetails.Discount
+LEFT JOIN tbl_POLPromotion ON tbl_POLBundle.Promotion = tbl_POLPromotion.Code
 
-SET @ToDate = '2026-02-14';
-SET @TopProducts = 50;
-
-/* =====================================================================
-   LẤY TOÀN BỘ LỊCH SỬ BÁN HÀNG CHO NHIỀU BARCODE
-
-   ĐẦU RA VÀ Ý NGHĨA:
-
-   1. Barcode
-      - Mã vạch định danh sản phẩm.
-      - Nguồn: tbl_LSProduct.Barcode.
-      - Được dùng để tìm Code nội bộ của sản phẩm.
-
-   2. ProductName
-      - Tên tiếng Việt của sản phẩm.
-      - Nguồn: tbl_LSProduct.VName.
-      - Chỉ dùng để giao diện hiển thị.
-      - Không tham gia tính demand, forecast hoặc phân loại ABC.
-
-   3. Date
-      - Ngày phát sinh giao dịch bán hàng.
-      - Nguồn: tbl_SALPoSMaster.TransactionDate.
-      - Chỉ lấy phần ngày.
-
-   4. Sales
-      - Tổng số lượng bán của sản phẩm trong ngày.
-      - Công thức:
-
-            Sales = SUM(tbl_SALPoSDetails.Qty)
-
-   5. Amount
-      - Tổng tiền trước giảm giá trong ngày.
-      - Công thức:
-
-            Amount = SUM(tbl_SALPoSDetails.Amount)
-
-      - Không trừ DiscountAmount.
-
-   6. Price
-      - Đơn giá bình quân trước giảm giá.
-      - Công thức:
-
-            Price = SUM(Amount) / SUM(Qty)
-
-      - Được sử dụng để tính giá trị tiêu thụ phục vụ phân loại ABC.
-      - Có thể NULL nếu tổng Qty bằng 0.
-
-   7. PromoCode
-      - Chuỗi JSON chứa danh sách chương trình khuyến mãi áp dụng
-        cho sản phẩm trong ngày.
-      - Mỗi phần tử gồm:
-
-            PromoCode: tbl_POLPromotion.Code
-            PromoName: tbl_POLPromotion.Promotion
-
-      - Nếu không có chương trình khuyến mãi:
-
-            []
-
-   LUỒNG TÌM DỮ LIỆU:
-
-       Danh sách Barcode
-           -> tbl_LSProduct.Barcode
-           -> tbl_LSProduct.Code
-           -> tbl_SALPoSDetails.Product
-           -> tbl_SALPoSMaster.TransactionDate
-
-   QUY TẮC:
-
-   - Barcode là thông tin định danh sản phẩm đáng tin cậy.
-   - Không dùng tbl_SALPoSDetails.Barcode để tìm sản phẩm.
-   - Không dùng RePosDetails làm điều kiện.
-   - Không ép TransactionType = 2.
-   - Không tự sinh ngày không có giao dịch.
-   - Không tạo record giả.
-   - Không dùng FOR JSON PATH.
-   - Không dùng STRING_AGG.
-   ===================================================================== */
-
-
-/* =====================================================================
-   1. TẠO BẢNG TẠM CHỨA DANH SÁCH BARCODE ĐẦU VÀO
-
-   Mỗi Barcode chỉ được xuất hiện một lần.
-   ===================================================================== */
-
-IF OBJECT_ID('tempdb..#InputBarcodes') IS NOT NULL
-BEGIN
-    DROP TABLE #InputBarcodes;
-END;
-
-CREATE TABLE #InputBarcodes
-(
-    Barcode varchar(100) NOT NULL
-        PRIMARY KEY
-);
-
-
-/* =====================================================================
-   2. NHẬP DANH SÁCH BARCODE CẦN LẤY LỊCH SỬ
-   ===================================================================== */
-
-INSERT INTO #InputBarcodes (Barcode)
-SELECT DISTINCT [Barcode]
-FROM [tbl_LSProduct]
-WHERE [Code] IN (
-    /* Cung tap top SKU va cung cutoff voi stock-history.sql. */
-    SELECT TOP (@TopProducts)
-        PosDetail.[Product]
-    FROM [POS].[dbo].[tbl_SALPoSDetails] AS PosDetail
-    INNER JOIN [POS].[dbo].[tbl_SALPoSMaster] AS PosMaster
-        ON PosMaster.[Code] = PosDetail.[PoSMaster]
-    WHERE PosMaster.[TransactionDate] < DATEADD(DAY, 1, @ToDate)
-    GROUP BY PosDetail.[Product]
-    ORDER BY
-        SUM(COALESCE(PosDetail.[Qty], 0)) DESC,
-        PosDetail.[Product] ASC
-)
-AND [Barcode] IS NOT NULL;
-
-
-/* =====================================================================
-   3. TẠO BẢNG TẠM CHỨA SẢN PHẨM TÌM ĐƯỢC
-
-   ProductCode:
-   - Nguồn: tbl_LSProduct.Code.
-   - Dùng đối chiếu với tbl_SALPoSDetails.Product.
-
-   Barcode:
-   - Nguồn: tbl_LSProduct.Barcode.
-
-   ProductName:
-   - Nguồn: tbl_LSProduct.VName.
-   ===================================================================== */
-
-IF OBJECT_ID('tempdb..#TargetProducts') IS NOT NULL
-BEGIN
-    DROP TABLE #TargetProducts;
-END;
-
-CREATE TABLE #TargetProducts
-(
-    Barcode varchar(100) NOT NULL,
-
-    ProductCode int NOT NULL,
-
-    ProductName nvarchar(500) NULL,
-
-    PRIMARY KEY
-    (
-        Barcode,
-        ProductCode
+WHERE 
+    /* Điều kiện 1: Lọc theo danh sách Mã sản phẩm nội bộ (Code) */
+    tbl_SALPoSDetails.Product IN (
+        49054, 50084, 14750, 30255, 61200, 
+        39632, 59975, 31866, 20179, 33811, 
+        31419, 39895, 36968, 28977, 24695, 
+        39089, 48923, 40717, 24010, 31825, 
+        34456, 38665, 34752, 41952, 55570, 
+        19551, 39894, 44351, 31863, 15346
     )
+    /* Kết hợp với Điều kiện 2: Lọc theo danh sách Mã vạch (Barcode) */
+    OR tbl_LSProduct.Barcode IN (
+        '4932313033092', '4965078102116', '4987645005453', '4987645005989',
+        '4901001194186', '4903024904957', '4955209080352', '4955209080338',
+        '4955209080345', '4573475402137', '4534374394596', '4971710573664',
+        '4901065606939', '4973221032487', '4905489647905', '8997240600041',
+        '4582517330024', '8936013251042', '4976416007932', '4902102019187',
+        '4902871053900', '4908609116909', '8936013251097', '4550516493583',
+        '4905687446263', '4968583245477', '4526112647644', '4582695026467',
+        '4982790187924', '4535792442340', '4978929915261', '4941336729073',
+        '4901548603844', '4905596183068', '4976790247870', '4901616010413',
+        '4982790412309', '4901111910973', '4970285280038', '4546490702476',
+        '4562370392322', '4560127703445'
+    )
+GROUP BY 
+    tbl_SALPoSMaster.EffDate,
+    tbl_LSProduct.Barcode,
+    tbl_LSProduct.VName,
+    tbl_SALPoSDetails.Product,
+    tbl_SALPoSDetails.Discount,
+    tbl_POLPromotion.Promotion
+ORDER BY 
+    tbl_SALPoSDetails.Product ASC,
+	tbl_SALPoSMaster.EffDate DESC;
+
+
+--Tìm ra những sản phẩm ít áp dụng KM nhất
+SELECT TOP 30 WITH TIES 
+[Product], 
+COUNT(*) AS TotalNullDiscount
+FROM [POS].[dbo].[tbl_SALPoSDetails]
+WHERE [Discount] IS NULL
+GROUP BY [Product]
+ORDER BY TotalNullDiscount DESC;
+
+
+/* =====================================================================
+   LỊCH SỬ TỒN KHO PHỤC VỤ MÔ PHỎNG NGÀY 2026-02-01
+
+   Hai SELECT doanh số phía trên được giữ nguyên. Result set này ghép với
+   doanh số bằng ProductCode + Date.
+
+   Khung xử lý Chặng 1:
+       2023-01-03 .. 2026-01-31
+
+   Vùng 24 ngày trước khung:
+       2022-12-10 .. 2023-01-02
+       IsReferenceOnly = 1, chỉ dùng tìm ngày tham chiếu để bù nền.
+
+   Tồn được tái dựng ngược từ tbl_LSProduct.Quantity và toàn bộ phát sinh
+   kho/POS đến ngày chạy SQL. Đây là số tái dựng, không phải snapshot gốc.
+   ===================================================================== */
+
+DECLARE @SimulationRunDate date = '2026-02-01';
+DECLARE @HistoryYears int = 3;
+DECLARE @CycleLength int = 15;
+DECLARE @ReferenceDaysBefore int = 24;
+DECLARE @StockAnchorDate date = CONVERT(date, GETDATE());
+DECLARE @HistoryCandidateStartDate date;
+DECLARE @ProcessingStartDate date;
+DECLARE @ProcessingEndDate date = DATEADD(day, -1, @SimulationRunDate);
+DECLARE @ReferenceReadStartDate date;
+DECLARE @FullCycleDays int;
+
+SET @HistoryCandidateStartDate = CONVERT
+(
+    date,
+    CONVERT(char(4), YEAR(@SimulationRunDate) - @HistoryYears) + '0101',
+    112
 );
 
+SET @FullCycleDays =
+    (DATEDIFF(day, @HistoryCandidateStartDate, @ProcessingEndDate) + 1)
+    / @CycleLength * @CycleLength;
 
-/* =====================================================================
-   4. TÌM CODE SẢN PHẨM TỪ DANH SÁCH BARCODE
-
-   Quan hệ:
-
-       #InputBarcodes.Barcode
-           = tbl_LSProduct.Barcode
-   ===================================================================== */
-
-INSERT INTO #TargetProducts
+SET @ProcessingStartDate = DATEADD
 (
-    Barcode,
-    ProductCode,
-    ProductName
-)
-SELECT DISTINCT
-    CONVERT(
-        varchar(100),
-        Product.Barcode
-    ) AS Barcode,
-
-    Product.Code AS ProductCode,
-
-    NULLIF(
-        LTRIM(
-            RTRIM(
-                CONVERT(
-                    nvarchar(500),
-                    Product.VName
-                )
-            )
-        ),
-        N''
-    ) AS ProductName
-
-FROM #InputBarcodes AS InputBarcode
-
-INNER JOIN dbo.tbl_LSProduct AS Product
-    ON Product.Barcode = InputBarcode.Barcode;
-
-
-/* =====================================================================
-   5. THÔNG BÁO BARCODE KHÔNG TÌM THẤY
-
-   Chỉ tạo thông báo trong tab Messages.
-   Không tạo thêm result set nên không làm ứng dụng đọc nhầm bảng kết quả.
-   ===================================================================== */
-
-DECLARE @MissingBarcodeCount int;
-DECLARE @MissingBarcodeList nvarchar(max);
-
-SELECT
-    @MissingBarcodeCount = COUNT(*)
-FROM #InputBarcodes AS InputBarcode
-
-LEFT JOIN #TargetProducts AS TargetProduct
-    ON TargetProduct.Barcode = InputBarcode.Barcode
-
-WHERE TargetProduct.Barcode IS NULL;
-
-
-IF @MissingBarcodeCount > 0
-BEGIN
-    SELECT
-        @MissingBarcodeList =
-            STUFF(
-                (
-                    SELECT
-                        N', '
-                        + CONVERT(
-                            nvarchar(100),
-                            InputBarcode.Barcode
-                        )
-
-                    FROM #InputBarcodes AS InputBarcode
-
-                    LEFT JOIN #TargetProducts AS TargetProduct
-                        ON TargetProduct.Barcode = InputBarcode.Barcode
-
-                    WHERE TargetProduct.Barcode IS NULL
-
-                    ORDER BY
-                        InputBarcode.Barcode
-
-                    FOR XML PATH(N''), TYPE
-                ).value(
-                    N'.',
-                    N'nvarchar(max)'
-                ),
-                1,
-                2,
-                N''
-            );
-
-    RAISERROR(
-        N'Có %d Barcode không tìm thấy trong tbl_LSProduct: %s',
-        10,
-        1,
-        @MissingBarcodeCount,
-        @MissingBarcodeList
-    );
-END;
-
-
-/* =====================================================================
-   6. TẠO INDEX CHO DANH SÁCH SẢN PHẨM
-
-   Giúp SQL Server join ProductCode với bảng POS nhanh hơn.
-   ===================================================================== */
-
-CREATE NONCLUSTERED INDEX IX_TargetProducts_ProductCode
-ON #TargetProducts
-(
-    ProductCode
+    day,
+    -@FullCycleDays + 1,
+    @ProcessingEndDate
 );
 
+SET @ReferenceReadStartDate = DATEADD
+(
+    day,
+    -@ReferenceDaysBefore,
+    @ProcessingStartDate
+);
 
-/* =====================================================================
-   7. TẠO BẢNG TẠM CHỨA DỮ LIỆU BÁN THEO NGÀY
-
-   Bảng này chỉ tồn tại trong phiên chạy hiện tại.
-   Không cập nhật hoặc tạo dữ liệu trong bảng thật.
-   ===================================================================== */
-
-IF OBJECT_ID('tempdb..#DailySales') IS NOT NULL
+IF @FullCycleDays < @CycleLength
 BEGIN
-    DROP TABLE #DailySales;
+    RAISERROR(N'Khung lịch sử không tạo được một chu kỳ đầy đủ.', 16, 1);
+    RETURN;
 END;
 
-CREATE TABLE #DailySales
+IF @ProcessingEndDate > @StockAnchorDate
+BEGIN
+    RAISERROR(N'Ngày cuối lịch sử lớn hơn ngày neo tồn hiện tại.', 16, 1);
+    RETURN;
+END;
+
+IF OBJECT_ID('tempdb..#SalesHistoryTargetProducts') IS NOT NULL
+    DROP TABLE #SalesHistoryTargetProducts;
+IF OBJECT_ID('tempdb..#SalesHistoryCalendar') IS NOT NULL
+    DROP TABLE #SalesHistoryCalendar;
+IF OBJECT_ID('tempdb..#SalesHistoryDailyMovements') IS NOT NULL
+    DROP TABLE #SalesHistoryDailyMovements;
+IF OBJECT_ID('tempdb..#SalesHistoryStock') IS NOT NULL
+    DROP TABLE #SalesHistoryStock;
+IF OBJECT_ID('tempdb..#SalesHistoryFirstReceipts') IS NOT NULL
+    DROP TABLE #SalesHistoryFirstReceipts;
+
+CREATE TABLE #SalesHistoryTargetProducts
 (
-    Barcode varchar(100) NOT NULL,
-
-    ProductCode int NOT NULL,
-
+    ProductCode int NOT NULL PRIMARY KEY,
+    Barcode nvarchar(100) NULL,
     ProductName nvarchar(500) NULL,
-
-    SaleDate date NOT NULL,
-
-    Sales decimal(38, 6) NOT NULL,
-
-    Amount decimal(38, 6) NOT NULL,
-
-    Price decimal(18, 2) NULL
+    CurrentStock decimal(38, 6) NOT NULL
 );
 
-
-/* =====================================================================
-   8. TỔNG HỢP TOÀN BỘ LỊCH SỬ BÁN HÀNG
-
-   Không giới hạn FromDate hoặc ToDate.
-
-   Điều kiện sản phẩm:
-
-       tbl_SALPoSDetails.Product
-           = tbl_LSProduct.Code
-
-   Điều kiện lấy ngày:
-
-       tbl_SALPoSDetails.PoSMaster
-           = tbl_SALPoSMaster.Code
-
-   Không sử dụng:
-
-       RePosDetails
-       TransactionType = 2
-       IsApproved
-       IsProcess
-   ===================================================================== */
-
-INSERT INTO #DailySales
+INSERT INTO #SalesHistoryTargetProducts
 (
-    Barcode,
     ProductCode,
+    Barcode,
     ProductName,
-    SaleDate,
-    Sales,
-    Amount,
-    Price
+    CurrentStock
 )
 SELECT
-    /*
-       Barcode:
-       Mã vạch định danh sản phẩm.
-    */
-    TargetProduct.Barcode,
-
-    /*
-       ProductCode:
-       Chỉ sử dụng nội bộ để join dữ liệu.
-       Không được xuất ra kết quả cuối.
-    */
-    TargetProduct.ProductCode,
-
-    /*
-       ProductName:
-       Tên tiếng Việt dùng cho UI.
-    */
-    TargetProduct.ProductName,
-
-    /*
-       Date:
-       Ngày giao dịch thực tế.
-    */
-    CAST(
-        PosMaster.TransactionDate
-        AS date
-    ) AS SaleDate,
-
-    /*
-       Sales:
-       Tổng số lượng bán trong ngày.
-
-       Công thức:
-           SUM(Qty)
-    */
-    SUM(
-        CAST(
-            COALESCE(
-                PosDetail.Qty,
-                0
-            )
-            AS decimal(38, 6)
-        )
-    ) AS Sales,
-
-    /*
-       Amount:
-       Tổng tiền trước giảm giá trong ngày.
-
-       Công thức:
-           SUM(Amount)
-
-       Không trừ:
-           DiscountAmount
-    */
-    SUM(
-        CAST(
-            COALESCE(
-                PosDetail.Amount,
-                0
-            )
-            AS decimal(38, 6)
-        )
-    ) AS Amount,
-
-    /*
-       Price:
-       Đơn giá bình quân trước giảm giá.
-
-       Ở cấp dòng:
-           Price = Amount / Qty
-
-       Khi tổng hợp nhiều dòng trong ngày:
-           Price = SUM(Amount) / SUM(Qty)
-
-       NULLIF ngăn lỗi chia cho 0.
-    */
-    CAST(
-        SUM(
-            CAST(
-                COALESCE(
-                    PosDetail.Amount,
-                    0
-                )
-                AS decimal(38, 8)
-            )
-        )
-        /
-        NULLIF(
-            SUM(
-                CAST(
-                    COALESCE(
-                        PosDetail.Qty,
-                        0
-                    )
-                    AS decimal(38, 8)
-                )
-            ),
-            0
-        )
-        AS decimal(18, 2)
-    ) AS Price
-
-FROM #TargetProducts AS TargetProduct
-
-INNER JOIN dbo.tbl_SALPoSDetails AS PosDetail
-    ON PosDetail.Product = TargetProduct.ProductCode
-
-INNER JOIN dbo.tbl_SALPoSMaster AS PosMaster
-    ON PosMaster.Code = PosDetail.PoSMaster
-
-WHERE PosMaster.TransactionDate < DATEADD(
-    DAY,
-    1,
-    @ToDate
+    Product.Code,
+    CONVERT(nvarchar(100), Product.Barcode),
+    CONVERT(nvarchar(500), Product.VName),
+    CONVERT(decimal(38, 6), COALESCE(Product.Quantity, 0))
+FROM dbo.tbl_LSProduct AS Product
+WHERE Product.Code IN
+(
+    49054, 50084, 14750, 30255, 61200,
+    39632, 59975, 31866, 20179, 33811,
+    31419, 39895, 36968, 28977, 24695,
+    39089, 48923, 40717, 24010, 31825,
+    34456, 38665, 34752, 41952, 55570,
+    19551, 39894, 44351, 31863, 15346
 )
+OR Product.Barcode IN
+(
+    '4932313033092', '4965078102116', '4987645005453', '4987645005989',
+    '4901001194186', '4903024904957', '4955209080352', '4955209080338',
+    '4955209080345', '4573475402137', '4534374394596', '4971710573664',
+    '4901065606939', '4973221032487', '4905489647905', '8997240600041',
+    '4582517330024', '8936013251042', '4976416007932', '4902102019187',
+    '4902871053900', '4908609116909', '8936013251097', '4550516493583',
+    '4905687446263', '4968583245477', '4526112647644', '4582695026467',
+    '4982790187924', '4535792442340', '4978929915261', '4941336729073',
+    '4901548603844', '4905596183068', '4976790247870', '4901616010413',
+    '4982790412309', '4901111910973', '4970285280038', '4546490702476',
+    '4562370392322', '4560127703445'
+);
 
-/*
-   Không dùng điều kiện:
+CREATE TABLE #SalesHistoryCalendar
+(
+    StockDate date NOT NULL PRIMARY KEY
+);
 
-       PosDetail.RePosDetails IS NULL
-*/
+;WITH Calendar AS
+(
+    SELECT @ReferenceReadStartDate AS StockDate
 
-/*
-   Không dùng điều kiện:
+    UNION ALL
 
-       PosMaster.TransactionType = 2
-*/
+    SELECT DATEADD(day, 1, StockDate)
+    FROM Calendar
+    WHERE StockDate < @StockAnchorDate
+)
+INSERT INTO #SalesHistoryCalendar (StockDate)
+SELECT StockDate
+FROM Calendar
+OPTION (MAXRECURSION 0);
 
-GROUP BY
-    TargetProduct.Barcode,
-    TargetProduct.ProductCode,
-    TargetProduct.ProductName,
-    CAST(
-        PosMaster.TransactionDate
-        AS date
-    );
+CREATE TABLE #SalesHistoryDailyMovements
+(
+    ProductCode int NOT NULL,
+    MovementDate date NOT NULL,
+    DailyNetMovement decimal(38, 6) NOT NULL,
+    PRIMARY KEY (ProductCode, MovementDate)
+);
 
-
-/* =====================================================================
-   9. TẠO INDEX CHO DỮ LIỆU BÁN THEO NGÀY
-
-   Hỗ trợ:
-   - Sắp xếp kết quả.
-   - Map chương trình khuyến mãi.
-   ===================================================================== */
-
-CREATE NONCLUSTERED INDEX IX_DailySales_ProductDate
-ON #DailySales
+INSERT INTO #SalesHistoryDailyMovements
 (
     ProductCode,
-    SaleDate
-);
-
-
-/* =====================================================================
-   10. TẠO BẢNG TẠM CHỨA CHƯƠNG TRÌNH KHUYẾN MÃI
-
-   Mỗi dòng tương ứng:
-
-       Một Barcode
-       + một ngày
-       + một chương trình khuyến mãi
-
-   PromoCode:
-       tbl_POLPromotion.Code
-
-   PromoName:
-       tbl_POLPromotion.Promotion
-   ===================================================================== */
-
-IF OBJECT_ID('tempdb..#DailyPromotions') IS NOT NULL
-BEGIN
-    DROP TABLE #DailyPromotions;
-END;
-
-CREATE TABLE #DailyPromotions
-(
-    Barcode varchar(100) NOT NULL,
-
-    SaleDate date NOT NULL,
-
-    PromoCode nvarchar(100) NOT NULL,
-
-    PromoName nvarchar(500) NOT NULL
-);
-
-
-/* =====================================================================
-   11. MAP CHƯƠNG TRÌNH KHUYẾN MÃI THEO SKU VÀ NGÀY
-
-   Quan hệ:
-
-       tbl_POLBundle.Product
-           = tbl_LSProduct.Code
-
-       tbl_POLBundle.Promotion
-           = tbl_POLPromotion.Code
-
-   Điều kiện hiệu lực:
-
-       StartDate <= ngày bán
-       EndDate >= ngày bán
-
-   EndDate NULL:
-       Được hiểu là chương trình chưa có ngày kết thúc.
-
-   DISTINCT:
-       Tránh một CTKM xuất hiện nhiều lần do nhiều dòng Bundle.
-   ===================================================================== */
-
-INSERT INTO #DailyPromotions
-(
-    Barcode,
-    SaleDate,
-    PromoCode,
-    PromoName
+    MovementDate,
+    DailyNetMovement
 )
-SELECT DISTINCT
-    DailySale.Barcode,
-
-    DailySale.SaleDate,
-
-    COALESCE(
-        CONVERT(
-            nvarchar(100),
-            Promotion.Code
-        ),
-        N''
-    ) AS PromoCode,
-
-    COALESCE(
-        CONVERT(
-            nvarchar(500),
-            Promotion.Promotion
-        ),
-        N''
-    ) AS PromoName
-
-FROM #DailySales AS DailySale
-
-INNER JOIN dbo.tbl_POLBundle AS Bundle
-    ON Bundle.Product = DailySale.ProductCode
-
-INNER JOIN dbo.tbl_POLPromotion AS Promotion
-    ON Promotion.Code = Bundle.Promotion
-
-WHERE
-    /*
-       Chương trình bắt đầu trước khi ngày bán kết thúc.
-    */
-    Promotion.StartDate
-        < DATEADD(
-            DAY,
-            1,
-            DailySale.SaleDate
+SELECT
+    Movement.ProductCode,
+    Movement.MovementDate,
+    SUM(Movement.MovementQty)
+FROM
+(
+    SELECT
+        StockDetail.Product AS ProductCode,
+        CONVERT
+        (
+            date,
+            CASE
+                WHEN StockMaster.DocumentType IN (1, 2, 3, 4, 21, 31, 41, 50)
+                    THEN COALESCE(StockMaster.ReceiptDate, StockMaster.EffDate)
+                ELSE COALESCE(StockMaster.EffDate, StockMaster.ReceiptDate)
+            END
+        ) AS MovementDate,
+        CONVERT
+        (
+            decimal(38, 6),
+            CASE
+                WHEN StockMaster.DocumentType IN (1, 2, 3, 4, 21, 31, 41, 50)
+                     AND StockMaster.DocumentStatus = 3
+                    THEN COALESCE(StockDetail.QtyReceived, 0)
+                WHEN StockMaster.DocumentType IN (1, 2, 3, 4, 21, 31, 41, 50)
+                     AND StockMaster.DocumentStatus = 2
+                    THEN COALESCE(StockDetail.Quantity, 0)
+                WHEN StockMaster.DocumentType IN (5, 6, 7, 8, 9, 10, 20, 30, 40, 52)
+                     AND StockMaster.DocumentStatus = 6
+                    THEN -COALESCE(StockDetail.QtyReceived, 0)
+                WHEN StockMaster.DocumentType IN (5, 6, 7, 8, 9, 20, 30, 40, 52)
+                     AND StockMaster.DocumentStatus = 5
+                    THEN -COALESCE(StockDetail.QtyReceived, 0)
+                ELSE 0
+            END
+        ) AS MovementQty
+    FROM dbo.tbl_OPSImExDetails AS StockDetail
+    INNER JOIN dbo.tbl_OPSImExMaster AS StockMaster
+        ON StockMaster.Code = StockDetail.DocumentNo
+    INNER JOIN #SalesHistoryTargetProducts AS TargetProduct
+        ON TargetProduct.ProductCode = StockDetail.Product
+    WHERE
+        (
+            StockMaster.DocumentType IN (1, 2, 3, 4, 21, 31, 41, 50)
+            AND StockMaster.DocumentStatus IN (2, 3)
+        )
+        OR
+        (
+            StockMaster.DocumentType IN (5, 6, 7, 8, 9, 10, 20, 30, 40, 52)
+            AND StockMaster.DocumentStatus = 6
+        )
+        OR
+        (
+            StockMaster.DocumentType IN (5, 6, 7, 8, 9, 20, 30, 40, 52)
+            AND StockMaster.DocumentStatus = 5
         )
 
-    /*
-       Chương trình chưa kết thúc trước ngày bán.
-    */
-    AND
-    (
-        Promotion.EndDate IS NULL
-        OR Promotion.EndDate >= DailySale.SaleDate
-    )
+    UNION ALL
 
-    /*
-       Chưa lọc:
+    SELECT
+        PosDetail.Product,
+        CONVERT(date, PosMaster.TransactionDate),
+        CONVERT(decimal(38, 6), -COALESCE(PosDetail.Qty, 0))
+    FROM dbo.tbl_SALPoSDetails AS PosDetail
+    INNER JOIN dbo.tbl_SALPoSMaster AS PosMaster
+        ON PosMaster.Code = PosDetail.PoSMaster
+    INNER JOIN #SalesHistoryTargetProducts AS TargetProduct
+        ON TargetProduct.ProductCode = PosDetail.Product
+) AS Movement
+WHERE Movement.MovementDate >= @ReferenceReadStartDate
+  AND Movement.MovementDate <= @StockAnchorDate
+GROUP BY
+    Movement.ProductCode,
+    Movement.MovementDate;
 
-           Promotion.IsPOS
-           Promotion.IsUse
-           Promotion.IsWholeSale
-           Bundle.IsClosed
-
-       Chỉ bổ sung khi đã xác minh chắc chắn ý nghĩa nghiệp vụ.
-    */;
-
-
-/* =====================================================================
-   12. TẠO INDEX CHO DỮ LIỆU KHUYẾN MÃI
-   ===================================================================== */
-
-CREATE NONCLUSTERED INDEX IX_DailyPromotions_BarcodeDate
-ON #DailyPromotions
+CREATE TABLE #SalesHistoryStock
 (
-    Barcode,
-    SaleDate
+    ProductCode int NOT NULL,
+    StockDate date NOT NULL,
+    OpenStock decimal(38, 6) NOT NULL,
+    CloseStock decimal(38, 6) NOT NULL,
+    PRIMARY KEY (ProductCode, StockDate)
 );
 
+;WITH ProductDates AS
+(
+    SELECT
+        Product.ProductCode,
+        Product.CurrentStock,
+        Calendar.StockDate,
+        CONVERT(decimal(38, 6), COALESCE(Movement.DailyNetMovement, 0))
+            AS DailyNetMovement
+    FROM #SalesHistoryTargetProducts AS Product
+    CROSS JOIN #SalesHistoryCalendar AS Calendar
+    LEFT JOIN #SalesHistoryDailyMovements AS Movement
+        ON Movement.ProductCode = Product.ProductCode
+       AND Movement.MovementDate = Calendar.StockDate
+),
+ReverseMovements AS
+(
+    SELECT
+        ProductDates.*,
+        SUM(DailyNetMovement) OVER
+        (
+            PARTITION BY ProductCode
+            ORDER BY StockDate DESC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS ReverseMovement
+    FROM ProductDates
+)
+INSERT INTO #SalesHistoryStock
+(
+    ProductCode,
+    StockDate,
+    OpenStock,
+    CloseStock
+)
+SELECT
+    ProductCode,
+    StockDate,
+    CONVERT(decimal(38, 6), CurrentStock - ReverseMovement),
+    CONVERT(decimal(38, 6), CurrentStock - ReverseMovement + DailyNetMovement)
+FROM ReverseMovements;
 
-/* =====================================================================
-   13. TRẢ KẾT QUẢ CUỐI
+CREATE TABLE #SalesHistoryFirstReceipts
+(
+    ProductCode int NOT NULL,
+    ReceiptDate date NOT NULL,
+    FirstReceiptCode int NOT NULL,
+    FirstReceiptDateTime datetime NULL,
+    PRIMARY KEY (ProductCode, ReceiptDate)
+);
 
-   Chỉ tạo một result set.
+DECLARE @ReceiptTimeColumn sysname =
+    CASE
+        WHEN COL_LENGTH(N'dbo.tbl_OPSImExMaster', N'CreateTime') IS NOT NULL
+            THEN N'CreateTime'
+        WHEN COL_LENGTH(N'dbo.tbl_OPSImExMaster', N'LastModifiedTime') IS NOT NULL
+            THEN N'LastModifiedTime'
+        WHEN COL_LENGTH(N'dbo.tbl_OPSImExMaster', N'ReceiptDate') IS NOT NULL
+            THEN N'ReceiptDate'
+        ELSE N'EffDate'
+    END;
+DECLARE @FirstReceiptSql nvarchar(max);
 
-   Mỗi dòng tương ứng:
-       Một Barcode trong một ngày có giao dịch thực tế.
+SET @FirstReceiptSql = N'
+;WITH ReceiptDocuments AS
+(
+    SELECT
+        Detail.Product AS ProductCode,
+        CONVERT
+        (
+            date,
+            COALESCE(Master.ReceiptDate, Master.EffDate, Master.'
+            + QUOTENAME(@ReceiptTimeColumn) + N')
+        ) AS ReceiptDate,
+        Master.Code AS FirstReceiptCode,
+        MIN(CONVERT(datetime, Master.' + QUOTENAME(@ReceiptTimeColumn) + N'))
+            AS FirstReceiptDateTime
+    FROM dbo.tbl_OPSImExDetails AS Detail
+    INNER JOIN dbo.tbl_OPSImExMaster AS Master
+        ON Master.Code = Detail.DocumentNo
+    INNER JOIN #SalesHistoryTargetProducts AS Product
+        ON Product.ProductCode = Detail.Product
+    WHERE Master.DocumentType = 1
+      AND Master.DocumentStatus IN (2, 3)
+      AND COALESCE(Master.ReceiptDate, Master.EffDate, Master.'
+        + QUOTENAME(@ReceiptTimeColumn) + N') >= @FromDate
+      AND COALESCE(Master.ReceiptDate, Master.EffDate, Master.'
+        + QUOTENAME(@ReceiptTimeColumn) + N') < DATEADD(day, 1, @ToDate)
+    GROUP BY
+        Detail.Product,
+        CONVERT
+        (
+            date,
+            COALESCE(Master.ReceiptDate, Master.EffDate, Master.'
+            + QUOTENAME(@ReceiptTimeColumn) + N')
+        ),
+        Master.Code
+),
+RankedReceipts AS
+(
+    SELECT
+        ReceiptDocuments.*,
+        ROW_NUMBER() OVER
+        (
+            PARTITION BY ProductCode, ReceiptDate
+            ORDER BY
+                COALESCE(FirstReceiptDateTime, CONVERT(datetime, ReceiptDate)),
+                FirstReceiptCode
+        ) AS ReceiptOrder
+    FROM ReceiptDocuments
+)
+INSERT INTO #SalesHistoryFirstReceipts
+(
+    ProductCode,
+    ReceiptDate,
+    FirstReceiptCode,
+    FirstReceiptDateTime
+)
+SELECT
+    ProductCode,
+    ReceiptDate,
+    FirstReceiptCode,
+    FirstReceiptDateTime
+FROM RankedReceipts
+WHERE ReceiptOrder = 1;';
 
-   PromoCode có cấu trúc:
-
-       [
-           {
-               "PromoCode": "KM001",
-               "PromoName": "Tên chương trình"
-           },
-           {
-               "PromoCode": "KM002",
-               "PromoName": "Tên chương trình khác"
-           }
-       ]
-
-   Nếu không có chương trình:
-       []
-   ===================================================================== */
+EXEC sys.sp_executesql
+    @FirstReceiptSql,
+    N'@FromDate date, @ToDate date',
+    @FromDate = @ReferenceReadStartDate,
+    @ToDate = @ProcessingEndDate;
 
 SELECT
-    /*
-       Barcode:
-       Mã vạch định danh sản phẩm.
-    */
-    DailySale.Barcode,
-
-    /*
-       ProductName:
-       Tên tiếng Việt của sản phẩm.
-
-       Nguồn:
-           tbl_LSProduct.VName
-    */
-    DailySale.ProductName,
-
-    /*
-       Date:
-       Ngày phát sinh giao dịch bán hàng.
-
-       Nguồn:
-           tbl_SALPoSMaster.TransactionDate
-    */
-    DailySale.SaleDate AS [Date],
-
-    /*
-       Sales:
-       Tổng số lượng bán trong ngày.
-    */
-    DailySale.Sales,
-
-    /*
-       Amount:
-       Tổng tiền trước giảm giá trong ngày.
-    */
-    CAST(
-        DailySale.Amount
-        AS decimal(18, 2)
-    ) AS Amount,
-
-    /*
-       Price:
-       Đơn giá bình quân trước giảm giá.
-
-       Công thức:
-           SUM(Amount) / SUM(Qty)
-    */
-    DailySale.Price,
-
-    /*
-       PromoCode:
-       Mảng JSON chứa chương trình khuyến mãi áp dụng trong ngày.
-
-       SQL Server hiện tại không hỗ trợ FOR JSON PATH,
-       nên sử dụng STUFF + FOR XML PATH.
-
-       Nếu không có khuyến mãi:
-           []
-    */
-    N'['
-    +
-    COALESCE(
-        STUFF(
-            (
-                SELECT
-                    N','
-                    +
-                    N'{'
-                    +
-                    N'"PromoCode":"'
-                    +
-                    /*
-                       Escape PromoCode để không làm hỏng JSON.
-                    */
-                    REPLACE(
-                        REPLACE(
-                            REPLACE(
-                                REPLACE(
-                                    REPLACE(
-                                        COALESCE(
-                                            DailyPromotion.PromoCode,
-                                            N''
-                                        ),
-                                        N'\',
-                                        N'\\'
-                                    ),
-                                    N'"',
-                                    N'\"'
-                                ),
-                                CHAR(13),
-                                N'\r'
-                            ),
-                            CHAR(10),
-                            N'\n'
-                        ),
-                        CHAR(9),
-                        N'\t'
-                    )
-                    +
-                    N'",'
-                    +
-                    N'"PromoName":"'
-                    +
-                    /*
-                       Escape PromoName để không làm hỏng JSON.
-                    */
-                    REPLACE(
-                        REPLACE(
-                            REPLACE(
-                                REPLACE(
-                                    REPLACE(
-                                        COALESCE(
-                                            DailyPromotion.PromoName,
-                                            N''
-                                        ),
-                                        N'\',
-                                        N'\\'
-                                    ),
-                                    N'"',
-                                    N'\"'
-                                ),
-                                CHAR(13),
-                                N'\r'
-                            ),
-                            CHAR(10),
-                            N'\n'
-                        ),
-                        CHAR(9),
-                        N'\t'
-                    )
-                    +
-                    N'"'
-                    +
-                    N'}'
-
-                FROM #DailyPromotions AS DailyPromotion
-
-                WHERE DailyPromotion.Barcode = DailySale.Barcode
-                  AND DailyPromotion.SaleDate = DailySale.SaleDate
-
-                ORDER BY
-                    DailyPromotion.PromoCode
-
-                FOR XML PATH(N''), TYPE
-            ).value(
-                N'.',
-                N'nvarchar(max)'
-            ),
-            1,
-            1,
-            N''
-        ),
-        N''
-    )
-    +
-    N']' AS PromoCode
-
-FROM #DailySales AS DailySale
-
+    Product.ProductCode,
+    Product.Barcode,
+    Product.ProductName,
+    Stock.StockDate AS [Date],
+    Stock.OpenStock,
+    Stock.CloseStock,
+    Receipt.FirstReceiptCode,
+    DATEPART(hour, Receipt.FirstReceiptDateTime) AS ReceiptHour,
+    CONVERT(time(0), Receipt.FirstReceiptDateTime) AS ReceiptTime,
+    CONVERT
+    (
+        bit,
+        CASE WHEN Stock.StockDate < @ProcessingStartDate THEN 1 ELSE 0 END
+    ) AS IsReferenceOnly
+FROM #SalesHistoryStock AS Stock
+INNER JOIN #SalesHistoryTargetProducts AS Product
+    ON Product.ProductCode = Stock.ProductCode
+LEFT JOIN #SalesHistoryFirstReceipts AS Receipt
+    ON Receipt.ProductCode = Stock.ProductCode
+   AND Receipt.ReceiptDate = Stock.StockDate
+WHERE Stock.StockDate >= @ReferenceReadStartDate
+  AND Stock.StockDate <= @ProcessingEndDate
 ORDER BY
-    DailySale.Barcode,
-    DailySale.SaleDate;
+    Product.ProductCode,
+    Stock.StockDate;
 
-
-/* =====================================================================
-   14. XÓA CÁC BẢNG TẠM
-
-   Không ảnh hưởng dữ liệu thật trong database.
-   ===================================================================== */
-
-DROP TABLE #DailyPromotions;
-DROP TABLE #DailySales;
-DROP TABLE #TargetProducts;
-DROP TABLE #InputBarcodes;
+DROP TABLE #SalesHistoryFirstReceipts;
+DROP TABLE #SalesHistoryStock;
+DROP TABLE #SalesHistoryDailyMovements;
+DROP TABLE #SalesHistoryCalendar;
+DROP TABLE #SalesHistoryTargetProducts;
