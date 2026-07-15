@@ -3,7 +3,7 @@ import { ChangeDetectionStrategy, Component, computed, signal, OnInit } from '@a
 import { FormsModule } from '@angular/forms';
 import { STAGES } from './domain/policy';
 import { DataSourceId } from './domain/catalog';
-import { DailyRecord, ExceptionTask, SkuDefinition, SkuPipelineState, StageNumber } from './domain/models';
+import { CycleRecord, DailyRecord, ExceptionTask, SkuDefinition, SkuPipelineState, StageNumber } from './domain/models';
 import { buildStageTrace } from './domain/stage-trace';
 import {
   buildAbcBoard, buildForecastAudit, buildFinalForecastAudit, buildPolicyMatrix, buildPromoAudit,
@@ -16,6 +16,107 @@ import { MathFormulaComponent } from './ui/math-formula.component';
 import { ComparisonReportComponent } from './ui/comparison-report.component';
 import { SimulationReportComponent } from './ui/simulation-report.component';
 import { buildStageTableExport, encodeStageTableCsv } from './domain/stage-table-export';
+
+const AUDIT_ROW_LIMIT = 300;
+
+type DemandChartBarKind = 'observed' | 'adjusted' | 'missing' | 'forecast' | 'inferred';
+
+interface DemandChartBar {
+  key: string;
+  label: string;
+  value: number | null;
+  height: number;
+  kind: DemandChartBarKind;
+  tooltip: string;
+}
+
+interface DemandStructureChart {
+  subtitle: string;
+  unit: string;
+  bars: DemandChartBar[];
+  firstLabel: string;
+  lastLabel: string;
+  missingCount: number;
+  ariaLabel: string;
+}
+
+function normalizeDemandBars(
+  bars: Omit<DemandChartBar, 'height'>[],
+  subtitle: string,
+  unit: string,
+): DemandStructureChart {
+  const max = Math.max(1, ...bars.map(bar => bar.value ?? 0));
+  const normalized = bars.map(bar => ({
+    ...bar,
+    height: bar.value === null ? 9 : bar.value === 0 ? 3 : Math.max(5, (bar.value / max) * 100),
+  }));
+  const missingCount = normalized.filter(bar => bar.kind === 'missing').length;
+  return {
+    subtitle,
+    unit,
+    bars: normalized,
+    firstLabel: normalized[0]?.label ?? '—',
+    lastLabel: normalized.at(-1)?.label ?? '—',
+    missingCount,
+    ariaLabel: `Cấu trúc nhu cầu gồm ${normalized.length} điểm; ${missingCount} điểm thiếu dữ liệu.`,
+  };
+}
+
+function buildDemandStructureChart(stage: StageNumber, state: Readonly<SkuPipelineState>): DemandStructureChart | null {
+  // Chặng 1–4 làm việc ở cấp NGÀY — hiển thị 60 ngày; từ Chặng 3–4 ngày đã chuẩn hóa nền
+  // (baseSource stockout-lifted/promo-normalized) hiện dạng "đã chỉnh nền" thay vì thiếu.
+  if (stage <= 4) {
+    const bars = state.daily.slice(-60).map(row => {
+      const adjusted = row.baseDemand !== null && row.baseSource !== null && row.baseSource !== 'clean';
+      const value = row.baseDemand ?? (row.hasRecord && row.sales !== null ? row.sales : null);
+      return {
+        key: row.date,
+        label: row.date.slice(5),
+        value,
+        kind: value === null ? 'missing' as const : adjusted ? 'adjusted' as const : row.isZeroSaleInferred ? 'inferred' as const : 'observed' as const,
+        tooltip: value !== null
+          ? `${row.date} · ${adjusted ? `Nền đã chỉnh (${row.baseSource}): ` : row.isZeroSaleInferred ? 'Bán = 0 (Không lịch sử): ' : 'Bán xác nhận: '}${value.toLocaleString('vi-VN')}`
+          : `${row.date} · ${row.hasRecord ? row.salesStatus : 'Không có bản ghi nguồn'} · không được coi là bán 0`,
+      };
+    });
+    const observedCount = bars.filter(bar => bar.kind !== 'missing').length;
+    const subtitle = observedCount
+      ? '60 ngày lịch gần nhất · dữ liệu bán xác nhận'
+      : '60 ngày lịch gần nhất · KHÔNG có ngày bán xác nhận nào trong cửa sổ này — kiểm tra phạm vi dữ liệu nguồn';
+    return normalizeDemandBars(bars, subtitle, 'đơn vị/ngày');
+  }
+
+  // Chặng 14–19 mang finalForecast của Chặng 13 đi tiếp — vẫn hiển thị cấu trúc nền + dự báo cuối.
+  const future = stage >= 13
+    ? state.finalForecast.slice(0, 6)
+    : stage >= 11
+      ? (state.forecast?.baseForecast ?? []).slice(0, 6)
+      : [];
+  const historyLimit = stage === 9 ? 48 : stage === 10 ? 12 : 24;
+  const history = state.cycles.slice(-historyLimit).map(cycle => ({
+    key: `CK-${cycle.cycleIndex}`,
+    label: `CK${cycle.cycleIndex}`,
+    value: cycle.locked ? cycle.baseDemand : null,
+    kind: !cycle.locked
+      ? 'missing' as const
+      : cycle.status === 'LOCKED_OBSERVED'
+        ? 'observed' as const
+        : 'adjusted' as const,
+    tooltip: `CK ${cycle.cycleIndex} · ${cycle.dateStart} → ${cycle.dateEnd} · ${cycle.locked ? `Yⱼ=${cycle.baseDemand.toLocaleString('vi-VN')}` : cycle.status} · nguồn ${cycle.sourceRecordDays}/${cycle.days} ngày · chưa nền ${cycle.unresolvedDays}`,
+  }));
+  const forecast = future.map((value, index) => ({
+    key: `F-${index + 1}`,
+    label: `F+${index + 1}`,
+    value,
+    kind: 'forecast' as const,
+    tooltip: `Dự báo ${index + 1}/${future.length}: ${value.toLocaleString('vi-VN')} đơn vị/chu kỳ${stage >= 13 ? ' · sau điều chỉnh CTKM tương lai' : ' · dự báo nền'}`,
+  }));
+  const forecastLabel = stage >= 13 ? 'dự báo cuối' : 'dự báo nền';
+  const subtitle = future.length
+    ? `${history.length} chu kỳ nền + ${future.length} kỳ ${forecastLabel}`
+    : `${history.length} chu kỳ nền gần nhất · chu kỳ chưa khóa không bị coi là 0`;
+  return normalizeDemandBars([...history, ...forecast], subtitle, 'đơn vị/chu kỳ');
+}
 
 @Component({
   selector: 'app-root',
@@ -32,6 +133,7 @@ export class AppComponent implements OnInit {
   readonly leftMode = signal<'data' | 'catalog'>('data');
   readonly rightMode = signal<'catalog' | 'context'>('catalog');
   readonly auditDate = signal<string | null>(null);
+  readonly auditRowsExpanded = signal(false);
   readonly journeyOpen = signal(false);
   readonly contextCollapsed = signal(false);
   readonly exceptionQueueOpen = signal(false);
@@ -81,7 +183,13 @@ export class AppComponent implements OnInit {
   readonly currentTableExport = computed(() => buildStageTableExport(this.store.currentSnapshot(), this.store.selectedSkuId(), this.store.policy()));
   readonly auditState = computed(() => this.store.view().state ?? this.store.inputState());
   readonly auditDailyRows = computed(() => this.auditState()?.daily ?? []);
+  readonly renderedAuditDailyRows = computed(() => this.auditRowsExpanded() ? this.auditDailyRows() : this.auditDailyRows().slice(-AUDIT_ROW_LIMIT));
+  readonly hiddenAuditRowCount = computed(() => this.auditDailyRows().length - this.renderedAuditDailyRows().length);
   readonly auditCycles = computed(() => this.auditState()?.cycles ?? []);
+  readonly demandStructureChart = computed(() => {
+    const state = this.store.view().state;
+    return state ? buildDemandStructureChart(this.store.activeStage(), state) : null;
+  });
   readonly selectedAuditRow = computed(() => this.auditDailyRows().find(row => row.date === this.auditDate()) ?? null);
   readonly currentAnomalyIndex = signal<{ type: string; index: number }>({ type: '', index: -1 });
   
@@ -112,6 +220,19 @@ export class AppComponent implements OnInit {
   readonly temporaryBases = computed(() => this.auditDailyRows().filter(row => ['unbalanced', 'fixed', 'insufficient'].includes(row.balanceStatus!)));
   readonly promos = computed(() => this.auditDailyRows().filter(row => !!row.promoCode));
   readonly unlockedCycles = computed(() => this.auditCycles().filter(c => !c.locked));
+  readonly selectedStage5Cycle = computed(() => {
+    const cycleIndex = this.highlightedCycleIndex();
+    return (cycleIndex === null ? null : this.auditCycles().find(cycle => cycle.cycleIndex === cycleIndex))
+      ?? this.unlockedCycles()[0]
+      ?? null;
+  });
+  readonly selectedCycleProblemDays = computed(() => {
+    const cycle = this.selectedStage5Cycle();
+    if (!cycle) return [];
+    return this.auditDailyRows().filter(row =>
+      row.date >= cycle.dateStart && row.date <= cycle.dateEnd && row.baseDemand === null,
+    );
+  });
 
   readonly stageTrace = computed(() => {
     const view = this.store.view();
@@ -276,12 +397,14 @@ export class AppComponent implements OnInit {
   set periodBudget(value: number) { void this.store.updatePolicy({ periodBudget: Math.max(0, Number(value)) }); }
 
   selectStage(stage: number): void {
+    this.auditRowsExpanded.set(false);
     this.traceStepOverrides.set({});
     void this.store.selectStage(stage as StageNumber);
   }
   selectDataSource(source: DataSourceId): void {
     const target = Math.max(1, this.store.activeStage(), this.store.completedStage()) as StageNumber;
     this.auditDate.set(null);
+    this.auditRowsExpanded.set(false);
     this.traceStepOverrides.set({});
     void this.store.selectDataSource(source, target);
   }
@@ -315,8 +438,8 @@ export class AppComponent implements OnInit {
   toggleMergedContext(event: Event): void {
     this.contextCollapsed.set(!(event.target as HTMLDetailsElement).open);
   }
-  selectSku(sku: SkuDefinition): void { this.store.selectSku(sku.id); this.auditDate.set(null); this.traceStepOverrides.set({}); this.highlightedCycleIndex.set(null); }
-  selectSkuId(skuId: string): void { this.store.selectSku(skuId); this.auditDate.set(null); this.traceStepOverrides.set({}); this.highlightedCycleIndex.set(null); }
+  selectSku(sku: SkuDefinition): void { this.store.selectSku(sku.id); this.auditDate.set(null); this.auditRowsExpanded.set(false); this.traceStepOverrides.set({}); this.highlightedCycleIndex.set(null); }
+  selectSkuId(skuId: string): void { this.store.selectSku(skuId); this.auditDate.set(null); this.auditRowsExpanded.set(false); this.traceStepOverrides.set({}); this.highlightedCycleIndex.set(null); }
   downloadCurrentStageTable(): void {
     const exportData = this.currentTableExport();
     if (!exportData || !exportData.rows.length) return;
@@ -356,8 +479,52 @@ export class AppComponent implements OnInit {
   formatCurrency(value: number): string { return `${viNumberFormat(0).format(value)} ₫`; }
   formatSeries(values: readonly number[]): string { return values.map(value => this.format(value, 1)).join(' · '); }
   selectAuditRow(row: DailyRecord): void {
+    if (!this.auditRowsExpanded() && !this.renderedAuditDailyRows().includes(row)) this.auditRowsExpanded.set(true);
     this.auditDate.set(row.date);
     setTimeout(() => document.getElementById(`audit-${row.date}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }
+
+  selectCycle(cycle: CycleRecord): void {
+    this.highlightedCycleIndex.set(cycle.cycleIndex);
+    this.auditDate.set(cycle.dateStart);
+    setTimeout(() => document.getElementById(`cycle-${cycle.cycleIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }
+
+  isSelectedCycle(cycle: CycleRecord): boolean { return this.selectedStage5Cycle()?.cycleIndex === cycle.cycleIndex; }
+
+  cycleStatusLabel(cycle: CycleRecord): string {
+    switch (cycle.status) {
+      case 'NO_SOURCE_RECORD': return 'KHÔNG CÓ NGUỒN';
+      case 'BASELINE_UNRESOLVED': return 'CHƯA CÓ NỀN';
+      case 'PARTIAL_BASELINE': return `THIẾU NỀN ${cycle.unresolvedDays}/${cycle.days}`;
+      case 'LOCKED_OBSERVED': return 'KHÓA · QUAN SÁT';
+      case 'LOCKED_ADJUSTED': return 'KHÓA · ĐÃ ĐIỀU CHỈNH';
+      case 'LOCKED_FALLBACK': return 'KHÓA · NGUỒN DỰ PHÒNG';
+      case 'OUTSIDE_ACTIVE_PERIOD': return 'NGOÀI KỲ HOẠT ĐỘNG';
+      case 'DATA_ERROR': return 'LỖI DỮ LIỆU';
+    }
+  }
+
+  cycleStatusExplanation(cycle: CycleRecord): string {
+    if (cycle.status === 'NO_SOURCE_RECORD') {
+      return `0/${cycle.days} ngày có bản ghi POS nguồn. Đây là thiếu nguồn; chưa thể kết luận SKU không bán, cửa hàng đóng hay nhu cầu bằng 0.`;
+    }
+    if (cycle.status === 'BASELINE_UNRESOLVED') {
+      return `${cycle.sourceRecordDays}/${cycle.days} ngày có bản ghi nguồn nhưng 0/${cycle.days} ngày xác định được Bₜ. Có nguồn không đồng nghĩa đã đủ ngày sạch đối chứng để tạo nền.`;
+    }
+    if (cycle.status === 'PARTIAL_BASELINE') {
+      return `${cycle.days - cycle.unresolvedDays}/${cycle.days} ngày đã có Bₜ; còn ${cycle.unresolvedDays} ngày thiếu căn cứ nên Yⱼ chưa được khóa.`;
+    }
+    return `Đủ ${cycle.days}/${cycle.days} ngày có Bₜ; Yⱼ=${this.format(cycle.baseDemand, 1)} được phép đi tiếp.`;
+  }
+
+  cycleDayIssue(row: DailyRecord): string {
+    const auditReason = row.selectionReason ? ` ${row.selectionReason}` : '';
+    if (!row.hasRecord) return `Không có bản ghi POS nguồn; sales là chưa biết, không phải 0.${auditReason}`;
+    if (row.promoCode) return `Ngày CTKM chưa tìm đủ ngày sạch đối chứng để chuẩn hóa.${auditReason}`;
+    if (row.isStockout) return `Ngày stockout chưa tìm đủ ngày sạch đối chứng để nâng nền.${auditReason}`;
+    if (row.baseSource === 'insufficient') return `Có bản ghi nguồn nhưng chưa đủ căn cứ tạo Bₜ.${auditReason}`;
+    return row.selectionReason || 'Chưa tìm được sức mua nền Bₜ cho ngày này.';
   }
 
   jumpToAnomaly(type: 'stockout' | 'promo'): void {
@@ -423,8 +590,8 @@ export class AppComponent implements OnInit {
     if (!state) return '';
     switch (stage) {
       case 1: {
-        const count = state.daily?.length ?? sku.actualDemand?.length ?? 0;
-        return `${count} ngày`;
+        const count = state.daily.filter(day => day.hasRecord).length;
+        return `${count} ngày ghi nhận bán`;
       }
       case 2: {
         const count = state.daily?.filter(d => d.isStockout).length ?? 0;
@@ -534,8 +701,8 @@ function compareSkus(
 
   switch (stage) {
     case 1:
-      valA = aState.daily?.length ?? 0;
-      valB = bState.daily?.length ?? 0;
+      valA = aState.daily.filter(day => day.hasRecord).length;
+      valB = bState.daily.filter(day => day.hasRecord).length;
       break;
     case 2:
       valA = aState.daily?.filter(d => d.isStockout).length ?? 0;
@@ -558,13 +725,9 @@ function compareSkus(
       valB = bState.classification?.annualValue ?? 0;
       break;
     case 7: {
-      const adiA = aState.classification?.adi ?? 0;
-      const adiB = bState.classification?.adi ?? 0;
-      if (adiA !== adiB) {
-        return adiB - adiA;
-      }
-      valA = aState.classification?.cv2 ?? 0;
-      valB = bState.classification?.cv2 ?? 0;
+      const order: Record<string, number> = { X: 4, Y: 3, Z: 2, D: 1, BLOCKED: 0 };
+      valA = order[aState.classification?.xyz ?? 'BLOCKED'] ?? 0;
+      valB = order[bState.classification?.xyz ?? 'BLOCKED'] ?? 0;
       break;
     }
     case 8:
@@ -642,3 +805,4 @@ function compareSkus(
 
   return a.id.localeCompare(b.id);
 }
+

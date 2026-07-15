@@ -430,10 +430,10 @@ function stage5(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
         substitution: `Số ngày đủ nền = ${cycle.days} − ${cycle.unresolvedDays} = ${sufficientDays}`,
       },
       {
-        title: 'B3 · Kiểm tra nhánh chu kỳ trống',
-        detail: sufficientDays === 0 ? 'Không có ngày nào đủ nền → chu kỳ trống; không được lấp toàn bộ chu kỳ.' : 'Có ít nhất một ngày đủ nền → được phép xét lấp từng ngày còn thiếu.',
+        title: 'B3 · Kiểm tra nhánh 0 ngày có nền',
+        detail: sufficientDays === 0 ? 'Không có ngày nào đủ nền; không được lấp toàn bộ chu kỳ. Đây chưa phải kết luận không có bản ghi nguồn.' : 'Có ít nhất một ngày đủ nền → được phép xét lấp từng ngày còn thiếu.',
         substitution: cycle.emptyCycle
-          ? `Chu kỳ này có 0/${cycle.days} ngày đã có nền → chu kỳ trống, không lấp`
+          ? `0/${cycle.days} ngày có nền; ${cycle.sourceRecordDays}/${cycle.days} ngày có bản ghi nguồn → không lấp toàn bộ chu kỳ`
           : `Chu kỳ này có ${sufficientDays}/${cycle.days} ngày đã có nền → được phép xét lấp từng ngày còn thiếu`,
         tone: cycle.emptyCycle ? 'warn' : 'info',
       },
@@ -458,12 +458,12 @@ function stage5(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
         detail: cycle.locked
           ? 'Tất cả ngày đã có nền và chu kỳ không trống → đủ điều kiện gom.'
           : cycle.emptyCycle
-            ? 'Chu kỳ trống hoàn toàn → không lấp, không dùng trong phiên học.'
+            ? `0/${cycle.days} ngày có nền (${cycle.sourceRecordDays}/${cycle.days} ngày có bản ghi nguồn) → không lấp, không dùng trong phiên học.`
             : 'Vẫn còn ngày chưa đủ căn cứ nền → chu kỳ không được khóa, không đi vào chuỗi học.',
         substitution: cycle.locked
           ? `Tất cả ${cycle.days} ngày đã có sức mua cơ bản → chu kỳ này được khóa để dùng trong phiên học`
           : cycle.emptyCycle
-            ? `Cả ${cycle.days} ngày đều không có dữ liệu bán → chu kỳ trống, không dùng`
+            ? `Cả ${cycle.days} ngày đều chưa có Bₜ; có ${cycle.sourceRecordDays}/${cycle.days} ngày có bản ghi nguồn → không dùng`
             : `Còn ${cycle.unresolvedDays}/${cycle.days} ngày chưa có nền → chu kỳ này chưa được khóa, không đưa vào phiên học`,
         tone: cycle.locked ? 'good' : 'warn',
       },

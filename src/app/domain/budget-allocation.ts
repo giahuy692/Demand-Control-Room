@@ -19,12 +19,15 @@ interface Candidate {
   atRiskQuantity: number;
   additionalForProtection: number;
   fundingStepUnits: number;
+  fundingMoqUnits: number;
 }
 
+// Doc(26) §17.8.2: số được cấp vốn phải là BỘI SỐ CỦA BƯỚC ĐẶT HÀNG (không phải MOQ) và, nếu đã
+// cấp (>0), không được thấp hơn MOQ — hai ràng buộc khác nhau, không gộp làm một step như trước.
 function fundingStepUnits(definition: SkuPipelineState['definition']): number {
   const perCarton = Math.max(1, definition.unitsPerCarton);
-  const moqCartons = Math.max(1, Math.ceil(definition.moq / perCarton));
-  return moqCartons * perCarton;
+  const stepCartons = Math.max(1, definition.orderStep);
+  return stepCartons * perCarton;
 }
 
 /** §7 — 7 tiêu chí sắp xếp; KHÔNG có orderValue trong danh sách (tài liệu §1 cấm dùng giá trị đơn làm ưu tiên). */
@@ -73,6 +76,7 @@ export function allocateBudget(states: Record<string, SkuPipelineState>, policy:
       priorityRank: PRIORITY_RANK[state.capitalPriority] ?? null,
       minimumToAvoidShortage, atRiskQuantity, additionalForProtection,
       fundingStepUnits: fundingStepUnits(state.definition),
+      fundingMoqUnits: Math.max(0, state.definition.moq),
     };
   });
   const sorted = [...candidates].sort(compareCandidates);
@@ -90,7 +94,9 @@ export function allocateBudget(states: Record<string, SkuPipelineState>, policy:
       if (unitCost <= 0) { funded.set(candidate.id, already + basketNeed); continue; }
       const step = candidate.fundingStepUnits;
       const affordableSteps = Math.floor(remaining / (unitCost * step));
-      const affordableUnits = affordableSteps * step;
+      let affordableUnits = affordableSteps * step;
+      // Doc(26) §17.8.2: không cấp nửa vời dưới MOQ — dưới ngưỡng thì để lại cho rổ/kỳ sau.
+      if (affordableUnits > 0 && affordableUnits < candidate.fundingMoqUnits) affordableUnits = 0;
       const fundable = Math.max(0, Math.min(basketNeed, affordableUnits));
       if (fundable <= 0) continue;
       funded.set(candidate.id, already + fundable);

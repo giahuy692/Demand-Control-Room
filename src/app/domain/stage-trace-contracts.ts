@@ -50,8 +50,8 @@ export const STAGE_TRACE_CONTRACTS: Readonly<Record<StageNumber, StageTraceContr
   5: {
     purpose: 'Quyết định có lấp phần nền còn thiếu hay không và tổng hợp chuỗi sức mua cơ bản theo chu kỳ.',
     inputs: ['Sức mua cơ bản ngày sau Chặng 3–4', 'Nhãn nguồn clean/stockout/promo/insufficient', 'Lịch chu kỳ cố định Chặng 1'],
-    rules: ['Chu kỳ trống hoàn toàn không được lấp', 'Chu kỳ có ngày đủ nền mới được xét lấp từng ngày thiếu bằng trung vị nguồn sạch', 'Chỉ khóa chu kỳ khi không còn ngày unresolved và không phải empty', 'Y_j là tổng B_t, không cộng sales CTKM thô'],
-    outputs: ['Sức mua cơ bản Y_j theo chu kỳ', 'Trạng thái locked/empty/unresolved', 'Số ngày sạch, nâng nền, chuẩn hóa CTKM và lấp kỹ thuật'],
+    rules: ['Chu kỳ trống theo tài liệu nghĩa là 0 ngày có nền, không đồng nghĩa 0 ngày có bản ghi nguồn; chu kỳ này không được lấp toàn bộ', 'Chu kỳ có ngày đủ nền mới được xét lấp từng ngày thiếu bằng trung vị nguồn sạch', 'Chỉ khóa chu kỳ khi không còn ngày unresolved và không phải empty', 'Y_j là tổng B_t, không cộng sales CTKM thô'],
+    outputs: ['Sức mua cơ bản Y_j theo chu kỳ', 'Trạng thái locked/empty/unresolved và phân biệt NO_SOURCE_RECORD với BASELINE_UNRESOLVED', 'Số ngày nguồn, ngày sạch, nâng nền, chuẩn hóa CTKM và lấp kỹ thuật'],
     controls: ['Ngày lấp không làm nguồn tham chiếu cho lần sau', 'Kế thừa cờ nền chưa cân bằng', 'Chỉ chu kỳ khóa mới đi vào phân loại và dự báo'],
     documentCoverage: ['§1–4 Vấn đề, mục tiêu, điều kiện, cột chuẩn', '§5–9 Quy tắc cộng, nguồn lấp, loại chu kỳ, tìm nền, kế thừa cờ', '§10–12 Tổng hợp, ví dụ, flowchart', '§13 Đầu ra'],
   },

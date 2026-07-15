@@ -81,24 +81,32 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
     }
   });
 
-  it('C16 tính Qraw rồi làm tròn lên đúng bội số MOQ, chưa xét ngân sách', () => {
+  it('C16 tính Qraw rồi áp MOQ làm sàn (không phải bội số) và làm tròn theo bước đặt hàng — doc(26) §8.2/§8.3', () => {
     const snapshot = runTo(16);
     for (const state of Object.values(snapshot.states)) {
       const plan = state.orderPlan!;
       if (plan.warnings.length) continue;
       expect(plan.rawQuantity).toBeCloseTo(Math.max(0, plan.demandCover + state.safetyStock! - plan.freeStock), 10);
-      expect(plan.orderQuantity).toBe(plan.rawQuantity > 0 ? Math.ceil(plan.rawQuantity / plan.moq) * plan.moq : 0);
+      const cartonsNeeded = Math.ceil(plan.rawQuantity / state.definition.unitsPerCarton);
+      const moqCartons = Math.max(1, Math.ceil(state.definition.moq / state.definition.unitsPerCarton));
+      const cartonsAtMoqFloor = Math.max(cartonsNeeded, moqCartons);
+      const step = Math.max(1, state.definition.orderStep);
+      const expectedOrderQuantity = plan.rawQuantity > 0 ? Math.ceil(cartonsAtMoqFloor / step) * step * state.definition.unitsPerCarton : 0;
+      expect(plan.orderQuantity).toBe(expectedOrderQuantity);
       expect(plan.moqSurplus).toBeCloseTo(plan.orderQuantity - plan.rawQuantity, 10);
     }
   });
 
-  it('C17 không vượt ngân sách và không cấp phần lẻ sai MOQ', () => {
+  it('C17 không vượt ngân sách, cấp theo bội số bước đặt hàng và không cấp dưới MOQ — doc(26) §17.8.2', () => {
     const snapshot = runTo(17);
     const fundedValue = Object.values(snapshot.states).reduce((sum, state) => sum + (state.budgetAllocation?.fundedValue ?? 0), 0);
     expect(fundedValue).toBeLessThanOrEqual(DEFAULT_POLICY.periodBudget);
     for (const state of Object.values(snapshot.states)) {
-      expect((state.budgetAllocation?.fundedQuantity ?? 0) % state.definition.moq).toBe(0);
-      expect(state.budgetAllocation?.fundedQuantity ?? 0).toBeLessThanOrEqual(state.orderPlan?.orderQuantity ?? 0);
+      const fundedQuantity = state.budgetAllocation?.fundedQuantity ?? 0;
+      const stepUnits = Math.max(1, state.definition.orderStep) * Math.max(1, state.definition.unitsPerCarton);
+      expect(fundedQuantity % stepUnits).toBe(0);
+      if (fundedQuantity > 0) expect(fundedQuantity).toBeGreaterThanOrEqual(state.definition.moq);
+      expect(fundedQuantity).toBeLessThanOrEqual(state.orderPlan?.orderQuantity ?? 0);
     }
   });
 

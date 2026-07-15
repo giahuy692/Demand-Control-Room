@@ -30,8 +30,8 @@ export function sampleStdev(values: readonly number[]): number {
  * toàn kiểu dữ liệu mà KHÔNG coi null là 0 — nếu bất biến bị vi phạm, báo lỗi rõ
  * ràng thay vì âm thầm tính sai.
  */
-export function requireObservedSales(record: Pick<DailyRecord, 'sales' | 'hasRecord'>): number {
-  if (record.sales === null) throw new Error('Bất biến vỡ: sales=null nhưng hasRecord=true — không được coi ngày này là đã quan sát.');
+export function requireObservedSales(record: Pick<DailyRecord, 'sku' | 'date' | 'sales' | 'hasRecord'>): number {
+  if (record.sales === null) throw new Error(`Bất biến vỡ: SKU ${record.sku} ngày ${record.date} có hasRecord=true nhưng sales=null — không được coi ngày này là đã quan sát.`);
   return record.sales;
 }
 
@@ -164,10 +164,10 @@ export function roundToPurchaseUnits(rawQuantity: number, unitsPerCarton: number
   const step = Math.max(1, orderStepCartons);
   const cartonsNeeded = Math.ceil(rawQuantity / perCarton);
   const moqCartons = Math.max(1, Math.ceil(Math.max(0, moqUnits) / perCarton));
-  // Làm tròn LÊN tới bội số MOQ (không chỉ đạt sàn MOQ) — với unitsPerCarton=orderStep=1
-  // công thức này cho kết quả giống hệt ceil(raw/moq)*moq trước đây.
-  const cartonsAtMoqMultiple = Math.ceil(cartonsNeeded / moqCartons) * moqCartons;
-  const cartonsOrdered = Math.ceil(cartonsAtMoqMultiple / step) * step;
+  // Doc(26) §8.2: MOQ là SÀN, không phải bội số — cartonsNeeded>=MOQ dùng nguyên cartonsNeeded,
+  // chỉ nâng lên MOQ khi 0<cartonsNeeded<MOQ. §8.3 mới làm tròn theo bước đặt hàng.
+  const cartonsAtMoqFloor = Math.max(cartonsNeeded, moqCartons);
+  const cartonsOrdered = Math.ceil(cartonsAtMoqFloor / step) * step;
   const orderedUnits = cartonsOrdered * perCarton;
   return { orderedUnits, cartonsOrdered, moqSurplus: orderedUnits - rawQuantity };
 }
@@ -208,16 +208,21 @@ export function fixedCalendarWindow(cycles: readonly CycleRecord[], size: number
 }
 
 /**
- * §2.1 LỆNH CODEX / RULE-05-006 — cửa sổ ABC là đúng `size` vị trí chu kỳ gần nhất theo lịch, GIỮ NGUYÊN mọi
- * vị trí (kể cả chu kỳ không khóa) để audit, khác `trailingLockedRun` (chỉ đoạn liên tiếp cuối). Đếm số CK
- * KHÓA trong cửa sổ bất kể có khoảng khuyết hay không — chỉ CK khóa mới được cộng vào `periodQuantity`, không
- * bao giờ dùng baseDemand của CK chưa khóa. `fullCoverage` chỉ true khi đủ `size` vị trí VÀ toàn bộ đã khóa.
+ * RULE-05-006 — cửa sổ ABC là đúng `size` vị trí chu kỳ gần nhất theo lịch, GIỮ NGUYÊN mọi vị trí
+ * (kể cả chu kỳ không khóa) để audit. RULE-06-003 (đặc thù Chặng 6, ưu tiên cao hơn cho quyết định
+ * năm hóa): chỉ đoạn chu kỳ khóa LIÊN TIẾP kết thúc tại chu kỳ đủ điều kiện gần nhất mới được năm
+ * hóa — "Không đếm các chu kỳ khóa nằm rải rác ở hai phía của một khoảng unresolved như một đoạn
+ * liên tiếp". Vì vậy `eligible`/`lockedCycleCount`/`periodQuantity` dùng `trailingLockedRun` trong
+ * cửa sổ, KHÔNG đếm mọi CK khóa rải rác trong `window` (đã sửa lại theo đúng RULE-06-003, một bản
+ * trước đây đổi sang đếm rải rác trích dẫn "§2.1 LỆNH CODEX" — không tồn tại trong bộ tài liệu
+ * governance, không có căn cứ để ghi đè RULE-06-003). `fullCoverage` chỉ true khi đủ `size` vị trí
+ * VÀ toàn bộ đã khóa.
  */
 export function calendarWindowAbcMetrics(cycles: readonly CycleRecord[], size: number, minimumLocked: number): {
   window: CycleRecord[]; lockedCycles: CycleRecord[]; lockedCycleCount: number; periodQuantity: number; eligible: boolean; fullCoverage: boolean;
 } {
   const window = cycles.slice(-size);
-  const lockedCycles = window.filter(cycle => cycle.locked);
+  const lockedCycles = trailingLockedRun(window);
   const periodQuantity = lockedCycles.reduce((sum, cycle) => sum + cycle.baseDemand, 0);
   return {
     window, lockedCycles, lockedCycleCount: lockedCycles.length, periodQuantity,

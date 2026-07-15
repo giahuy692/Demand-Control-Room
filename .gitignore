@@ -3,3 +3,6 @@ node_modules/
 dist/
 *.log
 .agents/
+
+Sql/sales-history.json
+Sql/stock-history.json

@@ -23,8 +23,6 @@ Default coding stance in this repo: treat `/ponytail full` as active every turn.
 
 `designs/rawblock-DESIGN.md` documents an aspirational "Minimalist Dark" system (layered slate + warm amber, glass cards, ambient glow, React/Tailwind-flavored). The app already lives in that direction but has its own concrete, evolved implementation — **the tokens and rules below are canonical**. If they ever conflict with `rawblock-DESIGN.md`, follow this file; update the doc if a deliberate restyle changes the direction.
 
-`designs/pipelinepro-DESIGN.md` (indigo/cyan, light-mode CRM system) is **not in use** — ignore it unless the user explicitly asks to apply it somewhere.
-
 ### Tokens
 
 Defined once, on `:host` in [app.component.css](src/app/app.component.css#L1-L14) — they cascade to every component under `<app-root>`, so treat that block as the single source of truth and add new tokens there rather than hardcoding hex values inline:

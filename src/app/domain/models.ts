@@ -189,6 +189,8 @@ export interface DailyRecord {
    * dòng đã được nguồn xác nhận là bán=0 thật).
    */
   hasRecord: boolean;
+  /** Cờ đánh dấu các ngày bán = 0 do lấp nền (suy diễn từ việc có tồn nhưng không có giao dịch bán) */
+  isZeroSaleInferred: boolean;
   /** RULE-01-003 — true khi ngày này nằm trong vùng đọc tham chiếu trước ProcessingStartDate; không được đưa vào ABC/XYZ hay chuỗi học. */
   isReferenceOnly: boolean;
   /** RULE-02-003/02-Hop-dong-du-lieu-dau-vao.md §6 — trạng thái tính tồn của openStock/closeStock ngày này. */
@@ -630,6 +632,7 @@ export interface DailySourceRecordV2 {
 
   readonly sales: number | null;
   readonly hasSalesRecord: boolean;
+  readonly isZeroSaleInferred?: boolean;
 
   readonly returnQty: number | null;
   readonly hasReturnRecord: boolean;
@@ -652,18 +655,6 @@ export interface DailySourceRecordV2 {
   readonly isReferenceOnly: boolean;
   readonly isHistoryRecord: boolean;
   readonly isValidationActual: boolean;
-}
-
-/** RESULT SET 2 (`PromotionInterval`) của `Sql/demand-planing.sql` — khoảng hiệu lực CTKM gắn trực tiếp SKU. */
-export interface PromotionInterval {
-  readonly sku: string;
-  readonly promoCode: string;
-  readonly promoName: string | null;
-  readonly startDate: string;
-  readonly endDate: string;
-  readonly promoTypeSource: string | null;
-  readonly isPos: boolean | null;
-  readonly sourceRole: 'DIRECT_PRODUCT' | 'REF_PRODUCT' | 'POS_MARKER';
 }
 
 /**

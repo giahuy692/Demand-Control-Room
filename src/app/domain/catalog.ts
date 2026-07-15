@@ -141,9 +141,9 @@ const EMPTY_DATES = Object.freeze([]) as unknown as string[];
  * chứng bán POS thật trong ngày (khác `0` = có dòng bán thật với tổng Qty bằng 0). Dữ liệu giả
  * (`generateDailyRecords`) luôn truyền số cụ thể nên không đổi hành vi cũ.
  */
-function dailyRecord(sku: string, date: string, openStock: number, closeStock: number, sales: number | null, receiptHour: string | null, promoCode: string | null, hasRecord = true): DailyRecord {
+function dailyRecord(sku: string, date: string, openStock: number, closeStock: number, sales: number | null, receiptHour: string | null, promoCode: string | null, hasRecord = true, isZeroSaleInferred = false): DailyRecord {
   return {
-    sku, date, openStock, closeStock, sales, hasRecord, receiptHour, promoCode,
+    sku, date, openStock, closeStock, sales, hasRecord, isZeroSaleInferred, receiptHour, promoCode,
     salesStatus: sales === null ? 'SOURCE_UNKNOWN' : sales > 0 ? 'OBSERVED' : 'OBSERVED_ZERO', isReferenceOnly: false,
     // Dữ liệu giả/nguồn thật trước scaffold luôn coi là đã tính được (không có mốc bị thiếu);
     // buildCalendarScaffold() sẽ tính lại đúng theo bất biến RULE-02-003 khi ghép vào lịch liên tục.
@@ -330,7 +330,13 @@ export function parseRealDataset(dailyPayload: string, productPayload: string, e
       row.sales,
       row.receiptHour,
       row.promoCode,
-      row.hasRecord,
+      // DailyRecord.hasRecord nghĩa là "sales đã quan sát được, dùng làm nền tham chiếu" (xem
+      // requireObservedSales/isObservedClean) — KHÔNG phải row.hasRecord của DailySourceRecordV2
+      // (luôn = true, chỉ nghĩa là "ngày này có dòng trong RESULT SET 1"). Ngày có InventoryNetMovement/
+      // ReturnQty nhưng hasSalesRecord=false vẫn phải hasRecord=false ở đây, nếu không requireObservedSales
+      // sẽ throw khi Chặng 3 gom ngày sạch.
+      row.hasSalesRecord,
+      row.isZeroSaleInferred ?? false,
     ));
     const current = dailyMeta.get(sku);
     if (!current || (!current.name && row.productName) || (!current.price && row.price)) dailyMeta.set(sku, { price: row.price || current?.price || 0, name: row.productName ?? current?.name ?? null });
@@ -452,6 +458,7 @@ function parseDailySourceRow(row: Record<string, unknown>, sourceName: string, i
     closeStock: requiredNumber(row['CloseStock'], `${sourceName} dòng ${index + 1}: CloseStock`),
     sales: sales.value,
     hasSalesRecord: sales.hasRecord,
+    isZeroSaleInferred: booleanCell(row['IsZeroSaleInferred'], false),
     returnQty: returns.value,
     hasReturnRecord: returns.hasRecord,
     inventoryNetMovement: movement.value,

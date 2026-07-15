@@ -1,4 +1,4 @@
-# Ghi chú nguồn dữ liệu cho Demand Planning — Bản 3
+# Ghi chú nguồn dữ liệu cho Demand Planning
 
 ## 0. Vai trò và phạm vi
 
@@ -11,7 +11,6 @@
 - truy vấn nào cần chạy để kiểm chứng giả định;
 - rủi ro nào chưa được phép tự suy diễn.
 
-File SQL chính đề xuất là `demand-planing-v3.sql`. File `03-Kiem-tra-du-lieu-nguon.sql` dùng để khảo sát và đối soát.
 
 ## 0.1. Kiến trúc đã khóa
 
@@ -79,6 +78,9 @@ Khóa ngoại đã biết:
 | `FK_tbl_SALPoSDetails_tbl_SYSUsers` | `PowerID` | `tbl_SYSUsers.Code` |
 | `FK_tbl_SALPoSDetails_tbl_HREmployee` | `EmployeeID` | `tbl_HREmployee.Code` |
 
+Cột [Discount] lưu Code của [tbl_POLBundle].
+Trường Promation trong [tbl_POLBundle] lưu Code tbl_POLPromotion.
+Dữ liệu của cột này hiện tại chỉ data của vài năm gần đây được lưu, cần dự liệu của 7 8 trước đó thì đã bị xóa dữ liệu trường này.
 Logic hiện tại cần dùng với POS thật:
 
 ```sql

@@ -655,8 +655,8 @@ function runStage5(previous: StageSnapshot, policy: SimulationPolicy): StageSnap
   const cycles = Object.values(states).flatMap(state => state.cycles);
   const countByStatus = (status: CycleStatus) => cycles.filter(cycle => cycle.status === status).length;
   return createSnapshot(5, policy, states, {
-    'Chu kỳ đã khóa': cycles.filter(cycle => cycle.locked).length, 'Chu kỳ trống': cycles.filter(cycle => cycle.emptyCycle).length, 'Chu kỳ chưa đủ': cycles.filter(cycle => !cycle.locked && !cycle.emptyCycle).length,
-    'NO_SOURCE_RECORD': countByStatus('NO_SOURCE_RECORD'), 'LOCKED_OBSERVED': countByStatus('LOCKED_OBSERVED'),
+    'Chu kỳ đã khóa': cycles.filter(cycle => cycle.locked).length, 'Chu kỳ 0 ngày có nền': cycles.filter(cycle => cycle.emptyCycle).length, 'Chu kỳ thiếu một phần nền': cycles.filter(cycle => !cycle.locked && !cycle.emptyCycle).length,
+    'NO_SOURCE_RECORD': countByStatus('NO_SOURCE_RECORD'), 'BASELINE_UNRESOLVED': countByStatus('BASELINE_UNRESOLVED'), 'PARTIAL_BASELINE': countByStatus('PARTIAL_BASELINE'), 'LOCKED_OBSERVED': countByStatus('LOCKED_OBSERVED'),
     'LOCKED_ADJUSTED': countByStatus('LOCKED_ADJUSTED'), 'LOCKED_FALLBACK': countByStatus('LOCKED_FALLBACK'),
     'Chu kỳ lấp Tầng 2': cycles.filter(cycle => cycle.tier2Filled).length,
     'Ngoại lệ cấp chu kỳ (RULE-05-006)': exceptions.length,
@@ -676,11 +676,10 @@ function runStage6(previous: StageSnapshot, policy: SimulationPolicy): StageSnap
   const states = cloneStates(previous);
   const exceptions: ExceptionTask[] = [];
   const ranked = Object.values(states).map(state => {
-    // §2.1 LỆNH CODEX / RULE-05-006 — cửa sổ CỐ ĐỊNH 24 vị trí chu kỳ gần nhất theo lịch, KHÔNG yêu cầu
-    // liên tiếp: đếm mọi CK khóa trong cửa sổ (kể cả rải rác quanh khoảng khuyết), tối thiểu 6 CK khóa mới
-    // được năm hóa. Đây là bản tinh chỉnh của RULE-06-003 theo mô hình 3 mức chất lượng RULE-05-006
-    // (FULL_COVERAGE/ANNUALIZED_WITH_GAPS/NOT_RATED) — khác bản trước dùng `trailingLockedRun` (chỉ đoạn
-    // liên tiếp cuối), vốn từ chối cả trường hợp có ≥6 CK khóa nhưng rải rác quanh MỘT khoảng khuyết.
+    // RULE-05-006/RULE-06-003 — cửa sổ CỐ ĐỊNH 24 vị trí chu kỳ gần nhất theo lịch (RULE-05-006, giữ
+    // nguyên mọi vị trí kể cả chưa khóa để audit), nhưng năm hóa chỉ dùng đoạn chu kỳ khóa LIÊN TIẾP
+    // trong cửa sổ đó (RULE-06-003 — "không đếm các chu kỳ khóa nằm rải rác ở hai phía của một khoảng
+    // unresolved như một đoạn liên tiếp"), tối thiểu 6 CK khóa liên tiếp mới được năm hóa.
     // Chu kỳ CHƯA khóa không bao giờ được cộng vào periodQuantity (calendarWindowAbcMetrics tự loại).
     const metrics = calendarWindowAbcMetrics(state.cycles, ABC_WINDOW_SIZE, ABC_MINIMUM_LOCKED_CYCLES);
     const annualizationFactor = metrics.eligible ? ABC_WINDOW_SIZE / metrics.lockedCycleCount : null;

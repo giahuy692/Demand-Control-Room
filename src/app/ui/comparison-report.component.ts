@@ -131,58 +131,83 @@ export class ComparisonReportComponent {
     };
   });
 
+  /**
+   * Trục x = 12 chu kỳ lịch sử gần nhất (tiêu thụ QUAN SÁT tổng theo chu kỳ, luôn có với mọi nguồn
+   * dữ liệu) nối tiếp 6 chu kỳ tương lai (dự báo + thực tế kiểm chứng nếu có). Trước đây chart chỉ
+   * vẽ 3 chuỗi tương lai — với dữ liệu thật cả 3 đều rỗng (actualDemand là bucket-(c), forecast bị
+   * chặn chờ duyệt CTKM thường trực) nên chart không bao giờ hiện.
+   */
   readonly selectedSkuChartPaths = computed(() => {
     const detail = this.selectedSkuDetail();
     if (!detail.definition) return null;
+
+    const HISTORY_CYCLES = 12;
+    const FUTURE_CYCLES = 6;
+    // Lịch sử tiêu thụ lấy từ state nguồn nào có dữ liệu (ưu tiên real).
+    const historyState = detail.real ?? detail.mock ?? null;
+    const cycles = (historyState?.cycles ?? []).slice(-HISTORY_CYCLES);
+    const daily = historyState?.daily ?? [];
+    const history = cycles.map(cycle => ({
+      label: `CK${cycle.cycleIndex}`,
+      val: Math.round(daily.reduce((sum, row) => row.date >= cycle.dateStart && row.date <= cycle.dateEnd && row.hasRecord && row.sales !== null ? sum + row.sales : sum, 0)),
+    }));
 
     const actual = detail.definition.actualDemand || [];
     const realFc = detail.real?.finalForecast || [];
     const mockFc = detail.mock?.finalForecast || [];
 
-    const allValues = [...actual, ...realFc, ...mockFc].filter(v => v != null);
+    const allValues = [...history.map(h => h.val), ...actual, ...realFc, ...mockFc].filter(v => v != null);
     if (!allValues.length) return null;
 
     const maxVal = Math.max(...allValues, 10);
-    const minVal = 0;
-    const range = maxVal - minVal;
+    const range = maxVal;
 
     const width = 480;
     const height = 180;
     const paddingLeft = 40;
     const paddingRight = 20;
-    const paddingTop = 20;
     const paddingBottom = 30;
-
     const plotWidth = width - paddingLeft - paddingRight;
-    const plotHeight = height - paddingTop - paddingBottom;
+    const plotHeight = height - 20 - paddingBottom;
 
-    const getX = (index: number) => paddingLeft + (index / 5) * plotWidth;
-    const getY = (val: number) => height - paddingBottom - ((val - minVal) / range) * plotHeight;
+    const slots = history.length + FUTURE_CYCLES;
+    const getX = (index: number) => paddingLeft + (slots > 1 ? index / (slots - 1) : 0) * plotWidth;
+    const getY = (val: number) => height - paddingBottom - (val / range) * plotHeight;
 
-    const actualPoints = actual.map((val, idx) => ({ x: getX(idx), y: getY(val), val }));
-    const realPoints = realFc.map((val, idx) => ({ x: getX(idx), y: getY(val), val }));
-    const mockPoints = mockFc.map((val, idx) => ({ x: getX(idx), y: getY(val), val }));
+    const historyPoints = history.map((h, idx) => ({ x: getX(idx), y: getY(h.val), val: h.val, label: h.label }));
+    const futureX = (idx: number) => getX(history.length + idx);
+    const actualPoints = actual.map((val, idx) => ({ x: futureX(idx), y: getY(val), val: Math.round(val), label: `CK+${idx + 1}` }));
+    const realPoints = realFc.map((val, idx) => ({ x: futureX(idx), y: getY(val), val: Math.round(val), label: `CK+${idx + 1}` }));
+    const mockPoints = mockFc.map((val, idx) => ({ x: futureX(idx), y: getY(val), val: Math.round(val), label: `CK+${idx + 1}` }));
 
     const makePath = (points: { x: number; y: number }[]) => {
       if (!points.length) return '';
       return `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ');
     };
 
-    const ticks = [0, 0.25, 0.5, 0.75, 1].map(pct => {
-      const val = minVal + pct * range;
-      return { y: getY(val), label: Math.round(val) };
-    });
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map(pct => ({ y: getY(pct * range), label: Math.round(pct * range) }));
+    // Nhãn trục x chọn lọc để không đè nhau: mỗi 3 chu kỳ lịch sử + mốc tương lai đầu/cuối.
+    const xLabels = [
+      ...historyPoints.filter((_, idx) => idx % 3 === 0 || idx === historyPoints.length - 1).map(p => ({ x: p.x, label: p.label })),
+      ...(realPoints.length || mockPoints.length || actualPoints.length ? [{ x: futureX(0), label: 'CK+1' }, { x: futureX(FUTURE_CYCLES - 1), label: `CK+${FUTURE_CYCLES}` }] : []),
+    ];
+    // Vạch phân vùng lịch sử | tương lai.
+    const dividerX = history.length ? (getX(history.length - 1) + futureX(0)) / 2 : null;
 
     return {
       width,
       height,
+      historyPoints,
       actualPoints,
       realPoints,
       mockPoints,
+      historyPath: makePath(historyPoints),
       actualPath: makePath(actualPoints),
       realPath: makePath(realPoints),
       mockPath: makePath(mockPoints),
       ticks,
+      xLabels,
+      dividerX,
     };
   });
 

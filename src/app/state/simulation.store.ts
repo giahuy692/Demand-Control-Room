@@ -147,7 +147,7 @@ function createCalculations(stage: StageNumber, state: Readonly<SkuPipelineState
 function createOutputs(stage: StageNumber, state: Readonly<SkuPipelineState> | null): StageViewModel['outputs'] {
   if (!state) return [];
   switch (stage) {
-    case 1: return [{ label: 'Bản ghi trong phạm vi', value: formatNumber(state.daily.length), tone: 'good' }];
+    case 1: return [{ label: 'Ngày có ghi nhận bán', value: formatNumber(state.daily.filter(day => day.hasRecord).length), tone: 'good' }];
     case 2: return [{ label: 'Trạng thái', value: 'Đã khóa cờ stockout', tone: 'good' }];
     case 3: return [{ label: 'Cột bàn giao', value: 'baseDemand ngày không KM', tone: 'good' }];
     case 4: return [{ label: 'Cột bàn giao', value: 'baseDemand ngày CTKM', tone: 'good' }];
@@ -440,8 +440,7 @@ export class SimulationStore {
     const [daily, products, extractMetadata, businessRoles] = await Promise.all([
       this.fetchText('assets/demand-planning-real.json'),
       // List-product.json là metadata bổ sung không bắt buộc (Price/ProductName giờ
-      // đã nằm sẵn trong từng dòng demand-planning-real.json) — thiếu file này
-      // không được chặn nạp dữ liệu thật.
+      // đã nằm sẵn trong từng dòng daily) — thiếu file này không được chặn nạp dữ liệu thật.
       this.fetchTextOptional('assets/List-product.json'),
       // §9 LỆNH CODEX — ExtractMetadata thật (RESULT SET 3 demand-planing-v3.sql), optional: pipeline
       // ingest hiện tại (tools/convert-real-data.mjs) chưa sinh file này nên mặc định vắng mặt.

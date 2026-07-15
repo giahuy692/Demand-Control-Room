@@ -23,9 +23,8 @@ function classifyStockStatus(openStock: number, closeStock: number, carriedFromM
 
 function scaffoldRecord(sku: string, date: string, isReferenceOnly: boolean, openStock: number, closeStock: number, stockCalculationStatus: StockCalculationStatus): DailyRecord {
   return {
-    sku, date, openStock, closeStock, sales: null, salesStatus: 'SOURCE_UNKNOWN',
-    hasRecord: false, receiptHour: null, promoCode: null,
-    isStockout: false, stockoutReason: null, stockoutReviewRequired: false, baseDemand: null, baseSource: null,
+    sku, date, openStock: openStock ?? 0, closeStock: closeStock ?? 0, sales: null, receiptHour: null, promoCode: null, hasRecord: false, isZeroSaleInferred: false,
+    salesStatus: 'SOURCE_UNKNOWN', isStockout: false, stockoutReason: null, stockoutReviewRequired: false, baseDemand: null, baseSource: null,
     referenceDates: [], beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null,
     balanceStatus: null, selectionReason: '', isReferenceOnly,
     stockSource: 'CARRIED_FORWARD', stockCalculationStatus,

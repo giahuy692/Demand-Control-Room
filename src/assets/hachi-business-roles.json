@@ -1,16 +1,216 @@
 [
-  { "SKU": "SKU-001", "HachiBusinessRole": "CORE", "_note": "Mẫu minh họa cho catalog giả AX-stable — KHÔNG PHẢI benchmark thật của Hachi." },
-  { "SKU": "SKU-002", "HachiBusinessRole": "SEASONAL", "_note": "Mẫu minh họa — AY-seasonal, dùng để kiểm thử đối chiếu với Chặng 9." },
-  { "SKU": "SKU-003", "HachiBusinessRole": "STANDARD" },
-  { "SKU": "SKU-004", "HachiBusinessRole": "CORE" },
-  { "SKU": "SKU-005", "HachiBusinessRole": "STANDARD" },
-  { "SKU": "SKU-006", "HachiBusinessRole": "MARGIN", "_note": "Mẫu minh họa — landedCostPerUnit hiện luôn null nên đối chiếu MARGIN sẽ ra NOT_COMPARABLE_WITH_CURRENT_DATA." },
-  { "SKU": "SKU-007", "HachiBusinessRole": "NEW" },
-  { "SKU": "SKU-008", "HachiBusinessRole": "STANDARD" },
-  { "SKU": "SKU-009", "HachiBusinessRole": "TRAFFIC" },
-  { "SKU": "SKU-010", "HachiBusinessRole": "STANDARD" },
-  { "SKU": "SKU-011", "HachiBusinessRole": "NEW" },
-  { "SKU": "SKU-012", "HachiBusinessRole": "NEW" },
-  { "SKU": "SKU-013", "HachiBusinessRole": "NEW" },
-  { "SKU": "SKU-014", "HachiBusinessRole": "STANDARD" }
+  {
+    "SKU": "58302",
+    "HachiBusinessRole": "MARGIN",
+    "_barcode": "4534374394596"
+  },
+  {
+    "SKU": "60454",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4546490702476"
+  },
+  {
+    "SKU": "41297",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4560127703445"
+  },
+  {
+    "SKU": "41817",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4562370392322"
+  },
+  {
+    "SKU": "60105",
+    "HachiBusinessRole": "MARGIN",
+    "_barcode": "4573475402137"
+  },
+  {
+    "SKU": "46746",
+    "HachiBusinessRole": "TRAFFIC",
+    "_barcode": "4582517330024"
+  },
+  {
+    "SKU": "52561",
+    "HachiBusinessRole": "CORE",
+    "_barcode": "4901001194186"
+  },
+  {
+    "SKU": "59242",
+    "HachiBusinessRole": "MARGIN",
+    "_barcode": "4901065606939"
+  },
+  {
+    "SKU": "47789",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4901111910973"
+  },
+  {
+    "SKU": "58473",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4901548603844"
+  },
+  {
+    "SKU": "60731",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4901616010413"
+  },
+  {
+    "SKU": "48902",
+    "HachiBusinessRole": "TRAFFIC",
+    "_barcode": "4902102019187"
+  },
+  {
+    "SKU": "55077",
+    "HachiBusinessRole": "TRAFFIC",
+    "_barcode": "4902871053900"
+  },
+  {
+    "SKU": "54620",
+    "HachiBusinessRole": "CORE",
+    "_barcode": "4903024904957"
+  },
+  {
+    "SKU": "55437",
+    "HachiBusinessRole": "MARGIN",
+    "_barcode": "4905489647905"
+  },
+  {
+    "SKU": "59527",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4905596183068"
+  },
+  {
+    "SKU": "60883",
+    "HachiBusinessRole": "TRAFFIC",
+    "_barcode": "4908609116909"
+  },
+  {
+    "SKU": "31054",
+    "HachiBusinessRole": "CORE",
+    "_barcode": "4932313033092"
+  },
+  {
+    "SKU": "58466",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4941336729073"
+  },
+  {
+    "SKU": "52198",
+    "HachiBusinessRole": "CORE",
+    "_barcode": "4965078102116"
+  },
+  {
+    "SKU": "61048",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4970285280038"
+  },
+  {
+    "SKU": "61132",
+    "HachiBusinessRole": "MARGIN",
+    "_barcode": "4971710573664"
+  },
+  {
+    "SKU": "54734",
+    "HachiBusinessRole": "MARGIN",
+    "_barcode": "4973221032487"
+  },
+  {
+    "SKU": "61433",
+    "HachiBusinessRole": "TRAFFIC",
+    "_barcode": "4976416007932"
+  },
+  {
+    "SKU": "41361",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4976790247870"
+  },
+  {
+    "SKU": "57070",
+    "HachiBusinessRole": "STANDARD",
+    "_barcode": "4982790412309"
+  },
+  {
+    "SKU": "59732",
+    "HachiBusinessRole": "CORE",
+    "_barcode": "4987645005453"
+  },
+  {
+    "SKU": "60426",
+    "HachiBusinessRole": "CORE",
+    "_barcode": "4987645005989"
+  },
+  {
+    "SKU": "58508",
+    "HachiBusinessRole": "TRAFFIC",
+    "_barcode": "8936013251042"
+  },
+  {
+    "SKU": "58510",
+    "HachiBusinessRole": "TRAFFIC",
+    "_barcode": "8936013251097"
+  },
+  {
+    "SKU": "55013",
+    "HachiBusinessRole": "TRAFFIC",
+    "_barcode": "8997240600041"
+  },
+  {
+    "SKU": "SKU-001",
+    "HachiBusinessRole": "CORE",
+    "_note": "Mẫu minh họa cho catalog giả AX-stable — KHÔNG PHẢI benchmark thật của Hachi."
+  },
+  {
+    "SKU": "SKU-002",
+    "HachiBusinessRole": "SEASONAL",
+    "_note": "Mẫu minh họa — AY-seasonal, dùng để kiểm thử đối chiếu với Chặng 9."
+  },
+  {
+    "SKU": "SKU-003",
+    "HachiBusinessRole": "STANDARD"
+  },
+  {
+    "SKU": "SKU-004",
+    "HachiBusinessRole": "CORE"
+  },
+  {
+    "SKU": "SKU-005",
+    "HachiBusinessRole": "STANDARD"
+  },
+  {
+    "SKU": "SKU-006",
+    "HachiBusinessRole": "MARGIN",
+    "_note": "Mẫu minh họa — landedCostPerUnit hiện luôn null nên đối chiếu MARGIN sẽ ra NOT_COMPARABLE_WITH_CURRENT_DATA."
+  },
+  {
+    "SKU": "SKU-007",
+    "HachiBusinessRole": "NEW"
+  },
+  {
+    "SKU": "SKU-008",
+    "HachiBusinessRole": "STANDARD"
+  },
+  {
+    "SKU": "SKU-009",
+    "HachiBusinessRole": "TRAFFIC"
+  },
+  {
+    "SKU": "SKU-010",
+    "HachiBusinessRole": "STANDARD"
+  },
+  {
+    "SKU": "SKU-011",
+    "HachiBusinessRole": "NEW"
+  },
+  {
+    "SKU": "SKU-012",
+    "HachiBusinessRole": "NEW"
+  },
+  {
+    "SKU": "SKU-013",
+    "HachiBusinessRole": "NEW"
+  },
+  {
+    "SKU": "SKU-014",
+    "HachiBusinessRole": "STANDARD"
+  }
 ]

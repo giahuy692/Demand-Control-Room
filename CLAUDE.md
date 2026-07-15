@@ -10,13 +10,13 @@ Full project contract (design system, local skills, tech stack) lives in **[AGEN
 
 ## Business rules & governance docs — read this before implementing/changing any stage
 
-`docs/Demand-Planning-Governance-Package-v1/` is the **authoritative business-rule source** for this app — more authoritative than any single doc referenced ad hoc elsewhere in the repo or its parent folder. Its own `00-README-Nguon-su-that.md` defines a strict priority order for resolving conflicts (highest first):
+`docs/Demand-Planning-Governance-Package-v3/` is the **authoritative business-rule source** for this app — more authoritative than any single doc referenced ad hoc elsewhere in the repo or its parent folder. Its own `00-README-Nguon-su-that.md` defines a strict priority order for resolving conflicts (highest first):
 
 1. `01-Danh-sach-quyet-dinh-nghiep-vu.md` — locked business decisions (`DEC-xxx`, status `ĐÃ KHÓA`/`ĐỀ XUẤT`/`CHỜ DỮ LIỆU`/`KHÔNG ÁP DỤNG HIỆN TẠI`). Highest authority in the package.
 2. `02-Hop-dong-du-lieu-dau-vao.md` — the POS/ERP → Demand Planning data contract.
 3. `04-Dac-ta-trien-khai-Demand-Planning.md` — implementation spec, precise enough to code and test directly from.
 4. `07-Danh-muc-Golden-Test.md` (+ its test data) — expected results used for acceptance.
-5. `Tài liệu giải pháp - Demand Planning & Replenishment Governance(25).md` — the readable business-solution doc (for MC/LGT/BA/MD/Thu mua/IT audiences).
+5. `Tài liệu giải pháp - Demand Planning & Replenishment Governance(26).md` — the readable business-solution doc (for MC/LGT/BA/MD/Thu mua/IT audiences).
 6. `demand-planing-data-source-notes-v3.md` — source-table survey, join keys, real-data computation logic, data risk notes (identical content to `../Sql/demand-planing-data-source-notes.md` one level up — same doc, kept in both places).
 7. `demand-planing-v3.sql` — proposed SQL to pull real source + real-derived stock data.
 8. Old simulation reports / historical JSON — evidence of past inputs/outputs only, never a source of new rules.
@@ -29,7 +29,7 @@ Key locked architectural facts from that README (§3) that constrain how the eng
 - The current test session is `HISTORICAL_VALIDATION` with no confirmed real future-promo plan, so stage 13 currently only ever runs its `PASSTHROUGH_NO_FUTURE_PROMO` branch.
 - Running the pipeline on a subset of SKUs ("đã chạy") does **not** by itself lock an official ABC classification for the whole catalog ("đã khóa") — those are distinct states.
 
-**Note**: the parent-directory copy `../Tài liệu giải pháp - Demand Planning & Replenishment Governance.md` (no version suffix) currently has content differences from the package's `(25)` version — treat the package's `(25)` copy as the priority-ordered one per its own README, and flag/reconcile the discrepancy with the user rather than silently picking one when a change depends on wording that differs between them.
+**Note**: the parent-directory copy `../Tài liệu giải pháp - Demand Planning & Replenishment Governance.md` (no version suffix) currently has content differences from the package's `(26)` version — treat the package's `(26)` copy as the priority-ordered one per its own README, and flag/reconcile the discrepancy with the user rather than silently picking one when a change depends on wording that differs between them.
 
 **Contradiction-handling protocol** (from the README, apply this instead of guessing): if the spec is unclear or two sources conflict, don't pick whichever reading is convenient for the code — record it in `01-Danh-sach-quyet-dinh-nghiep-vu.md` with status `CHỜ DUYỆT` and do not treat a `CHỜ DUYỆT`/`ĐỀ XUẤT` item as official operating behavior; it may be implemented behind a default-off config/flag if the spec calls for preparing it in advance, matching the bucket-(c) default philosophy already used in the engine (see below).
 
@@ -44,7 +44,7 @@ npm run test                 # vitest run — full suite, must be green
 npm run test:watch           # vitest watch mode
 npx vitest run <path>        # run a single spec file
 npx vitest run -t "<name>"   # run a single test by name
-npm run convert:real-data    # regenerate src/assets/demand-planning-real.json from the .txt source
+npm run convert:real-data    # regenerate src/assets/demand-planning-real.json from Sql/sales-history.csv + Sql/stock-history.csv
 ```
 
 There is no separate lint script; `ng build` (strict TS + strict Angular templates, see `tsconfig.json`) is the correctness gate along with vitest.
@@ -84,4 +84,4 @@ New numeric fields introduced for later-stage rework (e.g. `unitsPerCarton`, `or
 
 ## Local skills
 
-This repo has project-specific agent skills under `.agents/skills/` (design, frontend-design, brainstorming, clean-code, html-diagram, etc.) that are part of the project contract per **[AGENTS.md](AGENTS.md)** — check there for routing rules before doing UI or planning work. `.cursor/skills/` contains the same/adjacent third-party skill bundles for other tools; treat `.agents/skills/` as the canonical copy for Claude Code.
+This repo has project-specific agent skills under `.agents/skills/` (design, frontend-design, brainstorming, clean-code, html-diagram, etc.) that are part of the project contract per **[AGENTS.md](AGENTS.md)** — check there for routing rules before doing UI or planning work. `.claude/skills/` carries the Claude Code-loadable copies; treat `.agents/skills/` as the canonical source (per-tool duplicate folders were removed 2026-07).

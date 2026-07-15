@@ -283,47 +283,54 @@
           
           @if (selectedSkuChartPaths(); as paths) {
             <div class="svg-chart-container">
-              <svg [attr.viewBox]="'0 0 ' + paths.width + ' ' + paths.height" class="interactive-chart">
+              <svg [attr.viewBox]="'0 0 ' + paths.width + ' ' + paths.height" class="interactive-chart" role="img" aria-label="Đồ thị line: lịch sử tiêu thụ theo chu kỳ và dự báo 6 chu kỳ tới">
                 <!-- Grid Lines and Ticks -->
                 @for (tick of paths.ticks; track tick.y) {
                   <line x1="40" [attr.y1]="tick.y" [attr.x2]="paths.width - 20" [attr.y2]="tick.y" class="chart-gridline" />
                   <text x="32" [attr.y]="tick.y + 4" class="chart-axis-text Y-axis">{{ tick.label }}</text>
                 }
-                
-                <!-- X-Axis Labels -->
-                @for (p of paths.actualPoints; track $index) {
-                  <text [attr.x]="p.x" y="170" class="chart-axis-text X-axis">CK +{{ $index + 1 }}</text>
+
+                <!-- Vạch phân vùng lịch sử | tương lai -->
+                @if (paths.dividerX !== null) {
+                  <line [attr.x1]="paths.dividerX" y1="20" [attr.x2]="paths.dividerX" [attr.y2]="paths.height - 30" class="chart-divider" />
+                }
+
+                <!-- X-Axis Labels (chọn lọc, tránh đè nhau) -->
+                @for (label of paths.xLabels; track label.x) {
+                  <text [attr.x]="label.x" y="170" class="chart-axis-text X-axis">{{ label.label }}</text>
                 }
 
                 <!-- Lines -->
+                <path [attr.d]="paths.historyPath" class="path-line line-actual" />
                 <path [attr.d]="paths.actualPath" class="path-line line-actual" />
                 <path [attr.d]="paths.realPath" class="path-line line-real" />
                 <path [attr.d]="paths.mockPath" class="path-line line-mock" />
 
-                <!-- Dots and Tooltips for Actual -->
+                <!-- Dots + tooltip hover native -->
+                @for (p of paths.historyPoints; track $index) {
+                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="3.5" class="chart-dot dot-actual"><title>{{ p.label }}: {{ p.val }} sp (quan sát)</title></circle>
+                }
                 @for (p of paths.actualPoints; track $index) {
-                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-actual" />
-                  <text [attr.x]="p.x" [attr.y]="p.y - 8" class="chart-tooltip-text">{{ p.val }}</text>
+                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-actual"><title>{{ p.label }}: {{ p.val }} sp (thực tế kiểm chứng)</title></circle>
                 }
-                <!-- Dots for Real Forecast -->
                 @for (p of paths.realPoints; track $index) {
-                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-real" />
+                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-real"><title>{{ p.label }}: {{ p.val }} sp (dự báo Real)</title></circle>
                 }
-                <!-- Dots for Mock Forecast -->
                 @for (p of paths.mockPoints; track $index) {
-                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-mock" />
+                  <circle [attr.cx]="p.x" [attr.cy]="p.y" r="4" class="chart-dot dot-mock"><title>{{ p.label }}: {{ p.val }} sp (dự báo Mock)</title></circle>
                 }
               </svg>
-              
+
               <!-- Chart Legend -->
               <div class="chart-legend">
-                <span class="legend-item actual"><i aria-hidden="true"></i>Thực tế tiêu thụ</span>
-                <span class="legend-item real"><i aria-hidden="true"></i>Dự báo Real</span>
-                <span class="legend-item mock"><i aria-hidden="true"></i>Dự báo Mock</span>
+                <span class="legend-item actual"><i aria-hidden="true"></i>Tiêu thụ quan sát (lịch sử + kiểm chứng)</span>
+                @if (paths.realPoints.length) { <span class="legend-item real"><i aria-hidden="true"></i>Dự báo Real</span> }
+                @if (paths.mockPoints.length) { <span class="legend-item mock"><i aria-hidden="true"></i>Dự báo Mock</span> }
+                @if (!paths.realPoints.length && !paths.mockPoints.length) { <span class="legend-item muted">Chưa có dự báo — SKU đang bị chặn phân loại (xem hàng đợi ngoại lệ)</span> }
               </div>
             </div>
           } @else {
-            <div class="chart-empty">Chưa đủ dữ liệu dự phóng để lập biểu đồ. Hãy đảm bảo cả hai nguồn dữ liệu đã được chạy mô phỏng.</div>
+            <div class="chart-empty">SKU này chưa có cả lịch sử tiêu thụ lẫn dự báo — kiểm tra lại nguồn dữ liệu.</div>
           }
         </div>
       </div>

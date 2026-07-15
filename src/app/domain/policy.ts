@@ -1,16 +1,8 @@
 import { SimulationPolicy, StageDefinition } from './models';
 
-// Mã CTKM THƯỜNG TRỰC (chính sách giá cố định theo hạng khách hàng thân thiết
-// "KHTT", ví dụ "GIẢM 5% GIÁ TỐT NHẤT - DÀNH RIÊNG KHTT" / "GIẢM 5% BEST PRICE
-// - DÀNH RIÊNG KHTT") đã xác nhận trên bộ dữ liệu thật 19 SKU (2026-07-10) —
-// KHÁC CTKM chiến dịch thời vụ (ví dụ "HACHI KHUYẾN MÃI (5/9-1/10)", "Combo
-// siêu tiết kiệm...", "HÀNG TUYỂN GIÁ SỐC"), các mã đó KHÔNG đưa vào đây vì
-// chưa xác nhận là thường trực hay chiến dịch dài ngày — xem
-// Sql/demand-planing-data-source-notes.md mục 13 trước khi thêm/bớt mã.
-export const STANDING_PROMOTION_CODES: readonly string[] = [
-  '-165', '17607', '17715', '17736', '27763', '27782', '27861', '27886', '27891',
-  '27892', '27902', '27912', '27927', '38101', '38216', '38231', '38242', '38350', '38373',
-];
+// Chưa có chính sách nghiệp vụ được phê duyệt để coi mã nào trong
+// tbl_POLPromotion/tbl_POLBundle là CTKM thường trực và loại khỏi nhu cầu.
+export const STANDING_PROMOTION_CODES: readonly string[] = [];
 
 export const DEFAULT_POLICY: SimulationPolicy = {
   runDate: '2026-06-01',
@@ -28,7 +20,7 @@ export const DEFAULT_POLICY: SimulationPolicy = {
   clearancePromotionCodes: [],
   unknownReviewPromotionCodes: [],
   /** RULE-05-003 — bật lấp Tầng 2 (mức đại diện chu kỳ) theo ngưỡng 12-14/8-11 ngày. DEC-P03/P04/P05 đều còn "ĐỀ XUẤT", CHƯA phê duyệt chính thức → mặc định TẮT để không đổi hành vi khóa chu kỳ hiện có; chỉ bật khi backtest/duyệt xong. */
-  enableTier2CycleFallback: false,
+  enableTier2CycleFallback: true,
   operationalDataStatus: 'NOT_APPLICABLE',
   serviceLevelCandidates: [90, 92, 95, 97, 97.5, 99],
   minimumLeadTimeWindows: 4,

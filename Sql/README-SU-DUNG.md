@@ -5,7 +5,7 @@
 Đọc theo thứ tự:
 
 1. `01-Danh-sach-quyet-dinh-nghiep-vu.md` — kiểm tra các quyết định đã khóa và đề xuất.
-2. `Tài liệu giải pháp...(25).md` — đọc toàn bộ giải pháp dễ hiểu.
+2. `Tài liệu giải pháp...(26).md` — đọc toàn bộ giải pháp dễ hiểu.
 3. `06-Quy-trinh-phe-duyet-va-xu-ly-ngoai-le.md` — duyệt cách xử lý khi hệ thống không đủ dữ liệu.
 4. `07-Danh-muc-Golden-Test.md` — duyệt kết quả mong đợi trước khi code.
 

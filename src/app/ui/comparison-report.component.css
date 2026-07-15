@@ -602,6 +602,17 @@
   background: var(--cyan);
 }
 
+.legend-item.muted {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.chart-divider {
+  stroke: var(--line);
+  stroke-width: 1px;
+  stroke-dasharray: 2 3;
+}
+
 .chart-empty {
   padding: 40px;
   text-align: center;
