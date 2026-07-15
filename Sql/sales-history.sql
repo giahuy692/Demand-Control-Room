@@ -1,6 +1,12 @@
 USE [POS];
 SET NOCOUNT ON;
 
+DECLARE @ToDate date;
+DECLARE @TopProducts int;
+
+SET @ToDate = '2026-02-14';
+SET @TopProducts = 50;
+
 /* =====================================================================
    LẤY TOÀN BỘ LỊCH SỬ BÁN HÀNG CHO NHIỀU BARCODE
 
@@ -104,11 +110,17 @@ INSERT INTO #InputBarcodes (Barcode)
 SELECT DISTINCT [Barcode]
 FROM [tbl_LSProduct]
 WHERE [Code] IN (
-    /* Top 100 SKU ban chay nhat theo tong luong ban — dong bo giua sales va stock. */
-    SELECT TOP 100 [Product]
-    FROM [POS].[dbo].[tbl_SALPoSDetails]
-    GROUP BY [Product]
-    ORDER BY SUM([Qty]) DESC
+    /* Cung tap top SKU va cung cutoff voi stock-history.sql. */
+    SELECT TOP (@TopProducts)
+        PosDetail.[Product]
+    FROM [POS].[dbo].[tbl_SALPoSDetails] AS PosDetail
+    INNER JOIN [POS].[dbo].[tbl_SALPoSMaster] AS PosMaster
+        ON PosMaster.[Code] = PosDetail.[PoSMaster]
+    WHERE PosMaster.[TransactionDate] < DATEADD(DAY, 1, @ToDate)
+    GROUP BY PosDetail.[Product]
+    ORDER BY
+        SUM(COALESCE(PosDetail.[Qty], 0)) DESC,
+        PosDetail.[Product] ASC
 )
 AND [Barcode] IS NOT NULL;
 
@@ -439,6 +451,12 @@ INNER JOIN dbo.tbl_SALPoSDetails AS PosDetail
 
 INNER JOIN dbo.tbl_SALPoSMaster AS PosMaster
     ON PosMaster.Code = PosDetail.PoSMaster
+
+WHERE PosMaster.TransactionDate < DATEADD(
+    DAY,
+    1,
+    @ToDate
+)
 
 /*
    Không dùng điều kiện:

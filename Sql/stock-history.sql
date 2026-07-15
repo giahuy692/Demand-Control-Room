@@ -97,23 +97,17 @@ SET NOCOUNT ON;
    ToDate:
        Ngày cuối cùng cần lấy lịch sử.
 
-   Mặc định ToDate là ngày hôm qua vì:
-       - Tồn cuối ngày hôm nay chưa hoàn tất.
-       - tbl_LSProduct.Quantity là tồn tại thời điểm chạy query.
+   ToDate cố định theo watermark bán hàng đã chốt.
    ===================================================================== */
 
 DECLARE @FromDate date;
 DECLARE @ToDate date;
 DECLARE @AnchorDate date;
+DECLARE @TopProducts int;
 
 SET @FromDate = '2022-01-01';
-
-/* Ngày hoàn chỉnh gần nhất. */
-SET @ToDate = DATEADD(
-    DAY,
-    -1,
-    CONVERT(date, GETDATE())
-);
+SET @ToDate = '2026-02-14';
+SET @TopProducts = 50;
 
 /*
    Ngày neo tái dựng.
@@ -197,11 +191,17 @@ INSERT INTO #InputBarcodes (Barcode)
 SELECT DISTINCT [Barcode]
 FROM [tbl_LSProduct]
 WHERE [Code] IN (
-    /* Top 100 SKU ban chay nhat theo tong luong ban — dong bo giua sales va stock. */
-    SELECT TOP 100 [Product]
-    FROM [POS].[dbo].[tbl_SALPoSDetails]
-    GROUP BY [Product]
-    ORDER BY SUM([Qty]) DESC
+    /* Cung tap top SKU va cung cutoff voi sales-history.sql. */
+    SELECT TOP (@TopProducts)
+        PosDetail.[Product]
+    FROM [POS].[dbo].[tbl_SALPoSDetails] AS PosDetail
+    INNER JOIN [POS].[dbo].[tbl_SALPoSMaster] AS PosMaster
+        ON PosMaster.[Code] = PosDetail.[PoSMaster]
+    WHERE PosMaster.[TransactionDate] < DATEADD(DAY, 1, @ToDate)
+    GROUP BY PosDetail.[Product]
+    ORDER BY
+        SUM(COALESCE(PosDetail.[Qty], 0)) DESC,
+        PosDetail.[Product] ASC
 )
 AND [Barcode] IS NOT NULL;
 
