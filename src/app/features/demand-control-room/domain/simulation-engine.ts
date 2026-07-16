@@ -1,4 +1,8 @@
-import { Injectable } from '@angular/core';
+import { Inject, Injectable, Optional } from '@angular/core';
+import { DemandPipelineOrchestrator } from '../application/pipeline/demand-pipeline-orchestrator.service';
+import { DemandStageProcessor, DEMAND_STAGE_PROCESSORS } from '../application/pipeline/demand-stage-processor.interface';
+import { DemandStageRegistry } from '../application/pipeline/demand-stage-registry.service';
+import { StageExecutionContext } from '../application/pipeline/stage-execution-context.class';
 import { buildCalendarScaffold } from './calendar-scaffold';
 import { SimulationDataset } from './catalog';
 import { FORECAST_HORIZON, fitBaseForecast } from './forecast-models';
@@ -1324,36 +1328,60 @@ function runStage19(previous: StageSnapshot, policy: SimulationPolicy): StageSna
   }, ['Giữ nguyên toàn bộ snapshot C1–C18; không hồi tố.', 'Tách nguyên nhân theo dữ liệu, nguồn hàng, tồn an toàn, MOQ, ngân sách và duyệt ngoại lệ.', 'Mọi thay đổi chỉ là đề xuất cho phiên bản tương lai.', ...note19.audit]);
 }
 
+const STAGE_EXECUTORS: readonly ((context: StageExecutionContext) => StageSnapshot)[] = [
+  context => runStage1(context.policy, context.dataset),
+  context => runStage2(context.requirePrevious(), context.policy),
+  context => runStage3(context.requirePrevious(), context.policy),
+  context => runStage4(context.requirePrevious(), context.policy),
+  context => runStage5(context.requirePrevious(), context.policy),
+  context => runStage6(context.requirePrevious(), context.policy),
+  context => runStage7(context.requirePrevious(), context.policy),
+  context => runStage8(context.requirePrevious(), context.policy),
+  context => runStage9(context.requirePrevious(), context.policy),
+  context => runStage10(context.requirePrevious(), context.policy),
+  context => runStage11(context.requirePrevious(), context.policy),
+  context => runStage12(context.requirePrevious(), context.policy),
+  context => runStage13(context.requirePrevious(), context.policy),
+  context => runStage14(context.requirePrevious(), context.policy),
+  context => runStage15(context.requirePrevious(), context.policy),
+  context => runStage16(context.requirePrevious(), context.policy),
+  context => runStage17(context.requirePrevious(), context.policy),
+  context => runStage18(context.requirePrevious(), context.policy),
+  context => runStage19(context.requirePrevious(), context.policy),
+];
+
+export const DEFAULT_DEMAND_STAGE_PROCESSORS: readonly DemandStageProcessor[] = Object.freeze(
+  STAGE_EXECUTORS.map((execute, index) => {
+    const id = (index + 1) as StageNumber;
+    return Object.freeze({
+      id,
+      order: id,
+      dependsOn: id === 1 ? [] : [id - 1 as StageNumber],
+      isApplicable: () => true,
+      execute,
+    });
+  }),
+);
+
 @Injectable({ providedIn: 'root' })
 export class SimulationEngine {
   private dataset: SimulationDataset | null = null;
+  private readonly orchestrator: DemandPipelineOrchestrator;
+
+  constructor(
+    @Optional() @Inject(DEMAND_STAGE_PROCESSORS) processors: readonly DemandStageProcessor[] | null = null,
+  ) {
+    this.orchestrator = new DemandPipelineOrchestrator(new DemandStageRegistry(processors?.length ? processors : DEFAULT_DEMAND_STAGE_PROCESSORS));
+  }
 
   setDataset(dataset: SimulationDataset | null): void {
     this.dataset = dataset;
   }
 
   run(stage: StageNumber, previous: StageSnapshot | null, policy: SimulationPolicy): StageSnapshot {
-    if (stage === 1) return runStage1(policy, this.dataset);
-    if (!previous || previous.stage !== stage - 1) throw new Error(`Chặng ${stage} cần snapshot đã khóa của Chặng ${stage - 1}.`);
-    switch (stage) {
-      case 2: return runStage2(previous, policy);
-      case 3: return runStage3(previous, policy);
-      case 4: return runStage4(previous, policy);
-      case 5: return runStage5(previous, policy);
-      case 6: return runStage6(previous, policy);
-      case 7: return runStage7(previous, policy);
-      case 8: return runStage8(previous, policy);
-      case 9: return runStage9(previous, policy);
-      case 10: return runStage10(previous, policy);
-      case 11: return runStage11(previous, policy);
-      case 12: return runStage12(previous, policy);
-      case 13: return runStage13(previous, policy);
-      case 14: return runStage14(previous, policy);
-      case 15: return runStage15(previous, policy);
-      case 16: return runStage16(previous, policy);
-      case 17: return runStage17(previous, policy);
-      case 18: return runStage18(previous, policy);
-      case 19: return runStage19(previous, policy);
-    }
+    const result = this.orchestrator.run(new StageExecutionContext(stage, previous, policy, this.dataset));
+    if (result.status === 'COMPLETED') return result.snapshot;
+    if (result.status === 'BLOCKED') throw result.error;
+    throw new Error(`Chặng ${stage} không áp dụng cho phiên hiện tại.`);
   }
 }
