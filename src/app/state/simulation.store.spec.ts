@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { SimulationEngine } from '../domain/simulation-engine';
 import { SimulationStore } from './simulation.store';
+import { fileDatasetService } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 describe('SimulationStore synchronization invariants', () => {
   it('khởi tạo ở Chặng 1 nhưng chưa chạy snapshot nào', () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     expect(store.activeStage()).toBe(1);
     expect(store.completedStage()).toBe(0);
     expect(store.snapshots()).toEqual({});
@@ -13,7 +14,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('giữ snapshot Chặng 6 bất biến sau khi tự chạy Chặng 7', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     await store.selectStage(6);
     const snapshot6 = store.snapshots()[6]!;
     const before = JSON.stringify(snapshot6);
@@ -23,7 +24,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('click thẳng Chặng 8 tự chạy tuần tự 1→8 và đổi SKU cùng snapshot', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     await store.selectStage(8);
     expect(store.completedStage()).toBe(8);
     expect(Object.keys(store.snapshots())).toHaveLength(8);
@@ -42,7 +43,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('§8 LỆNH CODEX — stageLabel không gán "D" cho SKU chỉ đang POLICY_UNRESOLVED (ma trận chưa cấu hình), phải trả POLICY_PENDING', () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     // Giả lập trực tiếp: một state có xyz='X' hợp lệ (không phải D) nhưng serviceLevel=null (ô ma trận chưa cấu hình).
     const state: any = {
       classification: { abc: 'B', xyz: 'X', classificationStatus: 'CLASSIFIED', dSubtype: null },
@@ -52,7 +53,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('§8 LỆNH CODEX — stageLabel trả D subtype khi xyz=D và abc không phải N/A', () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     const state: any = {
       classification: { abc: 'B', xyz: 'D', classificationStatus: 'CLASSIFIED', dSubtype: 'D_NEW' },
       serviceLevel: null,
@@ -61,7 +62,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('đổi tham số phiên giữ nguyên chặng active và tự chạy lại đến chặng đó', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     await store.selectStage(6);
     const previousSnapshot = store.snapshots()[6];
 
@@ -76,7 +77,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('đổi tham số phiên khi đang xem lại chặng sớm hơn không được xóa tiến độ các chặng đã hoàn thành sau đó', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     await store.selectStage(15);
     await store.selectStage(6); // quay lại xem chặng 6, không đụng vào tiến độ đã chạy tới 15
 
@@ -89,7 +90,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('lưu ngày méo, ngày sạch tham chiếu và lineage Chặng 3→4 trong snapshot', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     await store.selectStage(4);
     const stage3 = store.snapshots()[3]!.states['SKU-001'];
     const distorted = stage3.daily.find(row => row.isStockout && !row.promoCode && row.referenceDates.length >= 3)!;
@@ -107,7 +108,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('§6.1 LỆNH CODEX — allExceptions gộp ngoại lệ từ nhiều chặng đã chạy, dedupe theo id, không trùng lặp', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     await store.selectStage(8);
     const perStageCount = Object.values(store.snapshots()).reduce((sum, snapshot) => sum + snapshot!.exceptions.length, 0);
     const all = store.allExceptions();
@@ -121,7 +122,7 @@ describe('SimulationStore synchronization invariants', () => {
   });
 
   it('§6.3 LỆNH CODEX — jumpToException điều hướng đúng SKU và Chặng của task', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     await store.selectStage(8);
     const task = store.allExceptions().find(item => item.skuId !== 'SKU-001')!;
     expect(task).toBeDefined();

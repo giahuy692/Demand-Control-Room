@@ -21,6 +21,11 @@ export type PolicyClassification = 'CAMPAIGN' | 'CLEARANCE' | 'UNKNOWN_REVIEW';
 /** 01-Danh-sach-quyet-dinh-nghiep-vu.md RULE-01-004/06-001 — phạm vi tập dữ liệu đang chạy. */
 export type PortfolioMode = 'FULL_PORTFOLIO' | 'SELECTED_SKU_SIMULATION' | 'USE_APPROVED_SNAPSHOT';
 
+/** Chế độ phiên của dataset (DEMAND-SIMULATION-DATASET-V1): backtest lịch sử hay mô phỏng kế hoạch có dữ liệu vận hành xác nhận. */
+export type SessionRunMode = 'HISTORICAL_VALIDATION' | 'PLANNING_SIMULATION';
+/** Cách Chặng 1 nhận dữ liệu ngày — khai báo trong dataset, không branch mock/real trong engine (xem SimulationMetadataDto). */
+export type CalendarScaffoldMode = 'GLOBAL_WINDOW' | 'PRESCAFFOLDED';
+
 export interface SimulationPolicy {
   runDate: string;
   historyYears: number;

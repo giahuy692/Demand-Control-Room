@@ -1,5 +1,7 @@
 import { computed, Injectable, signal } from '@angular/core';
-import { buildCatalog, DataSourceId, parseHachiBusinessRoles, parseRealDataset, SimulationDataset } from '../domain/catalog';
+import { buildCatalog, DataSourceId, parseHachiBusinessRoles, SimulationDataset } from '../domain/catalog';
+import { SimulationSession } from '../features/demand-control-room/domain/models/simulation-session.class';
+import { SimulationDatasetService } from '../features/demand-control-room/data-access/services/simulation-dataset.service';
 import { SimulationEngine } from '../domain/simulation-engine';
 import { DEFAULT_POLICY, STAGES } from '../domain/policy';
 import { getStageFormulas } from '../domain/formula-registry';
@@ -172,7 +174,10 @@ function createOutputs(stage: StageNumber, state: Readonly<SkuPipelineState> | n
 @Injectable({ providedIn: 'root' })
 export class SimulationStore {
   private readonly catalogSignal = signal(buildCatalog());
-  private realDataset: SimulationDataset | null = null;
+  private realSession: SimulationSession | null = null;
+
+  /** Hồ sơ dataset đang nạp (null = mock legacy nội bộ engine, sẽ có session sau Commit 6). */
+  readonly activeSession = signal<SimulationSession | null>(null);
 
   get catalog(): readonly SkuPipelineState['definition'][] { return this.catalogSignal(); }
 
@@ -244,7 +249,10 @@ export class SimulationStore {
     });
   });
 
-  constructor(private readonly engine: SimulationEngine) {}
+  constructor(
+    private readonly engine: SimulationEngine,
+    private readonly datasetService: SimulationDatasetService,
+  ) {}
 
   /** §6.3 LỆNH CODEX — "Đi tới Chặng" + "Xem SKU" của một ngoại lệ; điều hướng, không tự thực hiện phương án. */
   async jumpToException(task: ExceptionTask): Promise<void> {
@@ -327,6 +335,7 @@ export class SimulationStore {
         this.policy.update(policy => ({ ...policy, runDate: dataset.dateRange!.recommendedRunDate }));
       }
       this.engine.setDataset(dataset);
+      this.activeSession.set(source === 'real' ? this.realSession : null);
       const catalog = dataset?.catalog ?? buildCatalog();
       this.catalogSignal.set([...catalog]);
       this.selectedSkuId.set(catalog[0]?.id ?? '');
@@ -436,32 +445,19 @@ export class SimulationStore {
   }
 
   private async loadRealDataset(): Promise<SimulationDataset> {
-    if (this.realDataset) return this.realDataset;
-    const [daily, products, extractMetadata, businessRoles] = await Promise.all([
-      this.fetchText('assets/demand-planning-real.json'),
-      // List-product.json là metadata bổ sung không bắt buộc (Price/ProductName giờ
-      // đã nằm sẵn trong từng dòng daily) — thiếu file này không được chặn nạp dữ liệu thật.
-      this.fetchTextOptional('assets/List-product.json'),
-      // §9 LỆNH CODEX — ExtractMetadata thật (RESULT SET 3 demand-planing-v3.sql), optional: pipeline
-      // ingest hiện tại (tools/convert-real-data.mjs) chưa sinh file này nên mặc định vắng mặt.
-      this.fetchTextOptional('assets/extract-metadata.json'),
-      // §7 LỆNH CODEX — benchmark HachiBusinessRole, optional, KHÔNG thuộc pipeline SQL.
-      this.fetchTextOptional('assets/hachi-business-roles.json'),
-    ]);
-    this.hachiBusinessRoles = parseHachiBusinessRoles(businessRoles);
-    this.realDataset = parseRealDataset(daily, products, extractMetadata);
-    return this.realDataset;
-  }
-
-  private async fetchText(path: string): Promise<string> {
-    const response = await fetch(path);
-    if (!response.ok) throw new Error(`Không đọc được ${path} (${response.status}).`);
-    return response.text();
+    if (this.realSession) return this.realSession.dataset;
+    // Luồng nạp duy nhất: repository → DTO factory → mapper. Store không fetch,
+    // không parse, không biết đường dẫn asset. Lỗi ném nguyên vẹn — KHÔNG fallback mock.
+    this.realSession = await this.datasetService.load('real');
+    // §7 LỆNH CODEX — benchmark HachiBusinessRole, optional, KHÔNG thuộc pipeline dataset.
+    this.hachiBusinessRoles = parseHachiBusinessRoles(await this.fetchTextOptional('assets/hachi-business-roles.json'));
+    return this.realSession.dataset;
   }
 
   private async fetchTextOptional(path: string): Promise<string> {
     try {
-      return await this.fetchText(path);
+      const response = await fetch(path);
+      return response.ok ? await response.text() : '[]';
     } catch {
       return '[]';
     }

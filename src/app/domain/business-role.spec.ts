@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { SimulationStore } from '../state/simulation.store';
+import { fileDatasetService } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 import { parseHachiBusinessRoles } from './catalog';
 import { StageNumber, StageSnapshot } from './models';
 
@@ -36,8 +37,8 @@ describe('§7 LỆNH CODEX — HachiBusinessRole chỉ là benchmark, không đ�
   });
 
   it('#13b store: businessRoleComparison không làm lệch classification/seasonality/forecast của cùng snapshot', async () => {
-    const storeA = new SimulationStore(new SimulationEngine());
-    const storeB = new SimulationStore(new SimulationEngine());
+    const storeA = new SimulationStore(new SimulationEngine(), fileDatasetService());
+    const storeB = new SimulationStore(new SimulationEngine(), fileDatasetService());
     (storeB as any).hachiBusinessRoles = parseHachiBusinessRoles(SAMPLE_ROLES);
 
     await storeA.selectStage(11);
@@ -56,7 +57,7 @@ describe('§7 LỆNH CODEX — HachiBusinessRole chỉ là benchmark, không đ�
   });
 
   it('#14 SEASONAL đối chiếu đúng kết quả mùa vụ Chặng 9 (ALIGNED khi confirmed, POSSIBLE_DIFFERENCE khi no-clear-season, INVESTIGATION_REQUIRED khi thiếu cấu trúc)', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     (store as any).hachiBusinessRoles = parseHachiBusinessRoles(SAMPLE_ROLES);
     await store.selectStage(9);
 
@@ -70,7 +71,7 @@ describe('§7 LỆNH CODEX — HachiBusinessRole chỉ là benchmark, không đ�
   });
 
   it('#15 MARGIN/TRAFFIC → NOT_COMPARABLE_WITH_CURRENT_DATA khi thiếu landedCostPerUnit/dữ liệu giỏ hàng', async () => {
-    const store = new SimulationStore(new SimulationEngine());
+    const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     (store as any).hachiBusinessRoles = parseHachiBusinessRoles(SAMPLE_ROLES);
     await store.selectStage(9);
 
@@ -81,8 +82,8 @@ describe('§7 LỆNH CODEX — HachiBusinessRole chỉ là benchmark, không đ�
   });
 
   it('#16 NEW không tự gán D nếu không có lifecycle evidence — dSubtype của SKU-011 giống hệt khi có/không businessRole; đối chiếu NEW báo NOT_COMPARABLE_WITH_CURRENT_DATA', async () => {
-    const storeA = new SimulationStore(new SimulationEngine());
-    const storeB = new SimulationStore(new SimulationEngine());
+    const storeA = new SimulationStore(new SimulationEngine(), fileDatasetService());
+    const storeB = new SimulationStore(new SimulationEngine(), fileDatasetService());
     (storeB as any).hachiBusinessRoles = parseHachiBusinessRoles(SAMPLE_ROLES);
     await storeA.selectStage(7);
     await storeB.selectStage(7);

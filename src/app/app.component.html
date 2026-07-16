@@ -33,6 +33,22 @@
     </div>
   </header>
 
+  @if (store.activeSession(); as session) {
+    <section class="dataset-meta" aria-label="Hồ sơ dataset đang nạp">
+      <span class="dataset-badge" [class.real]="session.kind === 'real'">{{ session.kind === 'real' ? 'REAL' : 'MOCK' }}</span>
+      <span><b>{{ session.datasetId }}</b> · {{ session.contractVersion }}</span>
+      <span>Sinh lúc {{ session.generatedAt }}</span>
+      <span>RunDate <b>{{ session.metadata.runDate }}</b> · {{ session.metadata.runMode }}</span>
+      @if (session.dataset.dateRange; as range) { <span>Nguồn {{ range.min }} → {{ range.max }}</span> }
+      <span>Phạm vi {{ session.metadata.storeCode }} / {{ session.metadata.storeScopeStatus }} · {{ session.metadata.portfolioMode }}</span>
+      <span [class.gate-fail]="session.metadata.qualityGates.stockReconciliation !== 'PASS'">Gate tồn: {{ session.metadata.qualityGates.stockReconciliation }}</span>
+      <span>{{ session.metadata.rowCounts.dailyRecords }} dòng · {{ session.metadata.rowCounts.products }} SKU</span>
+    </section>
+  }
+  @if (store.dataSourceError(); as sourceError) {
+    <div class="error-banner" role="alert"><b>Nguồn dữ liệu BLOCKED.</b> {{ sourceError }} — không tự chuyển sang dữ liệu giả.</div>
+  }
+
   <section class="progress-rail" aria-label="Tiến độ pipeline">
     <div class="phase-legend">
       @for (phase of phases; track phase.number) {

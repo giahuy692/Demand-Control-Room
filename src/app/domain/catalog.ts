@@ -1,4 +1,4 @@
-import { DailyRecord, DailySourceRecordV2, ExtractMetadata, HachiBusinessRole, PortfolioMode, SkuDefinition } from './models';
+import { CalendarScaffoldMode, DailyRecord, DailySourceRecordV2, ExtractMetadata, HachiBusinessRole, PortfolioMode, SessionRunMode, SkuDefinition } from './models';
 
 export type DataSourceId = 'mock' | 'real';
 
@@ -9,6 +9,9 @@ export interface SimulationDataset {
   readonly dailyBySku: Readonly<Record<string, readonly DailyRecord[]>>;
   readonly audit: readonly string[];
   readonly dateRange?: { min: string; max: string; recommendedRunDate: string };
+  /** Ngữ nghĩa phiên — do dataset KHAI BÁO (metadata hợp đồng V1), engine không suy từ mock/real. */
+  readonly runMode: SessionRunMode;
+  readonly calendarScaffold: CalendarScaffoldMode;
   /**
    * RULE-01-004/06-001 — ngày nay `ExtractMetadata.PortfolioMode` chưa có trong
    * pipeline ingest (tools/convert-real-data.mjs không mang theo metadata này) —
@@ -408,6 +411,8 @@ export function parseRealDataset(dailyPayload: string, productPayload: string, e
     catalog,
     dailyBySku,
     dateRange: { min: minDate, max: maxDate, recommendedRunDate },
+    runMode: 'HISTORICAL_VALIDATION',
+    calendarScaffold: 'GLOBAL_WINDOW',
     // §9 — đọc từ ExtractMetadata khi asset có sẵn; vắng mặt thì giữ mặc định bảo thủ cũ (RESULT SET 3
     // chưa được ingest — xem `parseExtractMetadata`).
     portfolioMode,

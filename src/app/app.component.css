@@ -672,3 +672,10 @@ footer { display: flex; justify-content: space-between; padding: 11px 4px 0; col
   .merged-context-body > .demand-structure-card { position: static; }
   .merged-catalog .sku-list { max-height: 55dvh; overflow-y: auto; }
 }
+
+/* Hồ sơ dataset đang nạp (hợp đồng DEMAND-SIMULATION-DATASET-V1) */
+.dataset-meta { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: 8px; padding: 8px 14px; border: 1px solid rgba(140,180,255,.25); border-radius: 7px; background: rgba(140,180,255,.06); font-size: 11.5px; color: var(--muted, #9db0c9); }
+.dataset-meta b { color: var(--text, #e8eefc); font-weight: 600; }
+.dataset-badge { padding: 2px 8px; border-radius: 999px; font-weight: 700; font-size: 10.5px; letter-spacing: .06em; background: rgba(255,196,87,.16); color: #ffc457; border: 1px solid rgba(255,196,87,.4); }
+.dataset-badge.real { background: rgba(87,214,144,.14); color: #57d690; border-color: rgba(87,214,144,.4); }
+.dataset-meta .gate-fail { color: #ffb0b0; font-weight: 700; }

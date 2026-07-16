@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { AppComponent } from './app.component';
 import { SimulationEngine } from './domain/simulation-engine';
 import { SimulationStore } from './state/simulation.store';
+import { fileDatasetService } from './features/demand-control-room/data-access/testing/file-dataset.testing';
 
 function createApp(): { app: AppComponent; store: SimulationStore } {
-  const store = new SimulationStore(new SimulationEngine());
+  const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
   const app = new AppComponent(store);
   return { app, store };
 }
