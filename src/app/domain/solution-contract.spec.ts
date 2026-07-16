@@ -3,9 +3,10 @@ import { applyPromoFactor, classifyAbcRows, mean, meetsSeasonRepeatThreshold, sa
 import { StageNumber, StageSnapshot } from './models';
 import { CAPITAL_PRIORITIES, DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 function runTo(stage: StageNumber, policy = DEFAULT_POLICY): StageSnapshot {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let current = 1; current <= stage; current++) snapshot = engine.run(current as StageNumber, snapshot, policy);
   return snapshot!;

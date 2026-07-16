@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { DailyRecord, StageNumber, StageSnapshot } from './models';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 /**
  * §5/§10 LỆNH CODEX (RULE-05-006) — ngoại lệ cấp CHU KỲ sau Chặng 5: một task GỘP theo CK, không lặp
@@ -9,7 +10,7 @@ import { DailyRecord, StageNumber, StageSnapshot } from './models';
  * thể thành baseDemand=null (BASELINE_UNRESOLVED giả lập), rồi chạy Chặng 5 để kiểm tra ngoại lệ phát sinh.
  */
 function runTo4(): { engine: SimulationEngine; snapshot: StageSnapshot } {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let stage = 1; stage <= 4; stage++) snapshot = engine.run(stage as StageNumber, snapshot, DEFAULT_POLICY);
   return { engine, snapshot: snapshot! };

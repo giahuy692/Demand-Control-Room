@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { parseRealDataset } from './catalog';
 import { SimulationEngine } from './simulation-engine';
 import { DEFAULT_POLICY } from './policy';
+import { fixtureDailyRecord } from '../features/demand-control-room/data-access/dto/dataset-fixture';
+import { realDatasetFromRows } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 function dateAfter(iso: string, offset: number): string {
   const date = new Date(`${iso}T00:00:00Z`);
@@ -9,28 +10,16 @@ function dateAfter(iso: string, offset: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function productRow(id: string): string {
-  const row = Array.from({ length: 20 }, () => '');
-  row[0] = id;
-  row[3] = 'SKU thật';
-  row[17] = '100000';
-  row[19] = '70000';
-  return row.join(',');
-}
-
 describe('RULE-04-004 — cụm CTKM gần như liên tục không tách được nền → BASELINE_NOT_IDENTIFIABLE', () => {
   const start = '2024-01-01';
   const totalDays = 60;
-  // Yêu cầu cập nhật nguồn dữ liệu thật §6 — CSV giờ đọc theo header, bắt buộc có cột HasSalesRecord.
-  const HEADER = 'SKU,Date,OpenStock,CloseStock,Sales,HasSalesRecord,ReceiptHour,PromoCode,PromoName,Price,ProductName';
-
   it('toàn bộ chuỗi bị hai mã CTKM liền kề phủ kín, không còn ngày sạch nào → cả cụm gộp lại vẫn insufficient, tạo task RULE-04-004', () => {
-    const rows = [HEADER, ...Array.from({ length: totalDays }, (_, index) => {
+    const rows = Array.from({ length: totalDays }, (_, index) => {
       const date = dateAfter(start, index);
       const code = index < totalDays / 2 ? 'KMA' : 'KMB';
-      return `P1,${date},10,9,5,1,NULL,${code},NULL,100000,NULL`;
-    })];
-    const dataset = parseRealDataset(rows.join('\n'), productRow('P1'));
+      return fixtureDailyRecord({ sku: 'P1', date, openStock: 10, closeStock: 9, sales: 5, totalStockDelta: -1, promoCode: code });
+    });
+    const dataset = realDatasetFromRows(rows);
     const engine = new SimulationEngine();
     engine.setDataset(dataset);
     const runDate = dateAfter(start, totalDays + 5);
@@ -53,14 +42,14 @@ describe('RULE-04-004 — cụm CTKM gần như liên tục không tách đượ
   });
 
   it('hai vùng CTKM tách biệt có đủ ngày sạch xen giữa → không gắn clustered, không tạo task RULE-04-004', () => {
-    const rows = [HEADER, ...Array.from({ length: totalDays }, (_, index) => {
+    const rows = Array.from({ length: totalDays }, (_, index) => {
       const date = dateAfter(start, index);
       const inFirstPromo = index >= 20 && index < 25;
       const inSecondPromo = index >= 35 && index < 40;
-      const code = inFirstPromo ? 'KMA' : inSecondPromo ? 'KMB' : 'NULL';
-      return `P1,${date},10,9,5,1,NULL,${code},NULL,100000,NULL`;
-    })];
-    const dataset = parseRealDataset(rows.join('\n'), productRow('P1'));
+      const promoCode = inFirstPromo ? 'KMA' : inSecondPromo ? 'KMB' : null;
+      return fixtureDailyRecord({ sku: 'P1', date, openStock: 10, closeStock: 9, sales: 5, totalStockDelta: -1, promoCode });
+    });
+    const dataset = realDatasetFromRows(rows);
     const engine = new SimulationEngine();
     engine.setDataset(dataset);
     const runDate = dateAfter(start, totalDays + 5);

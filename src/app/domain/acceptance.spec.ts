@@ -4,6 +4,7 @@ import { buildCycles, SimulationEngine } from './simulation-engine';
 import { applyPromoFactor, calculateFreeStock, calculateTrend, classifyAbcRows, classifySeasonPosition, classifyXyz, croston, detectPulse, isStockout, median, populationStdev, promoBaseline, safetyStock, stockoutBaseline } from './math';
 import { DailyRecord } from './models';
 import { buildPromoRegionSamples } from './promo-analysis';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 function dailyRecord(index: number, baseDemand: number | null, baseSource: DailyRecord['baseSource']): DailyRecord {
   return {
@@ -17,7 +18,7 @@ function dailyRecord(index: number, baseDemand: number | null, baseSource: Daily
 
 describe('21 acceptance tests từ Developer Spec', () => {
   it('T01 · Chặng 1: 01/06/2026 tạo 1247 ngày, 83 chu kỳ, dư 2', () => {
-    const snapshot = new SimulationEngine().run(1, null, DEFAULT_POLICY);
+    const snapshot = testEngine().run(1, null, DEFAULT_POLICY);
     expect(snapshot.summary['Tổng ngày D']).toBe(1247);
     expect(snapshot.summary['Chu kỳ đầy đủ N']).toBe(83);
     expect(snapshot.summary['Ngày dư r']).toBe(2);

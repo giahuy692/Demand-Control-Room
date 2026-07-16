@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { SkuPipelineState, StageNumber, StageSnapshot } from './models';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 /**
  * GOLDEN REGRESSION — Commit 1 (Baseline characterization) của kế hoạch refactor.
@@ -19,7 +20,7 @@ const GOLDEN_SKUS = ['SKU-001', 'SKU-002', 'SKU-003'] as const;
 const ALL_STAGES = Array.from({ length: 19 }, (_, index) => (index + 1) as StageNumber);
 
 function runAllStages(): ReadonlyMap<StageNumber, StageSnapshot> {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   const snapshots = new Map<StageNumber, StageSnapshot>();
   let previous: StageSnapshot | null = null;
   for (const stage of ALL_STAGES) {

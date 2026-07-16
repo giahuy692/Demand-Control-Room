@@ -1,5 +1,5 @@
 import { computed, Injectable, signal } from '@angular/core';
-import { buildCatalog, DataSourceId, parseHachiBusinessRoles, SimulationDataset } from '../domain/catalog';
+import { DataSourceId, parseHachiBusinessRoles } from '../domain/catalog';
 import { SimulationSession } from '../features/demand-control-room/domain/models/simulation-session.class';
 import { SimulationDatasetService } from '../features/demand-control-room/data-access/services/simulation-dataset.service';
 import { SimulationEngine } from '../domain/simulation-engine';
@@ -173,10 +173,11 @@ function createOutputs(stage: StageNumber, state: Readonly<SkuPipelineState> | n
 
 @Injectable({ providedIn: 'root' })
 export class SimulationStore {
-  private readonly catalogSignal = signal(buildCatalog());
-  private realSession: SimulationSession | null = null;
+  private readonly catalogSignal = signal<readonly SkuPipelineState['definition'][]>([]);
+  /** Dataset kind engine đang giữ — null khi engine chưa được nạp gì. */
+  private engineSource: DataSourceId | null = null;
 
-  /** Hồ sơ dataset đang nạp (null = mock legacy nội bộ engine, sẽ có session sau Commit 6). */
+  /** Hồ sơ dataset đang nạp — mock lẫn real đều là một SimulationSession qua DTO/mapper. */
   readonly activeSession = signal<SimulationSession | null>(null);
 
   get catalog(): readonly SkuPipelineState['definition'][] { return this.catalogSignal(); }
@@ -269,7 +270,7 @@ export class SimulationStore {
   }
 
   selectSku(skuId: string): void {
-    if (this.catalog.some(sku => sku.id === skuId)) this.selectedSkuId.set(skuId);
+    if (!this.catalog.length || this.catalog.some(sku => sku.id === skuId)) this.selectedSkuId.set(skuId);
   }
 
   updatePolicy(patch: Partial<SimulationPolicy>): Promise<void> {
@@ -296,12 +297,13 @@ export class SimulationStore {
     return this.runThrough(recomputeTarget).then(() => this.activeStage.set(viewedStage));
   }
 
-  runActive(): void {
+  async runActive(): Promise<void> {
     const stage = this.activeStage();
     if (stage !== this.completedStage() + 1 || this.isRunning() || this.isLoadingDataSource()) return;
     this.isRunning.set(true);
     this.error.set(null);
     try {
+      await this.ensureEngineDataset();
       const previous = stage === 1 ? null : this.snapshots()[(stage - 1) as StageNumber] ?? null;
       const snapshot = this.engine.run(stage, previous, this.policy());
       this.snapshots.update(snapshots => ({ ...snapshots, [stage]: snapshot }));
@@ -330,15 +332,16 @@ export class SimulationStore {
     this.error.set(null);
     this.dataSourceError.set(null);
     try {
-      const dataset = source === 'real' ? await this.loadRealDataset() : null;
-      if (dataset?.dateRange && this.policy().runDate > dataset.dateRange.max) {
+      const session = await this.loadSession(source);
+      const dataset = session.dataset;
+      if (dataset.dateRange && this.policy().runDate > dataset.dateRange.max) {
         this.policy.update(policy => ({ ...policy, runDate: dataset.dateRange!.recommendedRunDate }));
       }
       this.engine.setDataset(dataset);
-      this.activeSession.set(source === 'real' ? this.realSession : null);
-      const catalog = dataset?.catalog ?? buildCatalog();
-      this.catalogSignal.set([...catalog]);
-      this.selectedSkuId.set(catalog[0]?.id ?? '');
+      this.engineSource = source;
+      this.activeSession.set(session);
+      this.catalogSignal.set(dataset.catalog);
+      this.selectedSkuId.set(dataset.catalog[0]?.id ?? '');
       this.dataSource.set(source);
       this.snapshots.set({});
       this.completedStage.set(0);
@@ -360,6 +363,7 @@ export class SimulationStore {
     this.isRunning.set(true);
     this.error.set(null);
     try {
+      await this.ensureEngineDataset();
       const nextSnapshots = { ...this.snapshots() };
       for (let number = this.completedStage() + 1; number <= targetStage; number++) {
         await new Promise<void>(resolve => setTimeout(resolve));
@@ -392,8 +396,8 @@ export class SimulationStore {
       
       // 1. Run for 'real' if missing
       if (!this.realFinalState()) {
-        const dataset = await this.loadRealDataset();
-        this.engine.setDataset(dataset);
+        this.engine.setDataset((await this.loadSession('real')).dataset);
+        this.engineSource = 'real';
         const nextSnapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
         for (let number = 1; number <= 13; number++) {
           const stage = number as StageNumber;
@@ -405,7 +409,8 @@ export class SimulationStore {
 
       // 2. Run for 'mock' if missing
       if (!this.mockFinalState()) {
-        this.engine.setDataset(null);
+        this.engine.setDataset((await this.loadSession('mock')).dataset);
+        this.engineSource = 'mock';
         const nextSnapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
         for (let number = 1; number <= 13; number++) {
           const stage = number as StageNumber;
@@ -416,12 +421,8 @@ export class SimulationStore {
       }
 
       // 3. Restore dataset in engine
-      if (originalSource === 'real') {
-        const dataset = await this.loadRealDataset();
-        this.engine.setDataset(dataset);
-      } else {
-        this.engine.setDataset(null);
-      }
+      this.engine.setDataset((await this.loadSession(originalSource)).dataset);
+      this.engineSource = originalSource;
     } catch (error) {
       console.error('Error generating report data:', error);
     } finally {
@@ -444,14 +445,34 @@ export class SimulationStore {
     this.error.set(null);
   }
 
-  private async loadRealDataset(): Promise<SimulationDataset> {
-    if (this.realSession) return this.realSession.dataset;
-    // Luồng nạp duy nhất: repository → DTO factory → mapper. Store không fetch,
-    // không parse, không biết đường dẫn asset. Lỗi ném nguyên vẹn — KHÔNG fallback mock.
-    this.realSession = await this.datasetService.load('real');
-    // §7 LỆNH CODEX — benchmark HachiBusinessRole, optional, KHÔNG thuộc pipeline dataset.
-    this.hachiBusinessRoles = parseHachiBusinessRoles(await this.fetchTextOptional('assets/hachi-business-roles.json'));
-    return this.realSession.dataset;
+  /**
+   * Luồng nạp duy nhất cho CẢ mock lẫn real: repository → DTO factory → mapper.
+   * Store không fetch, không parse, không biết đường dẫn asset. Lỗi ném nguyên
+   * vẹn — KHÔNG fallback sang kind khác.
+   */
+  private async loadSession(source: DataSourceId): Promise<SimulationSession> {
+    const session = await this.datasetService.load(source);
+    if (source === 'real' && !Object.keys(this.hachiBusinessRoles).length) {
+      // §7 LỆNH CODEX — benchmark HachiBusinessRole, optional, KHÔNG thuộc pipeline dataset.
+      this.hachiBusinessRoles = parseHachiBusinessRoles(await this.fetchTextOptional('assets/hachi-business-roles.json'));
+    }
+    return session;
+  }
+
+  /** Nạp dataset cho engine đúng kind đang chọn nếu engine chưa giữ nó (kể cả lần chạy đầu). */
+  private async ensureEngineDataset(): Promise<void> {
+    const source = this.dataSource();
+    if (this.engineSource === source) return;
+    const session = await this.loadSession(source);
+    this.engine.setDataset(session.dataset);
+    this.engineSource = source;
+    this.activeSession.set(session);
+    if (!this.catalogSignal().length || this.catalogSignal() !== session.dataset.catalog) {
+      this.catalogSignal.set(session.dataset.catalog);
+      if (!session.dataset.catalog.some(sku => sku.id === this.selectedSkuId())) {
+        this.selectedSkuId.set(session.dataset.catalog[0]?.id ?? '');
+      }
+    }
   }
 
   private async fetchTextOptional(path: string): Promise<string> {

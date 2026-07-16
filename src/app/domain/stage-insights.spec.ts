@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 import { StageNumber, StageSnapshot } from './models';
 import {
   buildAbcBoard, buildFinalForecastAudit, buildForecastAudit, buildPolicyMatrix, buildPromoAudit,
@@ -8,7 +9,7 @@ import {
 } from './stage-insights';
 
 function runPipeline(): Partial<Record<StageNumber, StageSnapshot>> {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   const snapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
   let previous: StageSnapshot | null = null;
   for (let stage = 1; stage <= 15; stage++) {

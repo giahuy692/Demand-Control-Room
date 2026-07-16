@@ -3,9 +3,10 @@ import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { StageNumber, StageSnapshot } from './models';
 import { buildSimulationReport } from './report-builder';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 function runTo(stage: StageNumber, policy = DEFAULT_POLICY): StageSnapshot {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let current = 1; current <= stage; current++) snapshot = engine.run(current as StageNumber, snapshot, policy);
   return snapshot!;
@@ -40,7 +41,7 @@ describe('04 §14 / DEC-W05 — Chặng 14–19 mặc định SIMULATION_ONLY kh
   for (const stage of [14, 15, 16, 17, 18, 19] as const) {
     it(`Chặng ${stage}: báo cáo mô phỏng (buildSimulationReport) hiển thị nhãn SIMULATION_ONLY cho toàn bộ SKU khi chưa CONFIRMED`, () => {
       const snapshot = runTo(stage);
-      const engine = new SimulationEngine();
+      const engine = testEngine();
       const snapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
       let previous: StageSnapshot | null = null;
       for (let current = 1; current <= stage; current++) {
@@ -59,7 +60,7 @@ describe('04 §14 / DEC-W05 — Chặng 14–19 mặc định SIMULATION_ONLY kh
 
   it('operationalDataStatus=CONFIRMED: báo cáo mô phỏng KHÔNG hiển thị nhãn SIMULATION_ONLY', () => {
     const policy = { ...DEFAULT_POLICY, operationalDataStatus: 'CONFIRMED' as const };
-    const engine = new SimulationEngine();
+    const engine = testEngine();
     const snapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
     let previous: StageSnapshot | null = null;
     for (let current = 1; current <= 17; current++) {

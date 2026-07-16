@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { StageSnapshot } from './models';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 function runTo(stage: 12 | 13): StageSnapshot {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let current = 1; current <= stage; current++) snapshot = engine.run(current as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13, snapshot, DEFAULT_POLICY);
   return snapshot!;

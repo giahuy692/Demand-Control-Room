@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { StageNumber, StageSnapshot } from './models';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 function runTo(stage: StageNumber): StageSnapshot {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let current = 1; current <= stage; current++) snapshot = engine.run(current as StageNumber, snapshot, DEFAULT_POLICY);
   return snapshot!;

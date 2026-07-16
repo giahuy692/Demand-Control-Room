@@ -3,9 +3,10 @@ import { SimulationEngine } from './simulation-engine';
 import { DEFAULT_POLICY } from './policy';
 import { StageNumber, StageSnapshot } from './models';
 import { buildStageTrace } from './stage-trace';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 describe('stage-trace sanity', () => {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   const snapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
   let previous: StageSnapshot | null = null;
   for (let stage = 1; stage <= 19; stage++) {

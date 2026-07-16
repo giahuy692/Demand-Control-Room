@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 import { StageSnapshot } from './models';
 
 function runTo(stage: 6 | 7 | 8): StageSnapshot {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let current = 1; current <= stage; current++) snapshot = engine.run(current as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8, snapshot, DEFAULT_POLICY);
   return snapshot!;
@@ -27,7 +28,7 @@ describe('RULE-06-001/002 — Chặng 6 ABC official/approval', () => {
   });
 
   it('portfolioMode=FULL_PORTFOLIO → ABC được coi là chính thức', () => {
-    const engine = new SimulationEngine();
+    const engine = testEngine();
     let snapshot: StageSnapshot | null = engine.run(1, null, DEFAULT_POLICY);
     for (const state of Object.values(snapshot.states)) (state.definition as { portfolioMode: string }).portfolioMode = 'FULL_PORTFOLIO';
     for (let stage = 2; stage <= 6; stage++) snapshot = engine.run(stage as 2 | 3 | 4 | 5 | 6, snapshot, DEFAULT_POLICY);
@@ -56,7 +57,7 @@ describe('RULE-07-001/002 — Chặng 7 phân loại D theo lý do', () => {
   });
 
   it('D_SHORT_HISTORY chỉ đạt tới khi extractIsTruncated=false (biết chắc không bị cắt)', () => {
-    const engine = new SimulationEngine();
+    const engine = testEngine();
     let snapshot: StageSnapshot | null = engine.run(1, null, DEFAULT_POLICY);
     (snapshot.states['SKU-013'].definition as { extractIsTruncated: boolean }).extractIsTruncated = false;
     for (let stage = 2; stage <= 7; stage++) snapshot = engine.run(stage as 2 | 3 | 4 | 5 | 6 | 7, snapshot, DEFAULT_POLICY);

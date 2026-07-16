@@ -5,6 +5,7 @@ import { SimulationStore } from '../state/simulation.store';
 import { fileDatasetService } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 import { parseHachiBusinessRoles } from './catalog';
 import { StageNumber, StageSnapshot } from './models';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 const SAMPLE_ROLES = JSON.stringify([
   { SKU: 'SKU-002', HachiBusinessRole: 'SEASONAL' },
@@ -15,7 +16,7 @@ const SAMPLE_ROLES = JSON.stringify([
 ]);
 
 function runEngineTo(stage: StageNumber): Record<string, unknown> {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let number = 1; number <= stage; number++) snapshot = engine.run(number as StageNumber, snapshot, DEFAULT_POLICY);
   return snapshot!.states;

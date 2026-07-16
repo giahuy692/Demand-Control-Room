@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { CycleRecord, CycleStatus, StageNumber, StageSnapshot } from './models';
+import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
 
 /**
  * Kỹ thuật chung: chạy engine thật tới Chặng 5 (dữ liệu giả gapless mặc định), rồi cấy trực tiếp
@@ -20,7 +21,7 @@ function makeCycle(index: number, locked: boolean, status: CycleStatus, baseDema
 }
 
 function runTo5(): { engine: SimulationEngine; snapshot: StageSnapshot } {
-  const engine = new SimulationEngine();
+  const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let stage = 1; stage <= 5; stage++) snapshot = engine.run(stage as StageNumber, snapshot, DEFAULT_POLICY);
   return { engine, snapshot: snapshot! };
@@ -183,7 +184,7 @@ describe('RULE-07-003 — cửa sổ XYZ là đúng 24 vị trí gần nhất th
   });
 
   it('GT-36: SKU-014 (mock catalog có sẵn — 6 chu kỳ khóa, baseDemand=0) → NO_POSITIVE_DEMAND_REVIEW, KHÔNG phải D (hồi quy: trước bản sửa sẽ là D)', () => {
-    const engine = new SimulationEngine();
+    const engine = testEngine();
     let snapshot: StageSnapshot | null = null;
     for (let stage = 1; stage <= 7; stage++) snapshot = engine.run(stage as StageNumber, snapshot, DEFAULT_POLICY);
     const state = snapshot!.states['SKU-014'];

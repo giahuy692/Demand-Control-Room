@@ -2,32 +2,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildCatalog, generateDailyRecords } from '../../src/app/domain/catalog';
-import { DEFAULT_POLICY } from '../../src/app/domain/policy';
 import { splitDataLine, readDelimitedFile } from './csv-reader.mjs';
 import { validateDataset } from './data-contract.mjs';
 import { buildMockDailyRows, buildMockProducts, fullCycleCount, MOCK_CYCLE_LENGTH, MOCK_HISTORY_YEARS, MOCK_RUN_DATE } from './mock-generator.mjs';
 
-describe('mock-generator.mjs — PORT phải tái tạo đúng từng số của catalog.ts', () => {
-  it('products khớp buildCatalog() (trừ portfolioMode/extractIsTruncated đã dời lên metadata)', () => {
-    const ported = buildMockProducts();
-    const original = buildCatalog().map(({ portfolioMode, extractIsTruncated, ...rest }) => rest);
-    expect(ported).toEqual(original);
-  });
-
-  it('dòng ngày khớp generateDailyRecords() từng field dùng chung', () => {
-    const maxCycles = fullCycleCount(MOCK_RUN_DATE, MOCK_HISTORY_YEARS, MOCK_CYCLE_LENGTH);
-    expect(maxCycles).toBe(83); // T01 — 2026-06-01 tạo 83 chu kỳ
-    const portedRows = buildMockDailyRows();
-    const originalRows = buildCatalog().flatMap(definition =>
-      generateDailyRecords(definition, DEFAULT_POLICY.runDate, DEFAULT_POLICY.cycleLength, maxCycles));
-    expect(portedRows.length).toBe(originalRows.length);
-    for (let index = 0; index < originalRows.length; index++) {
-      const ported = portedRows[index];
-      const original = originalRows[index];
-      expect({ sku: ported.sku, date: ported.date, openStock: ported.openStock, closeStock: ported.closeStock, sales: ported.sales, receiptHour: ported.receiptHour, promoCode: ported.promoCode })
-        .toEqual({ sku: original.sku, date: original.date, openStock: original.openStock, closeStock: original.closeStock, sales: original.sales, receiptHour: original.receiptHour, promoCode: original.promoCode });
-    }
+describe('mock-generator.mjs', () => {
+  it('giữ đúng cửa sổ lịch đã khóa trong baseline', () => {
+    expect(fullCycleCount(MOCK_RUN_DATE, MOCK_HISTORY_YEARS, MOCK_CYCLE_LENGTH)).toBe(83);
   });
 
   it('§12.15 — output deterministic: hai lần sinh giống hệt nhau', () => {
