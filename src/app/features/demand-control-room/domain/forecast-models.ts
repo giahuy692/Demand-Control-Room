@@ -1,5 +1,7 @@
 import { calculateBias, calculateTrend, calculateWape, detectPulse, detectShortCycle, mean, trailingLockedRun } from './math';
 import { ForecastResult, SkuPipelineState, XyzClass } from './models';
+import { DEFAULT_FORECAST_MODEL_REGISTRY, ForecastModelRegistry } from '../forecasting/forecast-model-registry.service';
+import { ForecastEligibilityContext, ForecastInput, RegisteredForecastModel } from '../forecasting/forecast-model-strategy.interface';
 
 /**
  * Cài đặt các mô hình dự báo nền của Chặng 11 theo đúng Tài liệu giải pháp [C11]:
@@ -57,7 +59,7 @@ export interface ForecastFit {
   learning: ModelLearning | null;
 }
 
-interface ModelRun {
+export interface ModelRun {
   rows: LearningRow[];
   future: number[];
   trainSse: number;
@@ -329,7 +331,7 @@ function lockStatusFrom(wape: number | null, bias: number | null): ForecastResul
   return 'review';
 }
 
-function buildLearning(
+export function buildLearning(
   model: ForecastResult['model'], params: Record<string, number>, run: ModelRun,
   trainSize: number, testSize: number, note: string,
 ): ModelLearning {
@@ -402,6 +404,7 @@ export function fitBaseForecast(
   xyz: XyzClass | null,
   seasonality: SkuPipelineState['seasonality'],
   trend: SkuPipelineState['trend'],
+  registry: ForecastModelRegistry = DEFAULT_FORECAST_MODEL_REGISTRY,
 ): ForecastFit {
   if (xyz === 'D' || xyz === null || !values.length) {
     // RULE-11-001 — xyz=null (CLASSIFICATION_BLOCKED/NO_POSITIVE_DEMAND_REVIEW ở Chặng 7) hoặc
@@ -422,6 +425,19 @@ export function fitBaseForecast(
   }
   const { trainSize, testSize } = splitSizes(values.length);
   const reliability: ForecastResult['reliability'] = testSize >= 3 ? 'ok' : 'low';
+  const context: ForecastEligibilityContext = {
+    xyz,
+    seasonality,
+    trend,
+    historyLength: values.length,
+    trainSize,
+    testSize,
+    seasonalPeriod: null,
+    seasonalCorrelation: null,
+  };
+  const input: ForecastInput = { values, trainSize, testSize, seasonalPeriod: null, seasonalCorrelation: null };
+  const candidate = (model: RegisteredForecastModel, candidateContext = context, candidateInput = input): ModelLearning | null =>
+    registry.fit(model, candidateContext, candidateInput)?.learning ?? null;
 
   if (xyz === 'Z') {
     const pulse = detectPulse(values);
@@ -429,14 +445,12 @@ export function fitBaseForecast(
       const learning = buildLearning('PulseRhythm', { D: pulse.interval!, Q: pulse.quantity! }, runPulse(values, pulse.interval!, pulse.quantity!, trainSize), trainSize, testSize, `Khoảng cách phát sinh đều D = ${pulse.interval}; quy mô Q = Median = ${pulse.quantity}.`);
       return toFit(learning, 'Nhóm Z, nhịp phát sinh ổn định → mô hình nhịp [C11 §8.6].', { reliability });
     }
-    const { run, params } = fitCroston(values, trainSize);
-    const learning = buildLearning('Croston', params, run, trainSize, testSize, `α = ${params['alpha']} chọn bằng Grid Search trên TRAIN; F = Z/P là bình quân mỗi chu kỳ.`);
+    const learning = candidate('Croston')!;
     return toFit(learning, 'Nhóm Z, khoảng cách phát sinh không đều → Croston bình quân [C11 §8.5].', { reliability });
   }
 
   // ── Bước 1: chọn mô hình đang thắng của nhánh X/Y theo mục 3 + quy tắc thắng §4.3-7/§4.5 ──
-  const ses = fitSes(values, trainSize);
-  const sesLearning = buildLearning('SES', ses.params, ses.run, trainSize, testSize, `α = ${ses.params['alpha']} chọn bằng Grid Search thô rồi tinh chỉnh bước 0,01 trong miền 0,05–0,5 [C11 §5.5].`);
+  const sesLearning = candidate('SES')!;
   const beats = (challenger: ModelLearning, incumbent: ModelLearning): boolean =>
     challenger.wape !== null && (incumbent.wape === null || challenger.wape < incumbent.wape);
 
@@ -447,10 +461,8 @@ export function fitBaseForecast(
 
   if (xyz === 'Y' && seasonality === 'confirmed') {
     // Nhánh 11Y-1: Holt-Winters phải thắng Holt/SES trên TEST [C11 §4.3 bước 7]; thua/không chạy được → fallback Holt → SES [§4.5].
-    const hw = fitHoltWinters(values, trainSize);
-    const holt = values.length >= 3 ? fitHolt(values, trainSize) : null;
-    const holtLearning = holt ? buildLearning('Holt', holt.params, holt.run, trainSize, testSize, `α = ${holt.params['alpha']}, β = ${holt.params['beta']} (β ≤ α) chọn bằng Grid Search trên TRAIN.`) : null;
-    const hwLearning = hw ? buildLearning('Holt-Winters', hw.params, hw.run, trainSize, testSize, 'm = 24; α/β/γ chọn bằng Grid Search trên TRAIN (β ≤ α, γ ≤ 1−α).') : null;
+    const holtLearning = candidate('Holt');
+    const hwLearning = candidate('Holt-Winters');
     if (hwLearning && (!holtLearning || beats(hwLearning, holtLearning)) && beats(hwLearning, sesLearning)) {
       incumbent = hwLearning;
       incumbentReason = `Nhóm Y có mùa vụ đủ căn cứ (C9) và Holt-Winters (WAPE ${pct(hwLearning.wape)}) thắng Holt/SES trên TEST → Holt-Winters [C11 §7, §4.3 bước 7].`;
@@ -466,8 +478,7 @@ export function fitBaseForecast(
     }
   } else if (xyz === 'Y' && (trend === 'up' || trend === 'down') && values.length >= 3) {
     // Nhánh 11Y-2: Holt phải thắng SES trên TEST; thua → dùng SES [C11 §4.3 bước 7, §4.5].
-    const holt = fitHolt(values, trainSize);
-    const holtLearning = buildLearning('Holt', holt.params, holt.run, trainSize, testSize, `α = ${holt.params['alpha']}, β = ${holt.params['beta']} (β ≤ α) chọn bằng Grid Search trên TRAIN.`);
+    const holtLearning = candidate('Holt')!;
     if (beats(holtLearning, sesLearning)) {
       incumbent = holtLearning;
       incumbentReason = `Nhóm Y có xu hướng ${trend === 'up' ? 'tăng' : 'giảm'} (C10) và Holt (WAPE ${pct(holtLearning.wape)}) thắng SES (WAPE ${pct(sesLearning.wape)}) trên TEST → Holt [C11 §6, §4.3 bước 7].`;
@@ -478,8 +489,8 @@ export function fitBaseForecast(
     // Nhánh 11X: nhóm X không qua C10 nên dò xu hướng cục bộ; Holt chỉ thắng khi backtest tốt hơn SES [C11 §3].
     const localTrend = calculateTrend(values);
     if (localTrend.trend === 'up' || localTrend.trend === 'down') {
-      const holt = fitHolt(values, trainSize);
-      const holtLearning = buildLearning('Holt', holt.params, holt.run, trainSize, testSize, `α = ${holt.params['alpha']}, β = ${holt.params['beta']}; Holt thắng SES khi WAPE backtest thấp hơn.`);
+      const holtLearning = candidate('Holt')!;
+      holtLearning.note = `α = ${holtLearning.params['alpha']}, β = ${holtLearning.params['beta']}; Holt thắng SES khi WAPE backtest thấp hơn.`;
       if (beats(holtLearning, sesLearning)) {
         incumbent = holtLearning;
         incumbentReason = `Nhóm X có xu hướng rõ và backtest Holt (WAPE ${pct(holtLearning.wape)}) tốt hơn SES → Holt [C11 §3, nhánh 11X].`;
@@ -499,13 +510,9 @@ export function fitBaseForecast(
     reliability,
   };
   if (shortCycle.ready) {
-    const naive = runSeasonalNaive(values, shortCycle.period!, trainSize);
-    const naiveLearning = buildLearning(
-      'SeasonalNaive',
-      { p: shortCycle.period!, r: Number(shortCycle.correlation!.toFixed(2)) },
-      naive, trainSize, testSize,
-      `Chu kỳ lặp p* = ${shortCycle.period} dò bằng tương quan Pearson trên TRAIN (r = ${shortCycle.correlation!.toFixed(2)} ≥ 0,60) [C11 §8.5]; F = Y của đúng ${shortCycle.period} chu kỳ trước [C11 §8.9].`,
-    );
+    const seasonalContext = { ...context, seasonalPeriod: shortCycle.period!, seasonalCorrelation: shortCycle.correlation! };
+    const seasonalInput = { ...input, seasonalPeriod: shortCycle.period!, seasonalCorrelation: shortCycle.correlation! };
+    const naiveLearning = candidate('SeasonalNaive', seasonalContext, seasonalInput)!;
     if (reliability === 'low') {
       // §8.10 + mục 12 + SN-04: TEST < 3 chu kỳ → SN chỉ được tính sai số tham khảo, không được tự thắng bằng so sánh.
       return toFit(incumbent, `${incumbentReason} Có ứng viên chu kỳ ngắn p* = ${shortCycle.period} (r = ${shortCycle.correlation!.toFixed(2)}) nhưng tập TEST chỉ ${testSize} chu kỳ < 3 → ${LOW_CONFIDENCE_FLAG}; giữ mô hình đối chứng, WAPE seasonal-naïve ${pct(naiveLearning.wape)} chỉ để tham khảo [C11 §8.10, mục 12].`, { ...gate, pStar: shortCycle.period });
