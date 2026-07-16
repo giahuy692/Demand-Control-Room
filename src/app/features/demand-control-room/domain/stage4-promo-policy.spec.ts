@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
-import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { testEngine } from '../data-access/testing/file-dataset.testing';
 
 function runToStage4(policy = DEFAULT_POLICY) {
   const engine = testEngine();

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
-import { SimulationDataset } from '../../../../domain/catalog';
-import { DailyRecord, SkuDefinition } from '../../../../domain/models';
+import { SimulationDataset } from '../../domain/catalog';
+import { DailyRecord, SkuDefinition } from '../../domain/models';
 import { SessionMetadata, SimulationSession } from '../../domain/models/simulation-session.class';
 import { DailyHistoryRecordDto } from '../dto/daily-history-record.dto';
 import { DemandSimulationDatasetDto } from '../dto/demand-simulation-dataset.dto';

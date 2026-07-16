@@ -1,6 +1,6 @@
 import '@angular/compiler';
 import { describe, expect, it } from 'vitest';
-import { SimulationReport } from '../domain/report-builder';
+import { SimulationReport } from '../../domain/report-builder';
 import { buildBrainstormFileName, buildBrainstormMarkdown } from './simulation-report.component';
 
 const sampleReport: SimulationReport = {

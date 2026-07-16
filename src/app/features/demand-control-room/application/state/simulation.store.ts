@@ -1,11 +1,11 @@
 import { computed, Injectable, signal } from '@angular/core';
-import { DataSourceId, parseHachiBusinessRoles } from '../domain/catalog';
-import { SimulationSession } from '../features/demand-control-room/domain/models/simulation-session.class';
-import { SimulationDatasetService } from '../features/demand-control-room/data-access/services/simulation-dataset.service';
-import { SimulationEngine } from '../domain/simulation-engine';
-import { DEFAULT_POLICY, STAGES } from '../domain/policy';
-import { getStageFormulas } from '../domain/formula-registry';
-import { BusinessRoleComparisonConclusion, BusinessRoleComparisonRow, ExceptionCode, ExceptionTask, HachiBusinessRole, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, StageViewModel } from '../domain/models';
+import { DataSourceId, parseHachiBusinessRoles } from '../../domain/catalog';
+import { SimulationSession } from '../../domain/models/simulation-session.class';
+import { SimulationDatasetService } from '../../data-access/services/simulation-dataset.service';
+import { SimulationEngine } from '../../domain/simulation-engine';
+import { DEFAULT_POLICY, STAGES } from '../../domain/policy';
+import { getStageFormulas } from '../../domain/formula-registry';
+import { BusinessRoleComparisonConclusion, BusinessRoleComparisonRow, ExceptionCode, ExceptionTask, HachiBusinessRole, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, StageViewModel } from '../../domain/models';
 
 /** §6.2 LỆNH CODEX — hai nhóm mức độ nghiêm trọng để lọc hàng đợi ngoại lệ trong UI. */
 const BLOCKING_EXCEPTION_CODES: readonly ExceptionCode[] = ['ABC_INPUT_BLOCKED', 'CLASSIFICATION_BLOCKED', 'FORECAST_INPUT_BLOCKED', 'CYCLE_EXCEPTION'];

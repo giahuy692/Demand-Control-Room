@@ -1,5 +1,5 @@
-import { DataSourceId, SimulationDataset } from '../../../../domain/catalog';
-import { CalendarScaffoldMode, PortfolioMode, SessionRunMode } from '../../../../domain/models';
+import { DataSourceId, SimulationDataset } from '../catalog';
+import { CalendarScaffoldMode, PortfolioMode, SessionRunMode } from '../models';
 
 /** Bản sao DOMAIN của metadata dataset — cắt phụ thuộc UI/store vào tầng DTO. */
 export interface SessionMetadata {

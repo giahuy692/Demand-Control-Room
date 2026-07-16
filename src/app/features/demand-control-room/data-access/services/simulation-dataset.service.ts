@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { DataSourceId } from '../../../../domain/catalog';
+import { DataSourceId } from '../../domain/catalog';
 import { DataQualityError } from '../../../../core/errors/data-quality-error.class';
 import { SimulationSession } from '../../domain/models/simulation-session.class';
 import { DemandSimulationDatasetDto } from '../dto/demand-simulation-dataset.dto';

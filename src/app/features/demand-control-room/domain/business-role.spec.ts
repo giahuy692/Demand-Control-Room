@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
-import { SimulationStore } from '../state/simulation.store';
-import { fileDatasetService } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { SimulationStore } from '../application/state/simulation.store';
+import { fileDatasetService } from '../data-access/testing/file-dataset.testing';
 import { parseHachiBusinessRoles } from './catalog';
 import { StageNumber, StageSnapshot } from './models';
-import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { testEngine } from '../data-access/testing/file-dataset.testing';
 
 const SAMPLE_ROLES = JSON.stringify([
   { SKU: 'SKU-002', HachiBusinessRole: 'SEASONAL' },

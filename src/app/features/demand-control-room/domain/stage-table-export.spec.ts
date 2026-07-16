@@ -3,7 +3,7 @@ import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { StageNumber, StageSnapshot } from './models';
 import { buildStageTableExport, encodeStageTableCsv, StageTableExport } from './stage-table-export';
-import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { testEngine } from '../data-access/testing/file-dataset.testing';
 
 function runAllStages(): Partial<Record<StageNumber, StageSnapshot>> {
   const engine = testEngine();

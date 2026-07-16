@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { fixtureDailyRecord } from '../features/demand-control-room/data-access/dto/dataset-fixture';
-import { realDatasetFromRows } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { fixtureDailyRecord } from '../data-access/dto/dataset-fixture';
+import { realDatasetFromRows } from '../data-access/testing/file-dataset.testing';
 import { parseHachiBusinessRoles } from './catalog';
 
 describe('SimulationDataset domain mapping', () => {

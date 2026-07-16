@@ -1,21 +1,21 @@
 import { KeyValuePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, signal, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { STAGES } from './domain/policy';
-import { DataSourceId } from './domain/catalog';
-import { CycleRecord, DailyRecord, ExceptionTask, SkuDefinition, SkuPipelineState, StageNumber } from './domain/models';
-import { buildStageTrace } from './domain/stage-trace';
+import { STAGES } from './features/demand-control-room/domain/policy';
+import { DataSourceId } from './features/demand-control-room/domain/catalog';
+import { CycleRecord, DailyRecord, ExceptionTask, SkuDefinition, SkuPipelineState, StageNumber } from './features/demand-control-room/domain/models';
+import { buildStageTrace } from './features/demand-control-room/domain/stage-trace';
 import {
   buildAbcBoard, buildForecastAudit, buildFinalForecastAudit, buildPolicyMatrix, buildPromoAudit,
   buildSafetyAudit, buildSeasonalityAudit, buildSupplyAudit, buildTrendAudit, buildXyzBoard,
-} from './domain/stage-insights';
-import { explainLearningCell, LearningColumn } from './domain/forecast-models';
-import { exceptionSeverity, SimulationStore, viNumberFormat } from './state/simulation.store';
-import { JourneyMapComponent } from './ui/journey-map.component';
-import { MathFormulaComponent } from './ui/math-formula.component';
-import { ComparisonReportComponent } from './ui/comparison-report.component';
-import { SimulationReportComponent } from './ui/simulation-report.component';
-import { buildStageTableExport, encodeStageTableCsv } from './domain/stage-table-export';
+} from './features/demand-control-room/domain/stage-insights';
+import { explainLearningCell, LearningColumn } from './features/demand-control-room/domain/forecast-models';
+import { exceptionSeverity, SimulationStore, viNumberFormat } from './features/demand-control-room/application/state/simulation.store';
+import { JourneyMapComponent } from './features/demand-control-room/ui/components/journey-map.component';
+import { MathFormulaComponent } from './features/demand-control-room/ui/components/math-formula.component';
+import { ComparisonReportComponent } from './features/demand-control-room/ui/components/comparison-report.component';
+import { SimulationReportComponent } from './features/demand-control-room/ui/components/simulation-report.component';
+import { buildStageTableExport, encodeStageTableCsv } from './features/demand-control-room/domain/stage-table-export';
 
 const AUDIT_ROW_LIMIT = 300;
 
@@ -805,4 +805,3 @@ function compareSkus(
 
   return a.id.localeCompare(b.id);
 }
-

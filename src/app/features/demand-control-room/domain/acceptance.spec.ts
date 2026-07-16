@@ -4,7 +4,7 @@ import { buildCycles, SimulationEngine } from './simulation-engine';
 import { applyPromoFactor, calculateFreeStock, calculateTrend, classifyAbcRows, classifySeasonPosition, classifyXyz, croston, detectPulse, isStockout, median, populationStdev, promoBaseline, safetyStock, stockoutBaseline } from './math';
 import { DailyRecord } from './models';
 import { buildPromoRegionSamples } from './promo-analysis';
-import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { testEngine } from '../data-access/testing/file-dataset.testing';
 
 function dailyRecord(index: number, baseDemand: number | null, baseSource: DailyRecord['baseSource']): DailyRecord {
   return {

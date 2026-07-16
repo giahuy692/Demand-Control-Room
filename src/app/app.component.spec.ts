@@ -1,8 +1,8 @@
 import '@angular/compiler';
 import { describe, expect, it } from 'vitest';
 import { AppComponent } from './app.component';
-import { SimulationEngine } from './domain/simulation-engine';
-import { SimulationStore } from './state/simulation.store';
+import { SimulationEngine } from './features/demand-control-room/domain/simulation-engine';
+import { SimulationStore } from './features/demand-control-room/application/state/simulation.store';
 import { fileDatasetService } from './features/demand-control-room/data-access/testing/file-dataset.testing';
 
 function createApp(): { app: AppComponent; store: SimulationStore } {

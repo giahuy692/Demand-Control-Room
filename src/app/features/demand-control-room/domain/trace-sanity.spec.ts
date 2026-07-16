@@ -3,7 +3,7 @@ import { SimulationEngine } from './simulation-engine';
 import { DEFAULT_POLICY } from './policy';
 import { StageNumber, StageSnapshot } from './models';
 import { buildStageTrace } from './stage-trace';
-import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { testEngine } from '../data-access/testing/file-dataset.testing';
 
 describe('stage-trace sanity', () => {
   const engine = testEngine();

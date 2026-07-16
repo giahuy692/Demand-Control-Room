@@ -1,6 +1,6 @@
 import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, HostListener, Injector, OnDestroy, computed, effect, inject, output, signal, viewChild } from '@angular/core';
-import { SimulationStore } from '../state/simulation.store';
-import { SkuPipelineState, StageNumber } from '../domain/models';
+import { SimulationStore } from '../../application/state/simulation.store';
+import { SkuPipelineState, StageNumber } from '../../domain/models';
 
 interface PhaseDef { id: string; code: number; name: string; desc: string; range: string; cssVar: string; stages: number; start: StageNumber; end: StageNumber; }
 interface LogEntry { id: number; time: string; html: string; }

@@ -1,6 +1,6 @@
 import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
-import { buildSimulationReport, IssueSeverity, ReportIssue, SimulationReport, StageReportSection } from '../domain/report-builder';
-import { SimulationStore, viNumberFormat } from '../state/simulation.store';
+import { buildSimulationReport, IssueSeverity, ReportIssue, SimulationReport, StageReportSection } from '../../domain/report-builder';
+import { SimulationStore, viNumberFormat } from '../../application/state/simulation.store';
 
 const SEVERITY_ORDER: Record<IssueSeverity, number> = { critical: 0, warn: 1, info: 2 };
 const SEVERITY_LABEL: Record<IssueSeverity, string> = { critical: 'Nghiêm trọng', warn: 'Cần chú ý', info: 'Ghi nhận' };

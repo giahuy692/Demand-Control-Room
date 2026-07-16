@@ -1,7 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { SimulationStore } from '../state/simulation.store';
-import { SkuPipelineState } from '../domain/models';
+import { SimulationStore } from '../../application/state/simulation.store';
+import { SkuPipelineState } from '../../domain/models';
 import { MathFormulaComponent } from './math-formula.component';
 
 @Component({

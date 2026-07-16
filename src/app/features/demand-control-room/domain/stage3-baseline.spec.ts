@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { SimulationEngine } from './simulation-engine';
 import { DEFAULT_POLICY } from './policy';
-import { fixtureDailyRecord } from '../features/demand-control-room/data-access/dto/dataset-fixture';
-import { realDatasetFromRows } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { fixtureDailyRecord } from '../data-access/dto/dataset-fixture';
+import { realDatasetFromRows } from '../data-access/testing/file-dataset.testing';
 
 function dateAfter(iso: string, offset: number): string {
   const date = new Date(`${iso}T00:00:00Z`);

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { SimulationDataset } from '../../../../domain/catalog';
-import { SimulationEngine } from '../../../../domain/simulation-engine';
+import { SimulationDataset } from '../../domain/catalog';
+import { SimulationEngine } from '../../domain/simulation-engine';
 import { DemandSimulationDatasetDto } from '../dto/demand-simulation-dataset.dto';
 import { fixtureDataset, fixtureProduct } from '../dto/dataset-fixture';
 import { DatasetDomainMapper } from '../mappers/dataset-domain.mapper';

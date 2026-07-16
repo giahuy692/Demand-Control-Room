@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { SimulationEngine } from '../domain/simulation-engine';
+import { SimulationEngine } from '../../domain/simulation-engine';
 import { SimulationStore } from './simulation.store';
-import { fileDatasetService } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { fileDatasetService } from '../../data-access/testing/file-dataset.testing';
 
 describe('SimulationStore synchronization invariants', () => {
   it('khởi tạo ở Chặng 1 nhưng chưa chạy snapshot nào', () => {

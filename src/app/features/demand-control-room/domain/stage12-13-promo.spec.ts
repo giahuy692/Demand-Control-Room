@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { StageSnapshot } from './models';
-import { testEngine } from '../features/demand-control-room/data-access/testing/file-dataset.testing';
+import { testEngine } from '../data-access/testing/file-dataset.testing';
 
 function runTo(stage: 12 | 13): StageSnapshot {
   const engine = testEngine();
