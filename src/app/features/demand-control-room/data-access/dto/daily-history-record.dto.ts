@@ -16,8 +16,13 @@ import { DataContractError } from '../../../../core/errors/data-contract-error.c
 export class DailyHistoryRecordDto {
   readonly sku!: string;
   readonly date!: string;
-  readonly openStock!: number;
-  readonly closeStock!: number;
+  /**
+   * `null` CHỈ hợp lệ trên dòng isValidationActual (bán sau ngày cắt stock của nguồn —
+   * SQL stock dừng ở ProcessingEndDate nên không có bằng chứng tồn; không được bịa 0).
+   * Dòng lịch sử bắt buộc có số tồn.
+   */
+  readonly openStock!: number | null;
+  readonly closeStock!: number | null;
   readonly sales!: number | null;
   readonly hasSalesRecord!: boolean;
   readonly isZeroSaleInferred!: boolean;
@@ -49,8 +54,8 @@ export class DailyHistoryRecordDto {
       sku: row.requiredString('sku'),
       date: row.isoDate('date'),
       // Tồn có thể ÂM hợp lệ (NEGATIVE_REVIEW ở scaffold) — chỉ yêu cầu hữu hạn.
-      openStock: row.requiredNumber('openStock'),
-      closeStock: row.requiredNumber('closeStock'),
+      openStock: row.nullableNumber('openStock'),
+      closeStock: row.nullableNumber('closeStock'),
       sales: row.nullableNumber('sales'),
       hasSalesRecord: row.requiredBoolean('hasSalesRecord'),
       isZeroSaleInferred: row.requiredBoolean('isZeroSaleInferred'),
@@ -76,6 +81,12 @@ export class DailyHistoryRecordDto {
     assertPairInvariant(record.hasInventoryMovement, record.inventoryNetMovement, path, 'hasInventoryMovement', 'inventoryNetMovement');
     if (record.isHistoryRecord && record.isValidationActual) {
       throw new DataContractError(path, 'một dòng không được vừa isHistoryRecord vừa isValidationActual.');
+    }
+    if ((record.openStock === null) !== (record.closeStock === null)) {
+      throw new DataContractError(path, 'openStock và closeStock phải cùng null hoặc cùng có số.');
+    }
+    if (record.openStock === null && !record.isValidationActual) {
+      throw new DataContractError(path, 'dòng lịch sử bắt buộc có bằng chứng tồn — chỉ dòng isValidationActual được phép openStock/closeStock=null.');
     }
     return record;
   }

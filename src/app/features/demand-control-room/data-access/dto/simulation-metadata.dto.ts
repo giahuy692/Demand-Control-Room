@@ -1,5 +1,6 @@
 import { JsonObjectReader } from '../../../../core/json/json-object-reader.class';
 import { DataQualityError } from '../../../../core/errors/data-quality-error.class';
+import { addDaysIso } from '../../../../core/date/iso-date.value-object';
 
 export type DatasetRunMode = 'HISTORICAL_VALIDATION' | 'PLANNING_SIMULATION';
 /**
@@ -12,7 +13,7 @@ export type DatasetRunMode = 'HISTORICAL_VALIDATION' | 'PLANNING_SIMULATION';
  *   bơm ngày SOURCE_UNKNOWN và đổi hoàn toàn ngữ nghĩa kiểm thử.
  */
 export type DatasetCalendarScaffold = 'GLOBAL_WINDOW' | 'PRESCAFFOLDED';
-export type DatasetStoreScopeStatus = 'FILTERED_SINGLE_STORE' | 'GLOBAL_POS_AGGREGATE';
+export type DatasetStoreScopeStatus = 'FILTERED_SINGLE_STORE' | 'GLOBAL_POS_AGGREGATE' | 'SYNTHETIC_FIXTURE';
 export type DatasetPortfolioMode = 'FULL_PORTFOLIO' | 'SELECTED_SKU_SIMULATION' | 'USE_APPROVED_SNAPSHOT';
 
 export class SimulationMetadataDto {
@@ -47,7 +48,7 @@ export class SimulationMetadataDto {
       historyYears: row.nonNegativeInteger('historyYears'),
       cycleLengthDays: row.nonNegativeInteger('cycleLengthDays'),
       storeCode: row.requiredString('storeCode'),
-      storeScopeStatus: row.literal('storeScopeStatus', ['FILTERED_SINGLE_STORE', 'GLOBAL_POS_AGGREGATE']),
+      storeScopeStatus: row.literal('storeScopeStatus', ['FILTERED_SINGLE_STORE', 'GLOBAL_POS_AGGREGATE', 'SYNTHETIC_FIXTURE']),
       portfolioMode: row.literal('portfolioMode', ['FULL_PORTFOLIO', 'SELECTED_SKU_SIMULATION', 'USE_APPROVED_SNAPSHOT']),
       extractIsTruncated: row.requiredBoolean('extractIsTruncated'),
       sourceWatermarks: { sales: watermarks.nullableIsoDate('sales'), stock: watermarks.nullableIsoDate('stock') },
@@ -65,6 +66,10 @@ export class SimulationMetadataDto {
       throw new DataQualityError('STOCK_RECONCILIATION', `gate=FAIL (${metadata.qualityGates.stockMismatchSkuCount} SKU lệch tồn) — không nạp dataset. Export lại nguồn trước khi chạy.`);
     }
     if (datasetKind === 'REAL') {
+      // §3.10 — dataset thật không được khai phạm vi cửa hàng dạng fixture tổng hợp.
+      if (metadata.storeScopeStatus === 'SYNTHETIC_FIXTURE') {
+        throw new DataQualityError('STORE_SCOPE', 'datasetKind=REAL không được khai storeScopeStatus=SYNTHETIC_FIXTURE.');
+      }
       // Dữ liệu thật là dòng thưa từ POS/ERP — bắt buộc GLOBAL_WINDOW để Chặng 1 scaffold theo RULE-01-001.
       if (metadata.calendarScaffold !== 'GLOBAL_WINDOW') {
         throw new DataQualityError('CALENDAR_SCAFFOLD', `datasetKind=REAL yêu cầu calendarScaffold=GLOBAL_WINDOW, nhận được ${metadata.calendarScaffold}.`);
@@ -77,9 +82,12 @@ export class SimulationMetadataDto {
       if (metadata.sourceWatermarks.sales === null || metadata.sourceWatermarks.stock === null) {
         throw new DataQualityError('SOURCE_WATERMARK', 'datasetKind=REAL phải khai báo watermark sales và stock.');
       }
+      // Lịch sử phải phủ trọn tới runDate−1. Stock của phiên backtest CỐ Ý dừng đúng
+      // ProcessingEndDate = runDate−1, nên điều kiện đúng là runDate ≤ watermark+1,
+      // không phải runDate ≤ watermark.
       const watermark = metadata.sourceWatermarks.sales < metadata.sourceWatermarks.stock ? metadata.sourceWatermarks.sales : metadata.sourceWatermarks.stock;
-      if (metadata.runDate > watermark) {
-        throw new DataQualityError('RUN_DATE_WATERMARK', `runDate=${metadata.runDate} vượt watermark nguồn ${watermark} — không được tự lùi RunDate, export lại nguồn hoặc chọn RunDate hợp lệ.`);
+      if (metadata.runDate > addDaysIso(watermark, 1)) {
+        throw new DataQualityError('RUN_DATE_WATERMARK', `runDate=${metadata.runDate} vượt watermark nguồn ${watermark} (lịch sử phải phủ tới runDate−1) — không được tự lùi RunDate, export lại nguồn hoặc chọn RunDate hợp lệ.`);
       }
     }
     return metadata;
