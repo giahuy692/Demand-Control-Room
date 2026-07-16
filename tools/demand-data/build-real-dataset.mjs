@@ -9,7 +9,7 @@
  *
  * Ghép theo (ProductCode, Date). Ngày có stock nhưng không có dòng bán: GIỮ QUYẾT ĐỊNH
  * NGHIỆP VỤ hiện hành sales=0 + isZeroSaleInferred=true (lấp nền Tầng 2 — xem
- * tools/convert-real-data.mjs cũ). Dòng bán SAU ngày cắt stock → isValidationActual,
+ * pipeline dữ liệu hiện hành). Dòng bán SAU ngày cắt stock → isValidationActual,
  * openStock/closeStock=null (không bịa tồn). Dòng bán TRƯỚC cửa sổ stock → loại, đếm log.
  */
 import { readDelimitedFile } from './csv-reader.mjs';
@@ -173,7 +173,7 @@ for (const row of dailyRecords) {
 }
 const stockReconciliation = mismatchSkus.size === 0 ? 'PASS' : 'FAIL';
 
-// ── 5. Products: giữ nguyên các default bucket-(c) của parseRealDataset cũ ────
+// ── 5. Products: gắn các default bucket-(c) bảo thủ cho trường ERP chưa cung cấp ────
 const products = [...skuMeta.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([sku, meta]) => {
   const price = meta.firstPrice ?? 0;
   const purchasePrice = price ? Math.round(price * 0.75) : 0;

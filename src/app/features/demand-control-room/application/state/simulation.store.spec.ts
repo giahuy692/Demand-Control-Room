@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SimulationEngine } from '../../domain/simulation-engine';
+import { emptyClassification } from '../../stages/stage-support';
 import { SimulationStore } from './simulation.store';
 import { fileDatasetService } from '../../data-access/testing/file-dataset.testing';
 
@@ -45,8 +46,8 @@ describe('SimulationStore synchronization invariants', () => {
   it('§8 LỆNH CODEX — stageLabel không gán "D" cho SKU chỉ đang POLICY_UNRESOLVED (ma trận chưa cấu hình), phải trả POLICY_PENDING', () => {
     const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     // Giả lập trực tiếp: một state có xyz='X' hợp lệ (không phải D) nhưng serviceLevel=null (ô ma trận chưa cấu hình).
-    const state: any = {
-      classification: { abc: 'B', xyz: 'X', classificationStatus: 'CLASSIFIED', dSubtype: null },
+    const state = {
+      classification: { ...emptyClassification(), abc: 'B' as const, xyz: 'X' as const, classificationStatus: 'CLASSIFIED' as const, dSubtype: null },
       serviceLevel: null,
     };
     expect(store.stageLabel(state, 8)).toBe('POLICY_PENDING');
@@ -54,8 +55,8 @@ describe('SimulationStore synchronization invariants', () => {
 
   it('§8 LỆNH CODEX — stageLabel trả D subtype khi xyz=D và abc không phải N/A', () => {
     const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
-    const state: any = {
-      classification: { abc: 'B', xyz: 'D', classificationStatus: 'CLASSIFIED', dSubtype: 'D_NEW' },
+    const state = {
+      classification: { ...emptyClassification(), abc: 'B' as const, xyz: 'D' as const, classificationStatus: 'CLASSIFIED' as const, dSubtype: 'D_NEW' as const },
       serviceLevel: null,
     };
     expect(store.stageLabel(state, 8)).toBe('D_NEW');

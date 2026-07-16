@@ -3,8 +3,7 @@ import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { SimulationStore } from '../application/state/simulation.store';
 import { fileDatasetService } from '../data-access/testing/file-dataset.testing';
-import { parseHachiBusinessRoles } from './catalog';
-import { StageNumber, StageSnapshot } from './models';
+import { SkuPipelineState, StageNumber, StageSnapshot } from './models';
 import { testEngine } from '../data-access/testing/file-dataset.testing';
 
 const SAMPLE_ROLES = JSON.stringify([
@@ -15,7 +14,7 @@ const SAMPLE_ROLES = JSON.stringify([
   { SKU: 'SKU-003', HachiBusinessRole: 'STANDARD' },
 ]);
 
-function runEngineTo(stage: StageNumber): Record<string, unknown> {
+function runEngineTo(stage: StageNumber): Record<string, SkuPipelineState> {
   const engine = testEngine();
   let snapshot: StageSnapshot | null = null;
   for (let number = 1; number <= stage; number++) snapshot = engine.run(number as StageNumber, snapshot, DEFAULT_POLICY);
@@ -28,19 +27,19 @@ describe('§7 LỆNH CODEX — HachiBusinessRole chỉ là benchmark, không đ�
     const withRoles = runEngineTo(11); // engine không có tham số nào nhận businessRole — chạy lại độc lập để đối chứng.
 
     for (const skuId of Object.keys(withoutRoles)) {
-      const a = (withoutRoles[skuId] as any).classification;
-      const b = (withRoles[skuId] as any).classification;
+      const a = withoutRoles[skuId].classification;
+      const b = withRoles[skuId].classification;
       expect(b).toEqual(a);
-      expect((withRoles[skuId] as any).seasonality).toBe((withoutRoles[skuId] as any).seasonality);
-      expect((withRoles[skuId] as any).forecast?.model).toBe((withoutRoles[skuId] as any).forecast?.model);
-      expect((withRoles[skuId] as any).forecast?.baseForecast).toEqual((withoutRoles[skuId] as any).forecast?.baseForecast);
+      expect(withRoles[skuId].seasonality).toBe(withoutRoles[skuId].seasonality);
+      expect(withRoles[skuId].forecast?.model).toBe(withoutRoles[skuId].forecast?.model);
+      expect(withRoles[skuId].forecast?.baseForecast).toEqual(withoutRoles[skuId].forecast?.baseForecast);
     }
   });
 
   it('#13b store: businessRoleComparison không làm lệch classification/seasonality/forecast của cùng snapshot', async () => {
     const storeA = new SimulationStore(new SimulationEngine(), fileDatasetService());
     const storeB = new SimulationStore(new SimulationEngine(), fileDatasetService());
-    (storeB as any).hachiBusinessRoles = parseHachiBusinessRoles(SAMPLE_ROLES);
+    storeB.setBusinessRoleBenchmark(SAMPLE_ROLES);
 
     await storeA.selectStage(11);
     await storeB.selectStage(11);
@@ -59,7 +58,7 @@ describe('§7 LỆNH CODEX — HachiBusinessRole chỉ là benchmark, không đ�
 
   it('#14 SEASONAL đối chiếu đúng kết quả mùa vụ Chặng 9 (ALIGNED khi confirmed, POSSIBLE_DIFFERENCE khi no-clear-season, INVESTIGATION_REQUIRED khi thiếu cấu trúc)', async () => {
     const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
-    (store as any).hachiBusinessRoles = parseHachiBusinessRoles(SAMPLE_ROLES);
+    store.setBusinessRoleBenchmark(SAMPLE_ROLES);
     await store.selectStage(9);
 
     const row = store.businessRoleComparison().find(item => item.skuId === 'SKU-002')!;
@@ -73,7 +72,7 @@ describe('§7 LỆNH CODEX — HachiBusinessRole chỉ là benchmark, không đ�
 
   it('#15 MARGIN/TRAFFIC → NOT_COMPARABLE_WITH_CURRENT_DATA khi thiếu landedCostPerUnit/dữ liệu giỏ hàng', async () => {
     const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
-    (store as any).hachiBusinessRoles = parseHachiBusinessRoles(SAMPLE_ROLES);
+    store.setBusinessRoleBenchmark(SAMPLE_ROLES);
     await store.selectStage(9);
 
     const marginRow = store.businessRoleComparison().find(item => item.skuId === 'SKU-006')!;
@@ -85,7 +84,7 @@ describe('§7 LỆNH CODEX — HachiBusinessRole chỉ là benchmark, không đ�
   it('#16 NEW không tự gán D nếu không có lifecycle evidence — dSubtype của SKU-011 giống hệt khi có/không businessRole; đối chiếu NEW báo NOT_COMPARABLE_WITH_CURRENT_DATA', async () => {
     const storeA = new SimulationStore(new SimulationEngine(), fileDatasetService());
     const storeB = new SimulationStore(new SimulationEngine(), fileDatasetService());
-    (storeB as any).hachiBusinessRoles = parseHachiBusinessRoles(SAMPLE_ROLES);
+    storeB.setBusinessRoleBenchmark(SAMPLE_ROLES);
     await storeA.selectStage(7);
     await storeB.selectStage(7);
 

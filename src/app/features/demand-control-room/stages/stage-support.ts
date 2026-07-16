@@ -1,16 +1,6 @@
-import { buildCalendarScaffold } from '../domain/calendar-scaffold';
-import { SimulationDataset } from '../domain/catalog';
-import { FORECAST_HORIZON, fitBaseForecast } from '../domain/forecast-models';
-import { applyPromoFactor, calculateAvailableStock, calculateBias, calendarWindowAbcMetrics, calculateFreeStock, calculateNrmse, calculateRmse, calculateTrend, calculateWape, classifyPromoRegionPolicy, classifyXyz, fixedCalendarWindow, isStockout, mean, median, meetsSeasonRepeatThreshold, requireObservedSales, stripStandingPromoCodes, trailingLockedRun } from '../domain/math';
-import { AbcClass, BalanceStatus, Classification, CycleRecord, CycleStatus, DailyRecord, DSubtype, ExceptionResolutionOption, ExceptionResolutionType, ExceptionTask, LotReliability, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, XyzClass } from '../domain/models';
-import { chooseSafetyStock } from '../domain/safety-stock';
-import { applySupplierConsolidation, buildOrderPlan } from '../domain/order-plan';
-import { allocateBudget } from '../domain/budget-allocation';
-import { applyPurchaseOrderGrouping } from '../domain/purchase-orders';
-import { CAPITAL_PRIORITIES, DEFAULT_POLICY, SERVICE_LEVELS } from '../domain/policy';
-import { buildPromoRegionSamples } from '../domain/promo-analysis';
-import { demandRiskInputs } from '../domain/demand-risk';
-
+import { median, requireObservedSales, trailingLockedRun } from '../domain/math';
+import { BalanceStatus, Classification, CycleRecord, CycleStatus, DailyRecord, DSubtype, ExceptionResolutionOption, ExceptionResolutionType, ExceptionTask, LotReliability, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot } from '../domain/models';
+import { DEFAULT_POLICY } from '../domain/policy';
 
 export function emptyClassification(): Classification {
   return {
@@ -219,10 +209,6 @@ export function lockedCycleQualityBreakdown(states: Record<string, SkuPipelineSt
   return { observed, adjusted, fallback };
 }
 
-
-
-
-
 /**
  * RULE-03-003 cấp 3 — cùng vị trí mùa vụ năm trước (dịch lùi đúng một "năm" theo lịch chu kỳ cố
  * định của phiên: 24 chu kỳ). Chỉ dùng khi cấp 1 (theo thời gian, cùng SKU) đã 'insufficient'.
@@ -240,10 +226,6 @@ export function seasonalFallbackSelection(source: DailyRecord[], index: number, 
   if (selection.status === 'insufficient') return null;
   return { ...selection, reason: `[Cấp 3 · mùa vụ năm trước, lùi ${yearOffset} ngày] ${selection.reason}` };
 }
-
-
-
-
 
 /** RULE-05-003 Tầng 2 — mức đại diện chu kỳ = median các ngày nền hợp lệ SẴN CÓ trong chính chu kỳ trước khi lấp (không lấy từ ngày vừa lấp). */
 export function tier2RepresentativeFill(cycleRows: DailyRecord[]): { filled: DailyRecord[]; used: boolean } {
@@ -317,7 +299,7 @@ export function fillAndBuildCycles(records: DailyRecord[], cycleLength: number, 
       locked, emptyCycle,
       cleanDays, stockoutLiftedDays, promoNormalizedDays, technicalFillDays,
       unresolvedDays, sourceRecordDays, fallbackDays, tier2Filled,
-      status: cycleStatus(sourceRecordDays, locked, emptyCycle, cleanDays, fallbackDays, tier2Filled, cycleLength),
+      status: cycleStatus(sourceRecordDays, locked, emptyCycle, cleanDays, fallbackDays, cycleLength),
       seasonRound: Math.floor((cycleIndex - 1) / 24) + 1, seasonPosition: ((cycleIndex - 1) % 24) + 1,
     });
   }
@@ -329,7 +311,7 @@ export function fillAndBuildCycles(records: DailyRecord[], cycleLength: number, 
  * phát hiện trong kiến trúc hiện tại (không có ngày mở/ngưng bán SKU, không có cờ lỗi dữ liệu
  * riêng) nên KHÔNG BAO GIỜ được trả về ở đây — ghi nhận tường minh thay vì giả vờ có khả năng này.
  */
-export function cycleStatus(sourceRecordDays: number, locked: boolean, emptyCycle: boolean, cleanDays: number, fallbackDays: number, tier2Filled: boolean, cycleLength: number): CycleStatus {
+export function cycleStatus(sourceRecordDays: number, locked: boolean, emptyCycle: boolean, cleanDays: number, fallbackDays: number, cycleLength: number): CycleStatus {
   if (sourceRecordDays === 0) return 'NO_SOURCE_RECORD';
   if (locked) {
     if (fallbackDays > 0) return 'LOCKED_FALLBACK';
@@ -419,12 +401,8 @@ export function buildCycleException(skuId: string, cycle: CycleRecord, policy: S
   };
 }
 
-
-
 export const ABC_WINDOW_SIZE = 24;
 export const ABC_MINIMUM_LOCKED_CYCLES = 6;
-
-
 
 /**
  * RULE-07-001 — phân biệt lý do gộp trong nhóm D. D_MANUAL_PLAN/D_SIMILAR_SKU không có nguồn dữ
@@ -444,20 +422,6 @@ export function classifyDSubtype(state: SkuPipelineState): { dSubtype: DSubtype;
   return { dSubtype: 'D_SHORT_HISTORY', reason: `Chỉ ${state.cycles.length} chu kỳ khóa trong dữ liệu đã xác nhận đầy đủ (không bị cắt) — tương đương D_TRUE_SHORT_HISTORY của tài liệu.` };
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 export function dateAfter(iso: string, offsetDays: number): string {
   const date = new Date(`${iso}T00:00:00Z`);
   date.setUTCDate(date.getUTCDate() + offsetDays);
@@ -469,16 +433,6 @@ export const EXCLUDED_LOT_REASON: Record<Exclude<LotReliability, 'shipped-confir
   overdue: 'Đã trễ so với ETA — giữ để kiểm toán nhưng không cộng vào hàng tự do.',
   cancelled: 'Đã bị hủy — loại khỏi hàng tự do.',
 };
-
-
-
-
-
-
-
-
-
-
 
 /** Chặng 19 §8 — bảng nguyên nhân theo thứ tự ưu tiên; hàm trả về true nếu điều kiện của dòng khớp. */
 interface CauseRow { id: string; label: string; proposal: string; test: (ctx: PostAuditContext) => boolean }

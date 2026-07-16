@@ -78,7 +78,7 @@ function clampNonNegative(value: number): number {
   return Math.max(0, value);
 }
 
-export function testMetrics(rows: LearningRow[], trainSize: number): Pick<ModelLearning, 'rmse' | 'nrmse' | 'wape' | 'bias' | 'hitRate' | 'missedPulses' | 'falsePulses' | 'wapePositive'> {
+export function testMetrics(rows: LearningRow[]): Pick<ModelLearning, 'rmse' | 'nrmse' | 'wape' | 'bias' | 'hitRate' | 'missedPulses' | 'falsePulses' | 'wapePositive'> {
   const testRows = rows.filter(row => row.phase === 'test');
   // Chỉ tiêu nhịp đếm trên MỌI chu kỳ TEST: có nhu cầu mà mô hình không có dự báo dương vẫn là missed.
   const actualPulseCount = testRows.filter(row => row.actual > 0).length;
@@ -335,7 +335,7 @@ export function buildLearning(
   model: ForecastResult['model'], params: Record<string, number>, run: ModelRun,
   trainSize: number, testSize: number, note: string,
 ): ModelLearning {
-  const metrics = testMetrics(run.rows, trainSize);
+  const metrics = testMetrics(run.rows);
   const labels: Record<string, [string | null, string | null, string | null]> = {
     SES: ['L · mức nền', null, null],
     Holt: ['L · mức nền', 'T · xu hướng', null],

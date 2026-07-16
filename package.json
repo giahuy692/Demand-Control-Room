@@ -7,7 +7,6 @@
     "build": "ng build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "convert:real-data": "node tools/convert-real-data.mjs Sql/sales-history.csv Sql/stock-history.csv src/assets/demand-planning-real.json 100",
     "data:build:mock": "node tools/demand-data/build-mock-dataset.mjs",
     "data:build:real": "node tools/demand-data/build-real-dataset.mjs",
     "data:validate": "node tools/demand-data/validate-dataset.mjs",

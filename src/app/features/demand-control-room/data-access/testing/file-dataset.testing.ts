@@ -44,7 +44,7 @@ export function testEngine(): SimulationEngine {
 
 /**
  * Dataset REAL nhỏ dựng từ mảng dòng ngày (dạng object hợp đồng V1) — thay cho
- * parseRealDataset(chuỗi CSV) trong các spec Chặng 1–4: đi qua đúng DTO + mapper.
+ * Các spec Chặng 1–4 vẫn đi qua đúng DTO + mapper production, không dựng domain object tắt.
  */
 export function realDatasetFromRows(rows: Record<string, unknown>[], metadataOverrides: Record<string, unknown> = {}): SimulationDataset {
   const skus = [...new Set(rows.map(row => String(row['sku'])))].sort();

@@ -21,8 +21,7 @@ export class DatasetDomainMapper {
     let minDate = '';
     let maxDate = '';
     for (const record of dto.dailyRecords) {
-      // Parity với parseRealDataset cũ: opening-anchor chỉ thiết lập tồn trước khung đọc,
-      // không phải ngày lịch sử — loại ngay tại cửa nạp.
+      // Opening anchor chỉ thiết lập tồn trước khung đọc, không phải ngày lịch sử — loại tại cửa nạp.
       if (record.isOpeningAnchor) continue;
       (dailyBySku[record.sku] ??= []).push(toDailyRecord(record));
       if (!minDate || record.date < minDate) minDate = record.date;

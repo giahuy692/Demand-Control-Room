@@ -668,40 +668,6 @@ export interface DailySourceRecordV2 {
   readonly isValidationActual: boolean;
 }
 
-/**
- * RESULT SET 3 (`ExtractMetadata`) của `Sql/demand-planing.sql` (demand-planing-v6-pos-real-backtest).
- * Optional/ingest riêng (asset JSON) — vắng mặt thì giữ mặc định bảo thủ hiện có, KHÔNG suy diễn ngược
- * từ dữ liệu daily. Khi CÓ mặt, `parseRealDataset` PHẢI chặn nạp dữ liệu nếu `stockReconciliationGate`
- * khác `'PASS'` — không được fallback âm thầm sang dữ liệu giả.
- */
-export interface ExtractMetadata {
-  readonly extractId: string;
-  readonly queryVersion: string;
-  readonly dataContractVersion: string;
-  readonly runMode: string;
-  readonly runDate: string;
-  readonly historyCandidateStartDate: string;
-  readonly processingStartDate: string;
-  readonly processingEndDate: string;
-  readonly referenceReadStartDate: string;
-  readonly actualValidationEndDate: string;
-  readonly databaseWatermarkDate: string;
-  readonly cycleLengthDays: number;
-  readonly fullCycleCount: number;
-  readonly droppedLeadingDays: number;
-  readonly storeCode: string;
-  readonly selectedSkuCount: number;
-  readonly portfolioMode: PortfolioMode;
-  readonly extractIsTruncated: boolean;
-  readonly stockAnchorAssumption: string;
-  /** Gate đối soát tồn — `'PASS'` là điều kiện BẮT BUỘC để dữ liệu được nạp vào mô phỏng. */
-  readonly stockReconciliationGate: 'PASS' | 'FAIL';
-  readonly stockMismatchSkuCount: number;
-  readonly dailySourceRecordCount: number;
-  readonly promotionIntervalCount: number;
-  readonly generatedAt: string;
-}
-
 export interface StageSnapshot {
   stage: StageNumber;
   completedAt: string;

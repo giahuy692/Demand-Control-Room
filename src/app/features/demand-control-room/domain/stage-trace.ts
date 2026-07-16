@@ -1,7 +1,7 @@
 import { DailyRecord, ForecastResult, SimulationPolicy, SkuPipelineState, StageNumber } from './models';
 import { calculateTrend, mean, median, meetsSeasonRepeatThreshold, populationStdev, trailingLockedRun } from './math';
 import { buildPromoRegionSamples } from './promo-analysis';
-import { buildForecastLearning, ModelLearning, SEASON_LENGTH, fitSes, fitHolt, fitHoltWinters, fitCroston, runPulse, runSeasonalNaive, splitSizes, testMetrics, lockedSeriesAll } from './forecast-models';
+import { buildForecastLearning, ModelLearning, SEASON_LENGTH, fitSes, fitHolt, fitHoltWinters, runSeasonalNaive, splitSizes, testMetrics, lockedSeriesAll } from './forecast-models';
 import { STAGE_TRACE_CONTRACTS, StageTraceContract } from './stage-trace-contracts';
 export interface TraceValue { label: string; value: string }
 export interface TraceCheck { label: string; actual: string; passed: boolean }
@@ -1018,7 +1018,7 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
     // 1. SES
     try {
       const sesFit = fitSes(values, cTrain);
-      const sesW = testMetrics(sesFit.run.rows, cTrain).wape;
+      const sesW = testMetrics(sesFit.run.rows).wape;
       candidatesList.push({ name: 'San bằng mũ đơn (SES)', wape: sesW });
     } catch (e) {}
 
@@ -1026,7 +1026,7 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
     if (values.length >= 3) {
       try {
         const holtFit = fitHolt(values, cTrain);
-        const holtW = testMetrics(holtFit.run.rows, cTrain).wape;
+        const holtW = testMetrics(holtFit.run.rows).wape;
         candidatesList.push({ name: 'Holt (Có xu hướng)', wape: holtW });
       } catch (e) {}
     }
@@ -1036,7 +1036,7 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
       try {
         const hwFit = fitHoltWinters(values, cTrain);
         if (hwFit) {
-          const hwW = testMetrics(hwFit.run.rows, cTrain).wape;
+          const hwW = testMetrics(hwFit.run.rows).wape;
           candidatesList.push({ name: 'Holt-Winters (Có mùa vụ)', wape: hwW });
         }
       } catch (e) {}
@@ -1046,7 +1046,7 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
     if (forecast.pStar !== null) {
       try {
         const naive = runSeasonalNaive(values, forecast.pStar, cTrain);
-        const naiveW = testMetrics(naive.rows, cTrain).wape;
+        const naiveW = testMetrics(naive.rows).wape;
         candidatesList.push({ name: `Ngây thơ theo mùa (Seasonal-naïve, p*=${forecast.pStar})`, wape: naiveW });
       } catch (e) {}
     }
@@ -1218,7 +1218,7 @@ function stage12(state: Readonly<SkuPipelineState>, focus: DailyRecord | null): 
     },
     {
       title: 'B5 · Gom các K hợp lệ của cùng nhóm CTKM',
-      detail: 'Nhóm mô phỏng đang xét cùng SKU/nơi bán/loại MEMBER; không gom K của chương trình khác cơ chế.',
+      detail: 'Chỉ gom các vùng cùng SKU/nơi bán; mã CTKM là bằng chứng để người vận hành xác nhận cùng cơ chế, không tự đồng nhất mọi chương trình.',
       substitution: `K_history = [${list(sortedK, 2)}]`,
     },
     {
@@ -1292,8 +1292,8 @@ function stage13(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
       },
       {
         title: 'Ghép kế hoạch với đúng nhóm CTKM tương tự',
-        detail: 'Mã/loại CTKM tương lai phải cùng nhóm áp dụng với hệ số lịch sử. Dữ liệu mô phỏng dùng nhóm MEMBER cho cả lịch sử và tương lai.',
-        substitution: samplePlan ? `${samplePlan.code} ↔ nhóm hệ số MEMBER → ${samplePlan.code === 'MEMBER' ? 'KHỚP' : 'CẦN DUYỆT'}` : 'Không có CTKM xác nhận → không cần ghép',
+        detail: 'Mã/loại CTKM tương lai phải cùng cơ chế với các vùng lịch sử dùng để học K; hệ thống không suy diễn quan hệ tương đương chỉ từ tên mã.',
+        substitution: samplePlan ? `${samplePlan.code} → cần bằng chứng cùng cơ chế trước khi coi hệ số lịch sử là tương thích` : 'Không có CTKM xác nhận → không cần ghép',
       },
       {
         title: 'Tách phần nền CTKM và tính dự báo cuối từng chu kỳ',
@@ -1448,7 +1448,7 @@ function stage15(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): S
   };
 }
 
-function stage16(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
+function stage16(state: Readonly<SkuPipelineState>): StageTrace {
   const p = state.orderPlan;
   return {
     heading: 'Tính số đặt trước ngân sách và làm tròn theo quy cách mua',
@@ -1571,7 +1571,7 @@ export function buildStageTrace(stage: StageNumber, state: Readonly<SkuPipelineS
     case 13: trace = stage13(state, policy); break;
     case 14: trace = stage14(state); break;
     case 15: trace = stage15(state, policy); break;
-    case 16: trace = stage16(state, policy); break;
+    case 16: trace = stage16(state); break;
     case 17: trace = stage17(state, policy); break;
     case 18: trace = stage18(state); break;
     case 19: trace = stage19(state); break;

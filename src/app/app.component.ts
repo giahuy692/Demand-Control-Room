@@ -696,8 +696,8 @@ function compareSkus(
   if (!aState) return 1;
   if (!bState) return -1;
 
-  let valA: any = 0;
-  let valB: any = 0;
+  let valA = 0;
+  let valB = 0;
 
   switch (stage) {
     case 1:

@@ -44,7 +44,8 @@ npm run test                 # vitest run — full suite, must be green
 npm run test:watch           # vitest watch mode
 npx vitest run <path>        # run a single spec file
 npx vitest run -t "<name>"   # run a single test by name
-npm run convert:real-data    # regenerate src/assets/demand-planning-real.json from Sql/sales-history.csv + Sql/stock-history.csv
+npm run data:build:real      # build runtime real.dataset.json from the canonical CSV inputs
+npm run data:validate        # validate both runtime dataset assets
 ```
 
 There is no separate lint script; `ng build` (strict TS + strict Angular templates, see `tsconfig.json`) is the correctness gate along with vitest.
@@ -59,15 +60,15 @@ Non-trivial stage logic that isn't simple glue lives in dedicated domain modules
 - `demand-risk.ts`, `promo-analysis.ts`, `forecast-models.ts` — stages 3–13 (cleaning, classification, forecasting)
 - `safety-stock.ts` (stage 15), `order-plan.ts` (stage 16), `budget-allocation.ts` (stage 17), `purchase-orders.ts` (stage 18 grouping)
 
-`runStageN` in `simulation-engine.ts` should stay a thin caller into these modules, not grow business logic inline.
+`simulation-engine.ts` is only a facade over the stage registry/orchestrator. Each `runStageN` implementation lives in `src/app/features/demand-control-room/stages/stage-NN-*`.
 
 ### State flow (UI)
 
-`src/app/state/simulation.store.ts` (`SimulationStore`, Angular Signals) owns the current dataset, policy, and the map of per-stage snapshots; it builds the `StageViewModel` (inputs/calculations/outputs shown per stage) consumed by `app.component.ts`/`.html`. `src/app/domain/stage-trace.ts` (~1500 lines) builds the human-readable, formula-substituted "trace" shown in the audit panel for a given stage + SKU (+ optional focused date/point) — this is what operators actually read, so wording changes matter as much as the math. `src/app/domain/report-builder.ts` scans all stage snapshots for anomalies (`STAGE_CHECKERS[stage]`) and feeds the "Báo cáo mô phỏng" report view (`src/app/ui/simulation-report.component.*`).
+`src/app/features/demand-control-room/application/state/simulation.store.ts` (`SimulationStore`, Angular Signals) owns the current session, policy, and per-stage snapshots. Domain trace/report builders and UI components live under the same feature folder.
 
 ### Data sourcing — the bucket (a/b/c) rule
 
-`src/app/domain/catalog.ts` has two producers of `SkuDefinition[]`: `buildCatalog()` (synthetic mock catalog for dev/tests) and `parseRealDataset()` (parses the real ERP export). **The real ERP export is missing many columns the solution document assumes exist** — see `Sql/demand-planing-data-source-notes.md` §9.2 for the authoritative list (e.g. `supplier`, `inboundPlan`, `leadTimeHistoryDays`, MOQ-related fields, `purchaseTermsComplete`, `futurePromotions`, `periodBudget`). Every field is one of:
+Mock and real both load from `src/assets/demand-planning/datasets/*.dataset.json` through the same repository → runtime-validating DTO classes → mapper → domain session. CSV is build-time input only. **The real ERP export is missing many columns the solution document assumes exist** — see `Sql/demand-planing-data-source-notes.md` §9.2 for the authoritative list. Every field is one of:
 - **(a)** a real ERP column,
 - **(b)** computed/derived from other real fields, or
 - **(c)** a policy-level default used only because no source data exists.

@@ -1,18 +1,7 @@
-import { buildCalendarScaffold } from '../../domain/calendar-scaffold';
-import { SimulationDataset } from '../../domain/catalog';
-import { FORECAST_HORIZON, fitBaseForecast } from '../../domain/forecast-models';
-import { applyPromoFactor, calculateAvailableStock, calculateBias, calendarWindowAbcMetrics, calculateFreeStock, calculateNrmse, calculateRmse, calculateTrend, calculateWape, classifyPromoRegionPolicy, classifyXyz, fixedCalendarWindow, isStockout, mean, median, meetsSeasonRepeatThreshold, requireObservedSales, stripStandingPromoCodes, trailingLockedRun } from '../../domain/math';
-import { AbcClass, BalanceStatus, Classification, CycleRecord, CycleStatus, DailyRecord, DSubtype, ExceptionResolutionOption, ExceptionResolutionType, ExceptionTask, LotReliability, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, XyzClass } from '../../domain/models';
-import { chooseSafetyStock } from '../../domain/safety-stock';
-import { applySupplierConsolidation, buildOrderPlan } from '../../domain/order-plan';
-import { allocateBudget } from '../../domain/budget-allocation';
-import { applyPurchaseOrderGrouping } from '../../domain/purchase-orders';
-import { CAPITAL_PRIORITIES, DEFAULT_POLICY, SERVICE_LEVELS } from '../../domain/policy';
-import { buildPromoRegionSamples } from '../../domain/promo-analysis';
-import { demandRiskInputs } from '../../domain/demand-risk';
+import { classifyPromoRegionPolicy } from '../../domain/math';
+import { ExceptionTask, SimulationPolicy, StageSnapshot } from '../../domain/models';
 
-
-import { emptyClassification, cloneStates, operationalStatusNote, createSnapshot, isObservedClean, collectCleanSide, selectReferences, qualifySelection, applyReferenceAudit, buildPromoRegions, resetDailyRecord, createInitialState, futureActualDemand, lockedValues, lockedCycleQualityBreakdown, seasonalFallbackSelection, tier2RepresentativeFill, fillAndBuildCycles, cycleStatus, buildCycles, buildCycleException, classifyDSubtype, dateAfter } from '../stage-support';
+import { applyReferenceAudit, buildPromoRegions, cloneStates, createSnapshot, qualifySelection, selectReferences } from '../stage-support';
 
 export function runStage4(previous: StageSnapshot, policy: SimulationPolicy): StageSnapshot {
   const states = cloneStates(previous);

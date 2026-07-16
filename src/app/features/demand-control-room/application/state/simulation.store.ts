@@ -189,7 +189,7 @@ export class SimulationStore {
   readonly dataSourceLabel = computed(() => this.dataSource() === 'real' ? 'Dữ liệu thật' : 'Dữ liệu giả');
   readonly activeStage = signal<StageNumber>(1);
   readonly completedStage = signal(0);
-  readonly selectedSkuId = signal('SKU-001');
+  readonly selectedSkuId = signal('');
   readonly snapshots = signal<Partial<Record<StageNumber, StageSnapshot>>>({});
   readonly error = signal<string | null>(null);
   readonly isRunning = signal(false);
@@ -249,6 +249,11 @@ export class SimulationStore {
       return { skuId: state.definition.id, skuName: state.definition.name, hachiRole: role, ...comparison };
     });
   });
+
+  /** Nạp benchmark đối chiếu; benchmark không bao giờ được truyền vào engine hoặc stage processor. */
+  setBusinessRoleBenchmark(raw: string): void {
+    this.hachiBusinessRoles = parseHachiBusinessRoles(raw);
+  }
 
   constructor(
     private readonly engine: SimulationEngine,
@@ -454,7 +459,7 @@ export class SimulationStore {
     const session = await this.datasetService.load(source);
     if (source === 'real' && !Object.keys(this.hachiBusinessRoles).length) {
       // §7 LỆNH CODEX — benchmark HachiBusinessRole, optional, KHÔNG thuộc pipeline dataset.
-      this.hachiBusinessRoles = parseHachiBusinessRoles(await this.fetchTextOptional('assets/hachi-business-roles.json'));
+      this.setBusinessRoleBenchmark(await this.fetchTextOptional('assets/hachi-business-roles.json'));
     }
     return session;
   }

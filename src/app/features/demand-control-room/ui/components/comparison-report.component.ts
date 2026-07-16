@@ -15,7 +15,7 @@ export class ComparisonReportComponent {
   readonly Math = Math;
   readonly store = inject(SimulationStore);
   readonly activeTab = signal<'kpis' | 'sku' | 'guide'>('kpis');
-  readonly selectedSkuId = signal<string>('SKU-001');
+  readonly selectedSkuId = signal<string>(this.store.selectedSkuId());
 
   readonly realStates = computed(() => this.store.realFinalState() ?? {});
   readonly mockStates = computed(() => this.store.mockFinalState() ?? {});
