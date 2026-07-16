@@ -1,0 +1,117 @@
+/**
+ * Fixture builder DÙNG CHO TEST — tạo payload JSON-thuần (plain object, không class)
+ * hợp lệ tối thiểu theo DEMAND-SIMULATION-DATASET-V1 rồi cho từng test bẻ gãy đúng
+ * một điều kiện. Không dùng trong production code.
+ */
+
+export function fixtureProduct(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 'SKU-T01',
+    name: 'Sản phẩm kiểm thử',
+    type: 'AX-stable',
+    price: 100000,
+    cycles: 2,
+    description: 'fixture',
+    category: 'Test',
+    supplier: 'NCC-01',
+    inboundPlan: [],
+    commitments: [],
+    futurePromotions: [],
+    leadTimeHistoryDays: [],
+    maxStock: 100,
+    warehouseCapacity: 120,
+    shelfLifeDays: null,
+    purchasePrice: 75000,
+    moq: 1,
+    purchaseTermsComplete: true,
+    actualDemand: [],
+    actualEndingStock: 0,
+    actualReceiptDelayDays: [],
+    actualBudgetUsed: 0,
+    heldStock: 0,
+    damagedStock: 0,
+    blockedStock: 0,
+    unsellableStock: 0,
+    displayMinimumStock: 0,
+    unitsPerCarton: 1,
+    orderStep: 1,
+    supplierMinOrderValue: null,
+    receivingLocation: 'KGV',
+    currency: 'VND',
+    landedCostPerUnit: null,
+    coreOrStrategicRole: 'normal',
+    obsolescenceRiskRank: 0,
+    ...overrides,
+  };
+}
+
+export function fixtureDailyRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sku: 'SKU-T01',
+    date: '2026-05-01',
+    openStock: 10,
+    closeStock: 8,
+    sales: 2,
+    hasSalesRecord: true,
+    isZeroSaleInferred: false,
+    returnQty: null,
+    hasReturnRecord: false,
+    inventoryNetMovement: null,
+    hasInventoryMovement: false,
+    totalStockDelta: -2,
+    receiptHour: null,
+    hasReceiptRecord: false,
+    receiptTimeSource: null,
+    promoCode: null,
+    promoName: null,
+    price: 100000,
+    productName: 'Sản phẩm kiểm thử',
+    isOpeningAnchor: false,
+    isReferenceOnly: false,
+    isHistoryRecord: true,
+    isValidationActual: false,
+    ...overrides,
+  };
+}
+
+export function fixtureDataset(overrides: {
+  datasetKind?: 'MOCK' | 'REAL';
+  metadata?: Record<string, unknown>;
+  products?: Record<string, unknown>[];
+  dailyRecords?: Record<string, unknown>[];
+  promotionIntervals?: Record<string, unknown>[];
+  root?: Record<string, unknown>;
+} = {}): Record<string, unknown> {
+  const products = overrides.products ?? [fixtureProduct()];
+  const dailyRecords = overrides.dailyRecords ?? [
+    fixtureDailyRecord({ date: '2026-05-01' }),
+    fixtureDailyRecord({ date: '2026-05-02', sales: 0, totalStockDelta: 0, openStock: 8, closeStock: 8 }),
+  ];
+  const datasetKind = overrides.datasetKind ?? 'MOCK';
+  return {
+    contractVersion: 'DEMAND-SIMULATION-DATASET-V1',
+    datasetId: 'fixture-2026-06-01',
+    datasetKind,
+    generatedAt: '2026-07-16T00:00:00+07:00',
+    metadata: {
+      runMode: datasetKind === 'REAL' ? 'HISTORICAL_VALIDATION' : 'PLANNING_SIMULATION',
+      runDate: '2026-06-01',
+      calendarScaffold: datasetKind === 'REAL' ? 'GLOBAL_WINDOW' : 'PRESCAFFOLDED',
+      historyYears: 3,
+      cycleLengthDays: 15,
+      storeCode: 'GLOBAL_POS',
+      storeScopeStatus: 'GLOBAL_POS_AGGREGATE',
+      portfolioMode: 'SELECTED_SKU_SIMULATION',
+      extractIsTruncated: true,
+      sourceWatermarks: datasetKind === 'REAL' ? { sales: '2026-06-15', stock: '2026-06-15' } : { sales: null, stock: null },
+      qualityGates: { stockReconciliation: 'PASS', stockMismatchSkuCount: 0 },
+      rowCounts: { dailyRecords: dailyRecords.length, products: products.length },
+      policyOverrides: {},
+      ...overrides.metadata,
+    },
+    products,
+    dailyRecords,
+    promotionIntervals: overrides.promotionIntervals ?? [],
+    ...overrides.root,
+  };
+}

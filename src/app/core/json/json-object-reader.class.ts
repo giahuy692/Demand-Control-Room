@@ -128,6 +128,11 @@ export class JsonObjectReader {
     return JsonObjectReader.read(this.present(key), this.at(key));
   }
 
+  /** Giá trị thô `unknown` của một trường bắt buộc — dùng để chuyển tiếp cho DTO factory con. */
+  rawValue(key: string): unknown {
+    return this.present(key);
+  }
+
   /** Object tự do (vd. policyOverrides) — trả về bản sao key/unknown để caller tự validate từng khóa. */
   rawObject(key: string): Readonly<Record<string, unknown>> {
     const raw = this.present(key);
