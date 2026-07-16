@@ -1,7 +1,7 @@
 import { buildForecastLearning, ForecastFit } from './forecast-models';
 import { mean, meetsSeasonRepeatThreshold, trailingLockedRun } from './math';
-import { SafetyStockMethod, SafetyStockSourceTier, SkuPipelineState } from './models';
-import { CAPITAL_PRIORITIES, SERVICE_LEVELS } from './policy';
+import { SafetyStockMethod, SafetyStockSourceTier, SimulationPolicy, SkuPipelineState } from './models';
+import { DEFAULT_POLICY } from './policy';
 import { buildPromoRegionSamples } from './promo-analysis';
 
 /**
@@ -46,7 +46,7 @@ export interface XyzBoardRow {
 
 const XYZ_ORDER: Record<string, number> = { X: 0, Y: 1, Z: 2, D: 3, BLOCKED: 4 };
 
-export function buildXyzBoard(states: States): XyzBoardRow[] {
+export function buildXyzBoard(states: States, policy: SimulationPolicy = DEFAULT_POLICY): XyzBoardRow[] {
   return Object.values(states)
     .map(state => {
       const { xyz, n, m, adi, positiveMean, positiveStdev, cv, cv2, classificationStatus, classificationBlockReason } = state.classification;
@@ -55,8 +55,8 @@ export function buildXyzBoard(states: States): XyzBoardRow[] {
       const rule = classificationStatus === 'CLASSIFICATION_BLOCKED' ? `CHẶN (${classificationBlockReason})`
         : classificationStatus === 'NO_POSITIVE_DEMAND_REVIEW' ? 'NO_POSITIVE_DEMAND_REVIEW (m = 0)'
         : n < 6 ? 'n < 6'
-        : (adi ?? 0) > 1.32 ? 'ADI > 1,32'
-        : (cv2 ?? Infinity) <= 0.49 ? 'CV² ≤ 0,49' : 'CV² > 0,49';
+        : (adi ?? 0) > policy.xyzThresholds.zMinAdi ? `ADI > ${policy.xyzThresholds.zMinAdi}`
+        : (cv2 ?? Infinity) <= policy.xyzThresholds.xMaxCv2 ? `CV² ≤ ${policy.xyzThresholds.xMaxCv2}` : `CV² > ${policy.xyzThresholds.xMaxCv2}`;
       return { id: state.definition.id, name: state.definition.name, xyz, n, m, adi, positiveMean, positiveStdev, cv, cv2, rule };
     })
     .sort((a, b) => XYZ_ORDER[a.xyz ?? 'BLOCKED'] - XYZ_ORDER[b.xyz ?? 'BLOCKED'] || (a.adi ?? 99) - (b.adi ?? 99) || a.id.localeCompare(b.id));
@@ -72,7 +72,7 @@ export interface PolicyMatrix {
   totalInMatrix: number;
 }
 
-export function buildPolicyMatrix(states: States, selectedId: string): PolicyMatrix {
+export function buildPolicyMatrix(states: States, selectedId: string, policy: SimulationPolicy = DEFAULT_POLICY): PolicyMatrix {
   const counts = new Map<string, number>();
   let exceptions = 0;
   let selectedCell = '';
@@ -88,7 +88,7 @@ export function buildPolicyMatrix(states: States, selectedId: string): PolicyMat
     abc,
     cells: (['X', 'Y', 'Z'] as const).map(xyz => {
       const cell = `${abc}${xyz}`;
-      return { cell, serviceLevel: SERVICE_LEVELS[cell] ?? null, capitalPriority: CAPITAL_PRIORITIES[cell] ?? 'Cần duyệt', count: counts.get(cell) ?? 0, hasSelected: selectedCell === cell };
+      return { cell, serviceLevel: policy.serviceLevels[cell] ?? null, capitalPriority: policy.capitalPriorities[cell] ?? 'Cần duyệt', count: counts.get(cell) ?? 0, hasSelected: selectedCell === cell };
     }),
   }));
   return { rows, exceptions: { count: exceptions, hasSelected: selectedCell === 'D' }, totalInMatrix: [...counts.values()].reduce((sum, count) => sum + count, 0) };

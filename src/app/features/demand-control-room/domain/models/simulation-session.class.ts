@@ -1,5 +1,5 @@
 import { DataSourceId, SimulationDataset } from '../catalog';
-import { CalendarScaffoldMode, PortfolioMode, SessionRunMode } from '../models';
+import { CalendarScaffoldMode, PortfolioMode, SessionRunMode, SimulationPolicy } from '../models';
 
 /** Bản sao DOMAIN của metadata dataset — cắt phụ thuộc UI/store vào tầng DTO. */
 export interface SessionMetadata {
@@ -29,6 +29,7 @@ export class SimulationSession {
     readonly contractVersion: string,
     readonly generatedAt: string,
     readonly metadata: SessionMetadata,
+    readonly policy: SimulationPolicy,
     readonly dataset: SimulationDataset,
   ) {
     Object.freeze(this);

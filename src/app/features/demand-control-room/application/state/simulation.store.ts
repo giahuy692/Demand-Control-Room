@@ -334,9 +334,7 @@ export class SimulationStore {
     try {
       const session = await this.loadSession(source);
       const dataset = session.dataset;
-      if (dataset.dateRange && this.policy().runDate > dataset.dateRange.max) {
-        this.policy.update(policy => ({ ...policy, runDate: dataset.dateRange!.recommendedRunDate }));
-      }
+      this.policy.set(session.policy);
       this.engine.setDataset(dataset);
       this.engineSource = source;
       this.activeSession.set(session);
@@ -396,26 +394,28 @@ export class SimulationStore {
       
       // 1. Run for 'real' if missing
       if (!this.realFinalState()) {
-        this.engine.setDataset((await this.loadSession('real')).dataset);
+        const realSession = await this.loadSession('real');
+        this.engine.setDataset(realSession.dataset);
         this.engineSource = 'real';
         const nextSnapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
         for (let number = 1; number <= 13; number++) {
           const stage = number as StageNumber;
           const previous = stage === 1 ? null : nextSnapshots[(stage - 1) as StageNumber] ?? null;
-          nextSnapshots[stage] = this.engine.run(stage, previous, this.policy());
+          nextSnapshots[stage] = this.engine.run(stage, previous, realSession.policy);
         }
         this.realFinalState.set(nextSnapshots[13]?.states ?? null);
       }
 
       // 2. Run for 'mock' if missing
       if (!this.mockFinalState()) {
-        this.engine.setDataset((await this.loadSession('mock')).dataset);
+        const mockSession = await this.loadSession('mock');
+        this.engine.setDataset(mockSession.dataset);
         this.engineSource = 'mock';
         const nextSnapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
         for (let number = 1; number <= 13; number++) {
           const stage = number as StageNumber;
           const previous = stage === 1 ? null : nextSnapshots[(stage - 1) as StageNumber] ?? null;
-          nextSnapshots[stage] = this.engine.run(stage, previous, this.policy());
+          nextSnapshots[stage] = this.engine.run(stage, previous, mockSession.policy);
         }
         this.mockFinalState.set(nextSnapshots[13]?.states ?? null);
       }
@@ -464,6 +464,7 @@ export class SimulationStore {
     const source = this.dataSource();
     if (this.engineSource === source) return;
     const session = await this.loadSession(source);
+    this.policy.set(session.policy);
     this.engine.setDataset(session.dataset);
     this.engineSource = source;
     this.activeSession.set(session);

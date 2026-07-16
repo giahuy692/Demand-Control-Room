@@ -36,6 +36,14 @@ describe('SimulationDatasetService — luồng nạp duy nhất', () => {
     expect(session.metadata.runMode).toBe('HISTORICAL_VALIDATION');
   });
 
+  it('validate policyOverrides ngay khi map session, trước khi engine chạy', async () => {
+    const { service: validLoader } = service({ MOCK: fixtureDataset({ metadata: { policyOverrides: { referenceRadius: 9, referenceRadiusExtended: 16 } } }) });
+    expect((await validLoader.load('mock')).policy.referenceRadius).toBe(9);
+
+    const { service: invalidLoader } = service({ MOCK: fixtureDataset({ metadata: { policyOverrides: { disableClassificationGate: true } } }) });
+    await expect(invalidLoader.load('mock')).rejects.toThrow('POLICY_OVERRIDE_FORBIDDEN');
+  });
+
   it('§12.11 — real lỗi thì ném lỗi thật, TUYỆT ĐỐI không gọi sang MOCK', async () => {
     const { service: loader, repository } = service({ MOCK: fixtureDataset({ datasetKind: 'MOCK' }) });
     await expect(loader.load('real')).rejects.toThrowError(/404/);

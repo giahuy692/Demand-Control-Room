@@ -4,6 +4,16 @@ import { SimulationPolicy, StageDefinition } from './models';
 // tbl_POLPromotion/tbl_POLBundle là CTKM thường trực và loại khỏi nhu cầu.
 export const STANDING_PROMOTION_CODES: readonly string[] = [];
 
+export const SERVICE_LEVELS: Record<string, number> = {
+  AX: 97, AY: 95, AZ: 92, BX: 95, BY: 92, BZ: 88, CX: 90, CY: 85, CZ: 80,
+};
+
+export const CAPITAL_PRIORITIES: Record<string, string> = {
+  AX: 'Rất cao', AY: 'Rất cao', AZ: 'Cao',
+  BX: 'Cao', BY: 'Trung bình', BZ: 'Trung bình thấp',
+  CX: 'Trung bình thấp', CY: 'Thấp', CZ: 'Rất thấp',
+};
+
 export const DEFAULT_POLICY: SimulationPolicy = {
   runDate: '2026-06-01',
   historyYears: 3,
@@ -14,6 +24,12 @@ export const DEFAULT_POLICY: SimulationPolicy = {
   maxReferenceRadius: 24,
   minimumReferences: 3,
   maxBalancedPerSide: 7,
+  abcThresholds: { aMaxCumulativeShare: 0.8, cMinCumulativeShare: 0.9 },
+  xyzThresholds: { zMinAdi: 1.32, xMaxCv2: 0.49 },
+  abcWindowCycles: 24,
+  minimumAbcLockedCycles: 6,
+  serviceLevels: SERVICE_LEVELS,
+  capitalPriorities: CAPITAL_PRIORITIES,
   version: 'DP-2026.06-v1',
   periodBudget: 4_000_000_000,
   standingPromotionCodes: STANDING_PROMOTION_CODES,
@@ -54,16 +70,6 @@ export const STAGES: readonly StageDefinition[] = [
   { number: 18, phase: 6, title: 'Duyệt ngoại lệ & phát hành', shortTitle: 'Phát hành', goal: 'Chỉ phát hành dòng đủ vốn, đủ thông tin và không có ngoại lệ cần duyệt.', flow: ['Đọc số được cấp vốn', 'Đọc điều kiện mua', 'Đọc ngoại lệ C8–16', 'Chọn SKU–NCC', 'Kiểm tra số vốn > 0', 'Kiểm tra đủ thông tin', 'Kiểm tra ngoại lệ', 'Chờ bổ sung/duyệt hoặc phát hành', 'Khóa đầu ra'], formula: 'Release = Funded ∧ Complete ∧ ¬Exception', variables: [{ symbol: 'Funded', meaning: 'Số lượng đã được cấp vốn ở Chặng 17' }, { symbol: 'Complete', meaning: 'Đủ ETA, MOQ, giá mua, NCC và điều kiện đơn mua' }] },
   { number: 19, phase: 6, title: 'Hậu kiểm & đề xuất kỳ sau', shortTitle: 'Hậu kiểm', goal: 'Đo kết quả, tách nguyên nhân và chỉ tạo đề xuất cho phiên tương lai.', flow: ['Đọc dự báo/số phát hành', 'Đọc thực tế vận hành', 'Đọc ngân sách/duyệt', 'Đo sai số dự báo', 'Đo thiếu/dư tồn', 'Đo trễ nguồn hàng', 'Đo tác động ngân sách/duyệt', 'Tách nguyên nhân', 'Kiểm tra cần thay đổi', 'Tạo đề xuất hoặc theo dõi', 'Khóa báo cáo'], formula: 'WAPE=Σ|A−F|/ΣA', variables: [{ symbol: 'A', meaning: 'Nhu cầu thực tế sau kỳ' }, { symbol: 'F', meaning: 'Dự báo cuối đã phát hành' }] },
 ] as const;
-
-export const SERVICE_LEVELS: Record<string, number> = {
-  AX: 97, AY: 95, AZ: 92, BX: 95, BY: 92, BZ: 88, CX: 90, CY: 85, CZ: 80,
-};
-
-export const CAPITAL_PRIORITIES: Record<string, string> = {
-  AX: 'Rất cao', AY: 'Rất cao', AZ: 'Cao',
-  BX: 'Cao', BY: 'Trung bình', BZ: 'Trung bình thấp',
-  CX: 'Trung bình thấp', CY: 'Thấp', CZ: 'Rất thấp',
-};
 
 export const Z_VALUES: Record<number, number> = {
   80: 0.84, 85: 1.04, 88: 1.17, 90: 1.28, 92: 1.41, 95: 1.65, 97: 1.88, 97.5: 1.96, 99: 2.33,

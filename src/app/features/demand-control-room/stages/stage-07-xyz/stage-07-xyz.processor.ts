@@ -20,7 +20,7 @@ export function runStage7(previous: StageSnapshot, policy: SimulationPolicy): St
   for (const state of Object.values(states)) {
     // RULE-07-003 — cửa sổ CỐ ĐỊNH 24 vị trí chu kỳ gần nhất theo lịch, giữ nguyên mọi vị trí kể
     // cả chu kỳ không khóa (khác lockedValues cũ — trích chu kỳ khóa rồi nối lại). Có gap → chặn.
-    const fixed = fixedCalendarWindow(state.cycles, 24);
+    const fixed = fixedCalendarWindow(state.cycles, policy.abcWindowCycles);
     // §2.2 LỆNH CODEX — tỷ lệ chất lượng chuỗi PHẢI chia cho độ dài CỬA SỔ đang xét (lockedCyclesInWindow /
     // window.length), không chia cho toàn bộ lịch sử `state.cycles.length` (bản trước làm lệch tỷ lệ khi
     // lịch sử dài hơn nhiều so với cửa sổ 24 CK — ví dụ 20/24 khóa trong cửa sổ nhưng lịch sử có 75 CK sẽ ra
@@ -30,7 +30,7 @@ export function runStage7(previous: StageSnapshot, policy: SimulationPolicy): St
       const blockReason = fixed.blockingStatus!;
       const totalHistory = state.cycles.length;
       const usableRun = trailingLockedRun(state.cycles).length;
-      const reason = `CLASSIFICATION_BLOCKED_${blockReason} — cửa sổ 24 vị trí gần nhất theo lịch có chu kỳ ${blockReason}, không được nối các chu kỳ khóa còn lại thành chuỗi liên tục giả.`
+      const reason = `CLASSIFICATION_BLOCKED_${blockReason} — cửa sổ ${policy.abcWindowCycles} vị trí gần nhất theo lịch có chu kỳ ${blockReason}, không được nối các chu kỳ khóa còn lại thành chuỗi liên tục giả.`
         + (totalHistory > usableRun + 1 ? ` Lịch sử dài hơn nhiều so với đoạn dùng được (INSUFFICIENT_CONTINUOUS_BASELINE_HISTORY, ${totalHistory} chu kỳ toàn bộ, chỉ ${usableRun} chu kỳ liên tiếp gần nhất còn dùng được).` : '');
       state.classification = {
         ...state.classification, xyz: null, classificationStatus: 'CLASSIFICATION_BLOCKED', classificationBlockReason: blockReason,
@@ -41,12 +41,12 @@ export function runStage7(previous: StageSnapshot, policy: SimulationPolicy): St
       exceptions.push({
         id: `${state.definition.id}:7:CLASSIFICATION_BLOCKED`,
         ruleId: 'RULE-07-003', code: 'CLASSIFICATION_BLOCKED', stage: 7, skuId: state.definition.id, date: null,
-        evidence: reason, suggestedAction: 'Rà soát nguyên nhân chu kỳ chưa khóa trong cửa sổ 24 chu kỳ gần nhất (Chặng 3–5) trước khi tin vào kết luận X/Y/Z/D.',
+        evidence: reason, suggestedAction: `Rà soát nguyên nhân chu kỳ chưa khóa trong cửa sổ ${policy.abcWindowCycles} chu kỳ gần nhất (Chặng 3–5) trước khi tin vào kết luận X/Y/Z/D.`,
         role: 'BA/Data', status: 'OPEN', decisionVersion: policy.version,
       });
       continue;
     }
-    const result = classifyXyz(fixed.window.map(cycle => cycle.baseDemand));
+    const result = classifyXyz(fixed.window.map(cycle => cycle.baseDemand), policy.xyzThresholds);
     if (result.xyz === 'D') {
       const { dSubtype, reason } = classifyDSubtype(state);
       state.classification = { ...state.classification, ...result, classificationStatus: 'CLASSIFIED', classificationBlockReason: null, dSubtype, seriesQualityRatio, classificationReason: reason };
@@ -69,7 +69,7 @@ export function runStage7(previous: StageSnapshot, policy: SimulationPolicy): St
     'ADI dùng n/m; m là số chu kỳ có nhu cầu dương.', 'CV² dùng độ lệch chuẩn quần thể, mẫu số m.',
     `[RULE-07-001] Nhóm D được tách theo dSubtype (D_NEW/D_SHORT_HISTORY/D_EXTRACT_TRUNCATED), không gộp mọi nguyên nhân.`,
     `[RULE-07-002] Đã ghi seriesQualityRatio (tỷ lệ chu kỳ khóa/tổng chu kỳ trong khung) và classificationReason cho mọi SKU.`,
-    `[RULE-07-003] Cửa sổ XYZ là đúng 24 vị trí chu kỳ gần nhất theo lịch, giữ nguyên mọi vị trí; ${blockedCount} SKU bị CLASSIFICATION_BLOCKED vì cửa sổ có chu kỳ chưa khóa.`,
+    `[RULE-07-003] Cửa sổ XYZ là đúng ${policy.abcWindowCycles} vị trí chu kỳ gần nhất theo lịch, giữ nguyên mọi vị trí; ${blockedCount} SKU bị CLASSIFICATION_BLOCKED vì cửa sổ có chu kỳ chưa khóa.`,
     `[RULE-07-004] ${noPositiveDemandCount} SKU có cửa sổ liên tục đủ dài nhưng toàn bộ bằng 0 → NO_POSITIVE_DEMAND_REVIEW, không gán D.`,
   ], exceptions);
 }

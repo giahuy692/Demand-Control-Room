@@ -5,6 +5,8 @@ import { SessionMetadata, SimulationSession } from '../../domain/models/simulati
 import { DailyHistoryRecordDto } from '../dto/daily-history-record.dto';
 import { DemandSimulationDatasetDto } from '../dto/demand-simulation-dataset.dto';
 import { ProductDto } from '../dto/product.dto';
+import { DEFAULT_POLICY } from '../../domain/policy';
+import { DemandPlanningPolicy } from '../../domain/policies/demand-planning-policy.class';
 
 /**
  * Cầu DUY NHẤT từ cây DTO (đã validate) sang domain model của engine. Mock và real
@@ -46,7 +48,8 @@ export class DatasetDomainMapper {
         `[metadata] runMode=${metadata.runMode}, runDate=${metadata.runDate}, scaffold=${metadata.calendarScaffold}, gate tồn=${metadata.qualityGates.stockReconciliation}, phạm vi=${metadata.storeCode}/${metadata.storeScopeStatus}, portfolioMode=${metadata.portfolioMode}.`,
       ],
     };
-    return new SimulationSession(kind, dto.datasetId, dto.contractVersion, dto.generatedAt, metadata, dataset);
+    const policy = DemandPlanningPolicy.fromMetadata(metadata, DEFAULT_POLICY);
+    return new SimulationSession(kind, dto.datasetId, dto.contractVersion, dto.generatedAt, metadata, policy, dataset);
   }
 }
 

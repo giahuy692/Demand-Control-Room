@@ -1,6 +1,5 @@
 import { DailyRecord, ForecastResult, SimulationPolicy, SkuPipelineState, StageNumber } from './models';
 import { calculateTrend, mean, median, meetsSeasonRepeatThreshold, populationStdev, trailingLockedRun } from './math';
-import { CAPITAL_PRIORITIES, SERVICE_LEVELS } from './policy';
 import { buildPromoRegionSamples } from './promo-analysis';
 import { buildForecastLearning, ModelLearning, SEASON_LENGTH, fitSes, fitHolt, fitHoltWinters, fitCroston, runPulse, runSeasonalNaive, splitSizes, testMetrics, lockedSeriesAll } from './forecast-models';
 import { STAGE_TRACE_CONTRACTS, StageTraceContract } from './stage-trace-contracts';
@@ -491,7 +490,7 @@ function stage5(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
   };
 }
 
-function stage6(state: Readonly<SkuPipelineState>): StageTrace {
+function stage6(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
   const values = lockedSeries(state);
   const c = state.classification;
   const eligible = values.length >= 6;
@@ -540,7 +539,7 @@ function stage6(state: Readonly<SkuPipelineState>): StageTrace {
         title: 'B7 · Xác định điểm cắt A/C/B',
         detail: eligible ? 'Chọn A trước theo vùng 70–80%; nếu SKU đứng đầu tự vượt 80% vẫn giữ A và ghi ngoại lệ tập trung. Chọn C từ 90% lũy kế, phần giữa là B.' : 'Dưới 6 chu kỳ khóa → N/A và chuyển chính sách mã mới/duyệt riêng.',
         substitution: eligible
-          ? `hạng #${c.abcRank} · ${pct(c.cumulativeShare)} ${c.abcRank === 1 && c.cumulativeShare > 0.8 ? '> 80% nhưng SKU đầu → A (ngoại lệ tập trung)' : c.cumulativeShare <= 0.8 ? '≤ 80% → A' : c.cumulativeShare < 0.9 ? '< 90% → B' : '≥ 90% → C'} → ABC = ${c.abc}`
+          ? `hạng #${c.abcRank} · ${pct(c.cumulativeShare)} ${c.abcRank === 1 && c.cumulativeShare > policy.abcThresholds.aMaxCumulativeShare ? 'vượt ngưỡng A nhưng SKU đầu → A (ngoại lệ tập trung)' : c.cumulativeShare <= policy.abcThresholds.aMaxCumulativeShare ? 'trong ngưỡng A' : c.cumulativeShare < policy.abcThresholds.cMinCumulativeShare ? 'trong ngưỡng B' : 'đạt ngưỡng C'} → ABC = ${c.abc}`
           : `N = ${c.lockedCycles} < 6 → ABC = N/A`,
         tone: c.abc === 'N/A' ? 'warn' : 'good',
       },
@@ -559,7 +558,7 @@ function stage6(state: Readonly<SkuPipelineState>): StageTrace {
   };
 }
 
-function stage7(state: Readonly<SkuPipelineState>): StageTrace {
+function stage7(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
   const { classificationStatus, classificationBlockReason } = state.classification;
   if (classificationStatus === 'CLASSIFICATION_BLOCKED') {
     return {
@@ -618,8 +617,8 @@ function stage7(state: Readonly<SkuPipelineState>): StageTrace {
       {
         title: '4.4.4 · Kiểm tra nhánh bán thưa Z',
         detail: 'Nếu ADI > 1,32 thì nhu cầu đã đủ thưa để gán Z; CV² vẫn được hiển thị để kiểm toán nhưng không thay đổi nhánh Z.',
-        substitution: !enoughData ? 'Chưa xét Z vì dữ liệu thuộc nhánh D' : `${fmt(adi, 3)} ${(adi ?? 0) > 1.32 ? '> 1,32 → ứng viên Z' : '≤ 1,32 → tiếp tục xét X/Y'}`,
-        tone: enoughData && (adi ?? 0) > 1.32 ? 'warn' : 'info',
+        substitution: !enoughData ? 'Chưa xét Z vì dữ liệu thuộc nhánh D' : `${fmt(adi, 3)} ${(adi ?? 0) > policy.xyzThresholds.zMinAdi ? `> ${policy.xyzThresholds.zMinAdi} → ứng viên Z` : `≤ ${policy.xyzThresholds.zMinAdi} → tiếp tục xét X/Y`}`,
+        tone: enoughData && (adi ?? 0) > policy.xyzThresholds.zMinAdi ? 'warn' : 'info',
       },
       {
         title: '4.4.5 · Lọc các chu kỳ có nhu cầu',
@@ -646,9 +645,9 @@ function stage7(state: Readonly<SkuPipelineState>): StageTrace {
         detail: 'Thứ tự ưu tiên: n < 6 hoặc m = 0 → D; ADI > 1,32 → Z; còn lại CV² ≤ 0,49 → X, CV² > 0,49 → Y.',
         substitution: n < 6 || !m
           ? `${n < 6 ? `n = ${n} < 6` : 'm = 0'} → D`
-          : (adi ?? 0) > 1.32
+          : (adi ?? 0) > policy.xyzThresholds.zMinAdi
             ? `ADI = ${fmt(adi, 3)} > 1,32 → Z`
-            : `ADI = ${fmt(adi, 3)} ≤ 1,32 · CV² = ${fmt(cv2, 4)} ${(cv2 ?? Infinity) <= 0.49 ? '≤ 0,49 → X' : '> 0,49 → Y'}`,
+            : `ADI = ${fmt(adi, 3)} ≤ ${policy.xyzThresholds.zMinAdi} · CV² = ${fmt(cv2, 4)} ${(cv2 ?? Infinity) <= policy.xyzThresholds.xMaxCv2 ? `≤ ${policy.xyzThresholds.xMaxCv2} → X` : `> ${policy.xyzThresholds.xMaxCv2} → Y`}`,
         result: `XYZ/D = ${xyz} · khóa và truyền sang Chặng 8–11`,
         tone: xyz === 'D' ? 'warn' : 'good',
       },
@@ -681,7 +680,7 @@ function stage8(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): St
       {
         title: 'B5 · Gán ưu tiên vốn và mức phục vụ theo đúng ô',
         detail: excluded ? 'Không tự gán mức phục vụ hoặc ưu tiên vốn mạnh cho ngoại lệ.' : 'Ưu tiên vốn thay đổi theo từng ô AX…CZ, không chỉ theo chữ A/B/C.',
-        substitution: excluded ? 'ServiceLevel = null' : `${cell}: ưu tiên ${CAPITAL_PRIORITIES[cell]} · ServiceLevel = ${SERVICE_LEVELS[cell]}%`,
+        substitution: excluded ? 'ServiceLevel = null' : `${cell}: ưu tiên ${policy.capitalPriorities[cell]} · ServiceLevel = ${policy.serviceLevels[cell]}%`,
         tone: excluded ? 'warn' : 'good',
       },
       {
@@ -1562,8 +1561,8 @@ export function buildStageTrace(stage: StageNumber, state: Readonly<SkuPipelineS
     case 3: trace = stage3(state, policy, focus); break;
     case 4: trace = stage4(state, policy, focus); break;
     case 5: trace = stage5(state, policy, focusDate); break;
-    case 6: trace = stage6(state); break;
-    case 7: trace = stage7(state); break;
+    case 6: trace = stage6(state, policy); break;
+    case 7: trace = stage7(state, policy); break;
     case 8: trace = stage8(state, policy); break;
     case 9: trace = stage9(state); break;
     case 10: trace = stage10(state); break;

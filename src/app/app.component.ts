@@ -247,11 +247,11 @@ export class AppComponent implements OnInit {
   });
   readonly xyzBoard = computed(() => {
     const states = this.currentStageStates();
-    return states ? buildXyzBoard(states) : [];
+    return states ? buildXyzBoard(states, this.store.policy()) : [];
   });
   readonly policyMatrix = computed(() => {
     const states = this.currentStageStates();
-    return states ? buildPolicyMatrix(states, this.store.selectedSkuId()) : null;
+    return states ? buildPolicyMatrix(states, this.store.selectedSkuId(), this.store.policy()) : null;
   });
   readonly seasonalityAudit = computed(() => {
     const state = this.store.selectedState();

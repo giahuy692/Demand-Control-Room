@@ -34,8 +34,8 @@ export function runStage8(previous: StageSnapshot, policy: SimulationPolicy): St
       continue;
     }
     const cell = `${abc}${xyz}`;
-    state.serviceLevel = SERVICE_LEVELS[cell] ?? null;
-    state.capitalPriority = CAPITAL_PRIORITIES[cell] ?? 'Cần duyệt';
+    state.serviceLevel = policy.serviceLevels[cell] ?? null;
+    state.capitalPriority = policy.capitalPriorities[cell] ?? 'Cần duyệt';
     if (state.serviceLevel === null) {
       exceptions.push({
         id: `${state.definition.id}:8:POLICY_UNRESOLVED`,

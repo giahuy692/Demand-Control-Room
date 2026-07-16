@@ -92,7 +92,10 @@ export function promoBaseline(references: readonly number[]): number | null {
   return references.length >= 3 ? median(references) : null;
 }
 
-export function classifyAbcRows(rows: readonly { id: string; annualValue: number; eligible?: boolean }[]): Record<string, 'A' | 'B' | 'C' | 'N/A'> {
+export function classifyAbcRows(
+  rows: readonly { id: string; annualValue: number; eligible?: boolean }[],
+  thresholds = { aMaxCumulativeShare: 0.8, cMinCumulativeShare: 0.9 },
+): Record<string, 'A' | 'B' | 'C' | 'N/A'> {
   const sorted = [...rows].sort((a, b) => b.annualValue - a.annualValue);
   const total = sorted.filter(row => row.eligible !== false).reduce((sum, row) => sum + row.annualValue, 0);
   let cumulative = 0;
@@ -100,7 +103,7 @@ export function classifyAbcRows(rows: readonly { id: string; annualValue: number
     if (row.eligible === false) return [row.id, 'N/A'];
     cumulative += row.annualValue;
     const share = total ? cumulative / total : 0;
-    return [row.id, index === 0 || share <= 0.8 ? 'A' : share >= 0.9 ? 'C' : 'B'];
+    return [row.id, index === 0 || share <= thresholds.aMaxCumulativeShare ? 'A' : share >= thresholds.cMinCumulativeShare ? 'C' : 'B'];
   }));
 }
 
@@ -231,7 +234,10 @@ export function calendarWindowAbcMetrics(cycles: readonly CycleRecord[], size: n
   };
 }
 
-export function classifyXyz(values: readonly number[]): {
+export function classifyXyz(
+  values: readonly number[],
+  thresholds = { zMinAdi: 1.32, xMaxCv2: 0.49 },
+): {
   xyz: 'X' | 'Y' | 'Z' | 'D' | null; n: number; m: number; adi: number | null;
   positiveMean: number | null; positiveStdev: number | null; cv: number | null; cv2: number | null;
 } {
@@ -248,8 +254,8 @@ export function classifyXyz(values: readonly number[]): {
   const positiveStdev = populationStdev(positive);
   const cv = positiveMean ? positiveStdev / positiveMean : null;
   const cv2 = cv === null ? null : cv ** 2;
-  if (adi > 1.32) return { xyz: 'Z', n, m, adi, positiveMean, positiveStdev, cv, cv2 };
-  return { xyz: (cv2 ?? Infinity) <= 0.49 ? 'X' : 'Y', n, m, adi, positiveMean, positiveStdev, cv, cv2 };
+  if (adi > thresholds.zMinAdi) return { xyz: 'Z', n, m, adi, positiveMean, positiveStdev, cv, cv2 };
+  return { xyz: (cv2 ?? Infinity) <= thresholds.xMaxCv2 ? 'X' : 'Y', n, m, adi, positiveMean, positiveStdev, cv, cv2 };
 }
 
 export function calculateTrend(values: readonly number[]): { trend: 'up' | 'down' | 'none' | 'insufficient'; rates: [number | null, number | null]; cappedRate: number | null; needsReview: boolean } {

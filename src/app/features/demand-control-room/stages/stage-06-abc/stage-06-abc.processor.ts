@@ -12,26 +12,28 @@ import { buildPromoRegionSamples } from '../../domain/promo-analysis';
 import { demandRiskInputs } from '../../domain/demand-risk';
 
 
-import { ABC_MINIMUM_LOCKED_CYCLES, ABC_WINDOW_SIZE, emptyClassification, cloneStates, operationalStatusNote, createSnapshot, isObservedClean, collectCleanSide, selectReferences, qualifySelection, applyReferenceAudit, buildPromoRegions, resetDailyRecord, createInitialState, futureActualDemand, lockedValues, lockedCycleQualityBreakdown, seasonalFallbackSelection, tier2RepresentativeFill, fillAndBuildCycles, cycleStatus, buildCycles, buildCycleException, classifyDSubtype, dateAfter } from '../stage-support';
+import { emptyClassification, cloneStates, operationalStatusNote, createSnapshot, isObservedClean, collectCleanSide, selectReferences, qualifySelection, applyReferenceAudit, buildPromoRegions, resetDailyRecord, createInitialState, futureActualDemand, lockedValues, lockedCycleQualityBreakdown, seasonalFallbackSelection, tier2RepresentativeFill, fillAndBuildCycles, cycleStatus, buildCycles, buildCycleException, classifyDSubtype, dateAfter } from '../stage-support';
 
 export function runStage6(previous: StageSnapshot, policy: SimulationPolicy): StageSnapshot {
   const states = cloneStates(previous);
   const exceptions: ExceptionTask[] = [];
+  const windowSize = policy.abcWindowCycles;
+  const minimumLockedCycles = policy.minimumAbcLockedCycles;
   const ranked = Object.values(states).map(state => {
     // RULE-05-006/RULE-06-003 — cửa sổ CỐ ĐỊNH 24 vị trí chu kỳ gần nhất theo lịch (RULE-05-006, giữ
     // nguyên mọi vị trí kể cả chưa khóa để audit), nhưng năm hóa chỉ dùng đoạn chu kỳ khóa LIÊN TIẾP
     // trong cửa sổ đó (RULE-06-003 — "không đếm các chu kỳ khóa nằm rải rác ở hai phía của một khoảng
     // unresolved như một đoạn liên tiếp"), tối thiểu 6 CK khóa liên tiếp mới được năm hóa.
     // Chu kỳ CHƯA khóa không bao giờ được cộng vào periodQuantity (calendarWindowAbcMetrics tự loại).
-    const metrics = calendarWindowAbcMetrics(state.cycles, ABC_WINDOW_SIZE, ABC_MINIMUM_LOCKED_CYCLES);
-    const annualizationFactor = metrics.eligible ? ABC_WINDOW_SIZE / metrics.lockedCycleCount : null;
+    const metrics = calendarWindowAbcMetrics(state.cycles, windowSize, minimumLockedCycles);
+    const annualizationFactor = metrics.eligible ? windowSize / metrics.lockedCycleCount : null;
     const annualQuantity = annualizationFactor === null ? null : metrics.periodQuantity * annualizationFactor;
     const annualValue = annualQuantity === null ? 0 : annualQuantity * state.definition.price;
     if (!metrics.eligible) {
       exceptions.push({
         id: `${state.definition.id}:6:ABC_INPUT_BLOCKED`,
         ruleId: 'RULE-06-003', code: 'ABC_INPUT_BLOCKED', stage: 6, skuId: state.definition.id, date: null,
-        evidence: `Cửa sổ ${ABC_WINDOW_SIZE} vị trí chu kỳ gần nhất theo lịch chỉ có ${metrics.lockedCycleCount}/${ABC_MINIMUM_LOCKED_CYCLES} chu kỳ khóa tối thiểu (đã xét ${metrics.window.length} vị trí) — NOT_RATED, không được năm hóa.`,
+        evidence: `Cửa sổ ${windowSize} vị trí chu kỳ gần nhất theo lịch chỉ có ${metrics.lockedCycleCount}/${minimumLockedCycles} chu kỳ khóa tối thiểu (đã xét ${metrics.window.length} vị trí) — NOT_RATED, không được năm hóa.`,
         suggestedAction: 'Rà soát nguyên nhân các chu kỳ chưa khóa trong cửa sổ 24 chu kỳ gần nhất (Chặng 3–5) trước khi coi SKU là chưa đủ dữ liệu ABC.',
         role: 'BA/Data', status: 'OPEN', decisionVersion: policy.version,
       });
@@ -48,7 +50,7 @@ export function runStage6(previous: StageSnapshot, policy: SimulationPolicy): St
     let abc: AbcClass = 'N/A';
     if (item.eligible) {
       rank++;
-      abc = rank === 1 || cumulativeShare <= 0.8 ? 'A' : cumulativeShare >= 0.9 ? 'C' : 'B';
+      abc = rank === 1 || cumulativeShare <= policy.abcThresholds.aMaxCumulativeShare ? 'A' : cumulativeShare >= policy.abcThresholds.cMinCumulativeShare ? 'C' : 'B';
     }
     // RULE-06-001/DEC-010 — ABC chỉ chính thức khi chạy toàn danh mục hoặc dùng snapshot đã duyệt.
     const abcOfficial = item.state.definition.portfolioMode === 'FULL_PORTFOLIO' || item.state.definition.portfolioMode === 'USE_APPROVED_SNAPSHOT';
@@ -76,11 +78,11 @@ export function runStage6(previous: StageSnapshot, policy: SimulationPolicy): St
     'Nhóm A': ranked.filter(item => item.state.classification.abc === 'A').length, 'Nhóm B': ranked.filter(item => item.state.classification.abc === 'B').length,
     'Nhóm C': ranked.filter(item => item.state.classification.abc === 'C').length, 'Chưa xếp hạng': ranked.filter(item => item.state.classification.abc === 'N/A').length,
     'SKU ABC chính thức': officialCount, 'SKU chỉ xếp hạng mô phỏng': ranked.length - officialCount,
-    'FULL_COVERAGE (24/24)': fullCoverageCount, 'ANNUALIZED_WITH_GAPS': withGapsCount, 'NOT_RATED (<6 CK khóa)': notRatedCount,
+    [`FULL_COVERAGE (${windowSize}/${windowSize})`]: fullCoverageCount, 'ANNUALIZED_WITH_GAPS': withGapsCount, [`NOT_RATED (<${minimumLockedCycles} CK khóa)`]: notRatedCount,
   }, [
     'Điểm cắt C bắt đầu khi lũy kế đạt từ 90% trở lên.', 'Tính trên bảng xếp hạng riêng, không đổi thứ tự dữ liệu gốc.',
     `[RULE-06-001][DEC-010] ${officialCount}/${ranked.length} SKU có ABC chính thức (portfolioMode=FULL_PORTFOLIO/USE_APPROVED_SNAPSHOT); còn lại chỉ là xếp hạng trong tập mô phỏng hiện tại (SELECTED_SKU_SIMULATION), KHÔNG được dùng làm kết luận ABC vận hành thật.`,
     `[RULE-06-002] Mọi ABC ở đây đều approvalStatus='PROPOSED' — công cụ mô phỏng một lượt chạy này không có quy trình phê duyệt/lưu vết bền vững để tự chuyển EFFECTIVE.`,
-    `[RULE-06-003][RULE-05-006] Cửa sổ ABC là ${ABC_WINDOW_SIZE} vị trí chu kỳ gần nhất theo lịch, giữ nguyên mọi vị trí (kể cả chưa khóa) để audit; đếm CK khóa bất kể khoảng khuyết, tối thiểu ${ABC_MINIMUM_LOCKED_CYCLES} CK khóa mới năm hóa. ${fullCoverageCount} SKU FULL_COVERAGE (24/24), ${withGapsCount} SKU ANNUALIZED_WITH_GAPS (đủ ngưỡng nhưng có khoảng khuyết), ${notRatedCount} SKU NOT_RATED (dưới ${ABC_MINIMUM_LOCKED_CYCLES} CK khóa, ABC_INPUT_BLOCKED).`,
+    `[RULE-06-003][RULE-05-006] Cửa sổ ABC là ${windowSize} vị trí chu kỳ gần nhất theo lịch, giữ nguyên mọi vị trí (kể cả chưa khóa) để audit; đếm CK khóa bất kể khoảng khuyết, tối thiểu ${minimumLockedCycles} CK khóa mới năm hóa. ${fullCoverageCount} SKU FULL_COVERAGE, ${withGapsCount} SKU ANNUALIZED_WITH_GAPS (đủ ngưỡng nhưng có khoảng khuyết), ${notRatedCount} SKU NOT_RATED (dưới ${minimumLockedCycles} CK khóa, ABC_INPUT_BLOCKED).`,
   ], exceptions);
 }

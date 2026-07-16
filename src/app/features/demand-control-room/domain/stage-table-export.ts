@@ -101,14 +101,14 @@ export function buildStageTableExport(
         ...base,
         scope: 'Toàn danh mục',
         columns: ['sku', 'name', 'n', 'm', 'adi', 'positiveMean', 'positiveStdev', 'cv', 'cv2', 'rule', 'xyz'],
-        rows: buildXyzRows(snapshot),
+        rows: buildXyzRows(snapshot, policy),
       };
     case 8:
       return {
         ...base,
         scope: 'Toàn danh mục',
         columns: ['cell', 'abc', 'xyz', 'serviceLevel', 'capitalPriority', 'skuCount', 'hasSelectedSku'],
-        rows: buildPolicyRows(snapshot, selectedSkuId),
+        rows: buildPolicyRows(snapshot, selectedSkuId, policy),
       };
     case 9:
       return state ? buildSeasonalityRows(base, selectedScope, state) : emptyExport(base, selectedScope);
@@ -185,16 +185,16 @@ function cycleRow(sku: string, row: SkuPipelineState['cycles'][number]): StageEx
   };
 }
 
-function buildXyzRows(snapshot: StageSnapshot): StageExportRow[] {
-  return buildXyzBoard(snapshot.states).map(row => ({
+function buildXyzRows(snapshot: StageSnapshot, policy: SimulationPolicy): StageExportRow[] {
+  return buildXyzBoard(snapshot.states, policy).map(row => ({
     sku: row.id, name: row.name, n: row.n, m: row.m, adi: row.adi,
     positiveMean: row.positiveMean, positiveStdev: row.positiveStdev,
     cv: row.cv, cv2: row.cv2, rule: row.rule, xyz: row.xyz,
   }));
 }
 
-function buildPolicyRows(snapshot: StageSnapshot, selectedSkuId: string): StageExportRow[] {
-  const matrix = buildPolicyMatrix(snapshot.states, selectedSkuId);
+function buildPolicyRows(snapshot: StageSnapshot, selectedSkuId: string, policy: SimulationPolicy): StageExportRow[] {
+  const matrix = buildPolicyMatrix(snapshot.states, selectedSkuId, policy);
   const rows: StageExportRow[] = matrix.rows.flatMap(row => row.cells.map(cell => ({
     cell: cell.cell, abc: row.abc, xyz: cell.cell.slice(1), serviceLevel: cell.serviceLevel,
     capitalPriority: cell.capitalPriority, skuCount: cell.count, hasSelectedSku: cell.hasSelected,

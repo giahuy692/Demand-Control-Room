@@ -37,6 +37,12 @@ export interface SimulationPolicy {
   maxReferenceRadius: number;
   minimumReferences: number;
   maxBalancedPerSide: number;
+  abcThresholds: { readonly aMaxCumulativeShare: number; readonly cMinCumulativeShare: number };
+  xyzThresholds: { readonly zMinAdi: number; readonly xMaxCv2: number };
+  abcWindowCycles: number;
+  minimumAbcLockedCycles: number;
+  serviceLevels: Readonly<Record<string, number>>;
+  capitalPriorities: Readonly<Record<string, string>>;
   version: string;
   periodBudget: number;
   /**
