@@ -82,12 +82,14 @@ function validateCrossRecords(dataset: DemandSimulationDatasetDto): void {
   const seen = new Set<string>();
   for (let index = 0; index < dailyRecords.length; index++) {
     const record = dailyRecords[index];
-    if (!productIds.has(record.sku)) {
-      throw new DataQualityError('UNKNOWN_SKU', `dailyRecords[${index}] mang sku=${record.sku} không có trong products.`);
+    const skuStr = record.productCode.toString();
+    const mappedSku = dataset.datasetKind === 'MOCK' ? `SKU-${skuStr.padStart(3, '0')}` : skuStr;
+    if (!productIds.has(mappedSku)) {
+      throw new DataQualityError('UNKNOWN_SKU', `dailyRecords[${index}] mang sku=${skuStr} không có trong products.`);
     }
-    const key = `${record.sku}|${record.date}`;
+    const key = `${skuStr}|${record.date}`;
     if (seen.has(key)) {
-      throw new DataQualityError('DUPLICATE_DAILY_KEY', `trùng khóa sku+date: ${record.sku} ${record.date} (dailyRecords[${index}]).`);
+      throw new DataQualityError('DUPLICATE_DAILY_KEY', `trùng khóa sku+date: ${skuStr} ${record.date} (dailyRecords[${index}]).`);
     }
     seen.add(key);
   }
@@ -95,14 +97,6 @@ function validateCrossRecords(dataset: DemandSimulationDatasetDto): void {
   for (const interval of promotionIntervals) {
     if (interval.sku !== null && !productIds.has(interval.sku)) {
       throw new DataQualityError('UNKNOWN_SKU', `promotionIntervals mang sku=${interval.sku} không có trong products.`);
-    }
-  }
-
-  // §3.12 — dòng validation-actual không được nằm trước RunDate (nếu cờ được nguồn khai báo).
-  for (let index = 0; index < dailyRecords.length; index++) {
-    const record = dailyRecords[index];
-    if (record.isValidationActual && record.date < metadata.runDate) {
-      throw new DataQualityError('VALIDATION_WINDOW', `dailyRecords[${index}] (${record.sku} ${record.date}) gắn isValidationActual nhưng nằm trước runDate=${metadata.runDate}.`);
     }
   }
 }

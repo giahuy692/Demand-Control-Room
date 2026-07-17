@@ -45,6 +45,46 @@ function list(values: readonly number[], digits = 1): string {
   return values.map(value => fmt(value, digits)).join('; ');
 }
 
+export function shiftLegacyTraceText(text: string): string {
+  return text
+    .replace(/Chặng (\d+)(?:–(\d+))?/g, (_, startText: string, endText?: string) => {
+      const start = Number(startText);
+      const shiftedStart = start >= 5 ? start + 1 : start;
+      if (!endText) return `Chặng ${shiftedStart}`;
+      const end = Number(endText);
+      return `Chặng ${shiftedStart}–${end >= 5 ? end + 1 : end}`;
+    })
+    .replace(/\bC(\d+)\b/g, (_, stageText: string) => {
+      const stage = Number(stageText);
+      return `C${stage >= 5 ? stage + 1 : stage}`;
+    })
+    .replace(/\bRULE-(\d{2})/g, (_, stageText: string) => {
+      const stage = Number(stageText);
+      return `RULE-${String(stage >= 5 ? stage + 1 : stage).padStart(2, '0')}`;
+    });
+}
+
+function shiftLegacyTrace(trace: StageTrace): StageTrace {
+  const shiftValue = (value: TraceValue): TraceValue => ({ label: shiftLegacyTraceText(value.label), value: shiftLegacyTraceText(value.value) });
+  const shiftCheck = (check: TraceCheck): TraceCheck => ({ ...check, label: shiftLegacyTraceText(check.label), actual: shiftLegacyTraceText(check.actual) });
+  return {
+    heading: shiftLegacyTraceText(trace.heading),
+    context: shiftLegacyTraceText(trace.context),
+    pickLabel: trace.pickLabel ? shiftLegacyTraceText(trace.pickLabel) : undefined,
+    points: trace.points?.map(point => ({ ...point, label: shiftLegacyTraceText(point.label) })),
+    steps: trace.steps.map(step => ({
+      ...step,
+      title: shiftLegacyTraceText(step.title),
+      detail: shiftLegacyTraceText(step.detail),
+      values: step.values?.map(shiftValue),
+      checks: step.checks?.map(shiftCheck),
+      result: step.result ? shiftLegacyTraceText(step.result) : undefined,
+      substitution: step.substitution ? shiftLegacyTraceText(step.substitution) : undefined,
+      expression: step.expression ? shiftLegacyTraceText(step.expression) : undefined,
+    })),
+  };
+}
+
 function lockedSeries(state: Readonly<SkuPipelineState>): number[] {
   return trailingLockedRun(state.cycles).slice(-24).map(cycle => cycle.baseDemand);
 }
@@ -160,11 +200,13 @@ function stage1(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): St
 }
 
 function stage2(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, focus: DailyRecord | null): StageTrace {
-  const stockouts = state.daily.filter(record => record.isStockout);
+  const stockouts = state.daily.filter(record => record.stockoutStatus !== 'NONE');
   const points: TracePoint[] = stockouts.slice(0, 14).map(record => ({ date: record.date, label: record.date, kind: 'so' }));
   if (focus) {
-    const lateReceipt = focus.openStock === 0 && focus.closeStock > 0 && !!focus.receiptHour && focus.receiptHour > policy.cutoffHour;
-    const emptyAllDay = focus.openStock === 0 && focus.closeStock === 0 && focus.sales === 0;
+    const [cutoffHours, cutoffMinutes] = policy.cutoffHour.split(':').map(Number);
+    const cutoffHour = cutoffHours + cutoffMinutes / 60;
+    const lateReceipt = focus.openStock === 0 && focus.closeStock !== null && focus.closeStock > 0 && focus.receiptHour !== null && focus.receiptHour > cutoffHour;
+    const emptyAllDay = focus.openStock === 0 && focus.closeStock === 0;
     return {
       heading: `Thế số hai điều kiện stockout cho ngày ${focus.date}`,
       context: 'Hệ thống chỉ dùng đúng hai điều kiện nghiệp vụ, không thêm heuristic theo loại SKU.',
@@ -177,7 +219,7 @@ function stage2(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
           values: [
             { label: 'Tồn đầu O', value: fmt(focus.openStock, 0) },
             { label: 'Tồn cuối C', value: fmt(focus.closeStock, 0) },
-            { label: 'Giờ nhập h', value: focus.receiptHour ?? 'Không có' },
+            { label: 'Giờ nhập h', value: focus.receiptHour === null ? 'Không có' : String(focus.receiptHour) },
             { label: 'Số bán Q', value: fmt(focus.sales, 0) },
           ],
         },
@@ -186,8 +228,8 @@ function stage2(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
           detail: 'Hệ thống kiểm tra lần lượt ba dấu hiệu dưới đây. Chỉ khi cả ba đều đạt, ngày này mới được xem là nhập hàng trễ.',
           checks: [
             { label: 'Đầu ngày không còn hàng', actual: `Tồn đầu ngày: ${fmt(focus.openStock, 0)}`, passed: focus.openStock === 0 },
-            { label: 'Trong ngày có hàng về', actual: `Tồn cuối ngày: ${fmt(focus.closeStock, 0)}`, passed: focus.closeStock > 0 },
-            { label: `Hàng về sau ${policy.cutoffHour}`, actual: `Giờ hàng về: ${focus.receiptHour ?? 'Không có'}`, passed: !!focus.receiptHour && focus.receiptHour > policy.cutoffHour },
+            { label: 'Trong ngày có hàng về', actual: `Tồn cuối ngày: ${fmt(focus.closeStock, 0)}`, passed: focus.closeStock !== null && focus.closeStock > 0 },
+            { label: `Hàng về sau ${policy.cutoffHour}`, actual: `Giờ hàng về: ${focus.receiptHour ?? 'Không có'}`, passed: focus.receiptHour !== null && focus.receiptHour > cutoffHour },
           ],
           result: lateReceipt ? 'Có nhập hàng trễ — khách đến sớm có thể không mua được' : 'Không thuộc trường hợp nhập hàng trễ',
           expression: String.raw`\underbrace{${focus.openStock}=0}_{\text{đầu ngày hết hàng}}\;\land\;\underbrace{${focus.closeStock}>0}_{\text{cuối ngày có hàng}}\;\land\;\underbrace{\mathtt{${focus.receiptHour ?? '—'}}>\mathtt{${policy.cutoffHour}}}_{\text{hàng về trễ}}\;\Longrightarrow\;\mathbf{${lateReceipt ? 'ĐÚNG' : 'SAI'}}`,
@@ -209,11 +251,11 @@ function stage2(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
         },
         {
           title: 'Gắn cờ và khóa kết quả',
-          detail: focus.isStockout
-            ? `Ít nhất một điều kiện đúng → ngày được gắn cờ stockout (${focus.stockoutReason === 'late-receipt' ? 'nhập trễ' : 'trống cả ngày'}) và chuyển sang Chặng 3.`
+          detail: focus.stockoutStatus !== 'NONE'
+            ? `Ngày được phân loại ${focus.stockoutStatus} và chuyển sang Chặng 3.`
             : 'Cả hai điều kiện đều sai → ngày được xem là ngày bán bình thường.',
-          substitution: `SO(${focus.date}) = ${focus.isStockout ? 'TRUE' : 'FALSE'}`,
-          tone: focus.isStockout ? 'warn' : 'good',
+          substitution: `SO(${focus.date}) = ${focus.stockoutStatus}`,
+          tone: focus.stockoutStatus !== 'NONE' ? 'warn' : 'good',
         },
       ],
     };
@@ -225,8 +267,8 @@ function stage2(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
     points,
     steps: [
       { title: 'Đọc chuỗi tồn đầu / tồn cuối / phiếu nhập', detail: 'Duyệt lần lượt từng ngày trong khung lịch của phiên.', values: [{ label: 'Bản ghi được quét', value: fmt(state.daily.length, 0) }] },
-      { title: 'Áp điều kiện 1 — nhập trễ', detail: `Tồn đầu bằng 0, có hàng về trong ngày nhưng sau giờ quy định ${policy.cutoffHour}.`, values: [{ label: 'Ngày nhập trễ', value: fmt(state.daily.filter(record => record.stockoutReason === 'late-receipt').length, 0) }] },
-      { title: 'Áp điều kiện 2 — trống cả ngày', detail: 'Tồn đầu và tồn cuối đều bằng 0, không ghi nhận số bán.', values: [{ label: 'Ngày trống cả ngày', value: fmt(state.daily.filter(record => record.stockoutReason === 'empty-all-day').length, 0) }] },
+      { title: 'Áp điều kiện 1 — nhập trễ', detail: `Tồn đầu bằng 0, có hàng về trong ngày nhưng sau giờ quy định ${policy.cutoffHour}.`, values: [{ label: 'Ngày nhập trễ', value: fmt(state.daily.filter(record => record.stockoutStatus === 'LATE_RECEIPT_STOCKOUT').length, 0) }] },
+      { title: 'Áp điều kiện 2 — trống cả ngày', detail: 'Tồn đầu và tồn cuối đều bằng 0.', values: [{ label: 'Ngày trống cả ngày', value: fmt(state.daily.filter(record => record.stockoutStatus === 'ALL_DAY_STOCKOUT_CANDIDATE').length, 0) }] },
       { title: 'Gắn cờ và khóa', detail: 'Ngày thỏa một trong hai điều kiện được gắn cờ; cờ này là đầu vào duy nhất cho Chặng 3.', substitution: `Tổng ngày gắn cờ stockout = ${stockouts.length}`, tone: 'good' },
     ],
   };
@@ -277,18 +319,18 @@ function referenceSteps(state: Readonly<SkuPipelineState>, row: DailyRecord, pol
 }
 
 function stage3(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, focus: DailyRecord | null): StageTrace {
-  const distorted = state.daily.filter(record => record.isStockout && !record.promoCode);
+  const distorted = state.daily.filter(record => record.stockoutStatus !== 'NONE' && !record.promoCode);
   const points: TracePoint[] = distorted.slice(0, 14).map(record => ({
     date: record.date,
     label: record.date,
-    kind: record.baseSource === 'insufficient' ? 'warn' : 'so',
+    kind: record.baseDemandSource === 'STOCKOUT_UNRESOLVED' ? 'warn' : 'so',
   }));
-  const valid = focus && focus.isStockout && !focus.promoCode ? focus : null;
+  const valid = focus && focus.stockoutStatus !== 'NONE' && !focus.promoCode ? focus : null;
   if (valid) {
     const steps: TraceStep[] = [
       {
         title: 'Nhận diện điểm méo',
-        detail: `Ngày ${valid.date} không thuộc CTKM nhưng bị stockout (${valid.stockoutReason === 'late-receipt' ? 'nhập trễ' : 'trống cả ngày'}) — số bán ghi nhận có thể thấp giả, chưa được dùng làm nền.`,
+        detail: `Ngày ${valid.date} không thuộc CTKM và có trạng thái ${valid.stockoutStatus} — không dùng làm ngày sạch.`,
         values: [
           { label: 'Số bán ghi nhận Q', value: fmt(valid.sales, 0) },
           { label: 'Tồn đầu / cuối', value: `${fmt(valid.openStock, 0)} / ${fmt(valid.closeStock, 0)}` },
@@ -297,18 +339,18 @@ function stage3(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
       },
       ...referenceSteps(state, valid, policy),
     ];
-    if (valid.baseSource === 'insufficient') {
+    if (valid.baseDemandSource === 'STOCKOUT_UNRESOLVED') {
       steps.push({
         title: 'Khóa trạng thái, không nâng nền',
         detail: 'Ngày được ghi THIẾU CĂN CỨ; Chặng 5 sẽ quyết định có lấp nền kỹ thuật hay không.',
-        substitution: `B(${valid.date}) = null · baseSource = insufficient`,
+        substitution: `B(${valid.date}) = null · baseDemandSource = STOCKOUT_UNRESOLVED`,
         tone: 'warn',
       });
     } else {
       steps.push({
         title: 'Khóa sức mua cơ bản của ngày',
-        detail: 'Lấy max giữa số bán ghi nhận và mức nền tham chiếu — Chặng 3 không bao giờ làm giảm số bán thật.',
-        substitution: `Bₜ = max(Qₜ; R) = max(${fmt(valid.sales, 0)}; ${fmt(valid.referenceMedian)}) = ${fmt(valid.baseDemand)}`,
+        detail: 'Lấy trung vị ngày sạch quan sát; sales gốc vẫn giữ riêng để kiểm toán.',
+        substitution: `Bₜ = Median(R) = ${fmt(valid.baseDemand)}`,
         tone: 'good',
       });
     }
@@ -327,13 +369,13 @@ function stage3(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
     points,
     steps: [
       { title: 'B1 · Chọn SKU — nơi bán — ngày', detail: 'Duyệt từng ngày trong dữ liệu Chặng 1.', values: [{ label: 'Số ngày', value: fmt(state.daily.length, 0) }] },
-      { title: 'B2 · Kiểm tra ngày có thuộc CTKM', detail: 'Ngày CTKM không xử lý ở Chặng 3 mà bàn giao nguyên trạng sang Chặng 4.', values: [{ label: 'Chờ Chặng 4', value: fmt(state.daily.filter(record => record.baseSource === 'promo-defer').length, 0) }] },
-      { title: 'B3 · Kiểm tra stockout', detail: 'Ngày không CTKM, không stockout dùng số bán ghi nhận làm sức mua cơ bản; chỉ ngày có stockout mới tìm nền.', values: [{ label: 'Ngày sạch dùng Q', value: fmt(state.daily.filter(record => record.baseSource === 'clean').length, 0) }, { label: 'Ngày cần nâng nền', value: fmt(distorted.length, 0) }] },
+      { title: 'B2 · Kiểm tra ngày có thuộc CTKM', detail: 'Ngày CTKM bàn giao Chặng 4.', values: [{ label: 'Chờ Chặng 4', value: fmt(state.daily.filter(record => record.baseDemandSource === 'PROMOTION_UNRESOLVED').length, 0) }] },
+      { title: 'B3 · Kiểm tra stockout', detail: 'Ngày sạch quan sát giữ sales/zero thật.', values: [{ label: 'Ngày sạch', value: fmt(state.daily.filter(record => record.isCleanObservedReference).length, 0) }, { label: 'Ngày cần nền', value: fmt(distorted.length, 0) }] },
       { title: 'B4 · Tìm ngày sạch trong ±7 ngày', detail: `Quét lớp đầu ±${policy.referenceRadius} ngày; ngày CTKM, stockout, lấp kỹ thuật và ngày thiếu bản ghi không được làm tham chiếu.` },
       { title: 'B5 · Cân bằng; nếu cần mở rộng tối đa ±24 ngày', detail: `k=min(n₋,n₊,${policy.maxBalancedPerSide}); ưu tiên 2+2 cân bằng, cắt phía dư trước khi dùng nền tạm. Dữ liệu ngoài khung chỉ được dùng nếu nguồn đệm thực sự tồn tại.` },
       { title: 'B6 · Tính trung vị hoặc ghi thiếu căn cứ', detail: `Có tập cân bằng ≥4 ngày → nền tốt; không tạo được 2+2 nhưng có ≥${policy.minimumReferences} ngày → nền tạm; dưới ${policy.minimumReferences} ngày → không tự tạo nền.` },
-      { title: 'B7 · Tính sức mua cơ bản ngày stockout', detail: 'Bₜ=max(Qₜ,Median(Rₜ)); Chặng 3 không bao giờ làm giảm số bán thật.', values: [{ label: 'Đã nâng nền', value: fmt(state.daily.filter(record => record.baseSource === 'stockout-lifted').length, 0) }, { label: 'Thiếu căn cứ', value: fmt(state.daily.filter(record => record.baseSource === 'insufficient').length, 0) }] },
-      { title: 'B8 · Bàn giao nền và trạng thái tin cậy', detail: 'Lưu Q gốc, mức nền, ngày tham chiếu, trạng thái cân bằng và cờ kiểm tra lại cho Chặng 5/19.', tone: 'good' },
+      { title: 'B7 · Tính sức mua cơ bản ngày stockout', detail: 'Bₜ=Median(Rₜ).', values: [{ label: 'Đã có nền', value: fmt(state.daily.filter(record => record.baseDemandSource === 'STOCKOUT_BASELINE').length, 0) }, { label: 'Thiếu căn cứ', value: fmt(state.daily.filter(record => record.baseDemandSource === 'STOCKOUT_UNRESOLVED').length, 0) }] },
+      { title: 'B8 · Bàn giao nền và trạng thái tin cậy', detail: 'Lưu Q gốc, mức nền, ngày tham chiếu, trạng thái cân bằng và cờ kiểm tra lại cho Chặng 5/20.', tone: 'good' },
     ],
   };
 }
@@ -343,7 +385,7 @@ function stage4(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
   const points: TracePoint[] = regions.slice(0, 14).map(region => ({
     date: region.rows[0].date,
     label: formatPromoPointLabel(region.codes, region.rows[0].date, region.rows.at(-1)!.date),
-    kind: region.rows[0].baseSource === 'insufficient' ? 'warn' : 'km',
+    kind: region.rows[0].baseDemandSource === 'PROMOTION_UNRESOLVED' ? 'warn' : 'km',
   }));
   const totalPromoDays = state.daily.filter(record => record.promoCode).length;
   const region = focus?.promoCode ? regions.find(item => item.rows.some(row => row.date === focus.date)) ?? null : null;
@@ -369,7 +411,7 @@ function stage4(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
       },
       ...referenceSteps(state, focus, policy),
     ];
-    if (focus.baseSource === 'insufficient') {
+    if (focus.baseDemandSource === 'PROMOTION_UNRESOLVED') {
       steps.push({
         title: 'Không tự tạo nền CTKM',
         detail: 'Cả hai phía đều không đủ căn cứ trong ranh giới cho phép — vùng được ghi THIẾU CĂN CỨ và bàn giao Chặng 5 xử lý.',
@@ -404,8 +446,8 @@ function stage4(state: Readonly<SkuPipelineState>, policy: SimulationPolicy, foc
       { title: 'B4 · Mở rộng tối đa ±24 ngày và cân bằng hai phía', detail: `Chọn k=min(n₋,n₊,${policy.maxBalancedPerSide}) ngày gần vùng nhất mỗi phía; cắt phía dư trước khi kết luận chưa cân bằng.` },
       { title: 'B5 · Áp nhánh nền cân bằng/tạm/cố định/thiếu căn cứ', detail: `2+2 trở lên → cân bằng tốt; không đạt 2+2 nhưng có ≥${policy.minimumReferences} ngày → tạm; cụm sát cận lịch sử có đủ nguồn một phía → cố định; dưới ngưỡng → thiếu căn cứ.` },
       { title: 'B6 · Tính mức bán tự nhiên bằng Median', detail: 'Mức bán tự nhiên của vùng bằng trung vị tập ngày sạch đã chọn; tuyệt đối không dùng max(Q,Median).' },
-      { title: 'B7 · Gán cùng mức nền cho mọi ngày trong vùng', detail: 'Bₜ=Median(Rᵣ) cho mọi t thuộc vùng/cụm; giữ Q và mã CTKM riêng.', values: [{ label: 'Ngày đã chuẩn hóa', value: fmt(state.daily.filter(record => record.baseSource === 'promo-normalized').length, 0) }, { label: 'Thiếu căn cứ', value: fmt(state.daily.filter(record => record.promoCode && record.baseSource === 'insufficient').length, 0) }] },
-      { title: 'B8 · Bàn giao dữ liệu kiểm toán và nguồn học K', detail: 'Lưu vùng, tập tham chiếu, trạng thái nền, Q gốc và promoCode cho Chặng 5/12/19.', tone: 'good' },
+      { title: 'B7 · Gán cùng mức nền cho mọi ngày trong vùng', detail: 'Bₜ=Median(Rᵣ) cho mọi t thuộc vùng/cụm; giữ Q và mã CTKM riêng.', values: [{ label: 'Ngày đã chuẩn hóa', value: fmt(state.daily.filter(record => record.baseDemandSource === 'PROMOTION_BASELINE').length, 0) }, { label: 'Thiếu căn cứ', value: fmt(state.daily.filter(record => record.promoCode && record.baseDemandSource === 'PROMOTION_UNRESOLVED').length, 0) }] },
+      { title: 'B8 · Bàn giao dữ liệu kiểm toán và nguồn học K', detail: 'Lưu vùng, tập tham chiếu, trạng thái nền, Q gốc và promoCode cho Chặng 5/13/20.', tone: 'good' },
     ],
   };
 }
@@ -1554,8 +1596,28 @@ function stage19(state: Readonly<SkuPipelineState>): StageTrace {
 
 export function buildStageTrace(stage: StageNumber, state: Readonly<SkuPipelineState>, policy: SimulationPolicy, focusDate: string | null): StageTrace {
   const focus = focusDate ? state.daily.find(record => record.date === focusDate) ?? null : null;
+  if (stage === 5) {
+    const selected = focus ?? state.daily.find(record => record.baseDemandSource === 'TECHNICAL_FILL' || record.baseDemand === null) ?? state.daily.at(-1) ?? null;
+    const filledCount = state.daily.filter(record => record.baseDemandSource === 'TECHNICAL_FILL').length;
+    const unresolvedCount = state.daily.filter(record => record.baseDemand === null).length;
+    return {
+      heading: selected ? `Bổ sung mức bán nền — soi ngày ${selected.date}` : 'Bổ sung mức bán nền còn thiếu',
+      context: 'Chặng 5 chỉ xử lý cấp ngày; không cộng chu kỳ và không dùng ngày đã ước lượng làm nguồn cho ngày khác.',
+      points: state.daily.filter(record => record.baseDemandSource === 'TECHNICAL_FILL' || record.baseDemand === null).slice(-40).map(record => ({ date: record.date, label: record.baseDemand === null ? 'Chưa đủ căn cứ' : 'Đã bổ sung', kind: record.baseDemand === null ? 'warn' : 'so' })),
+      steps: [
+        { title: 'B1 · Xác định ngày thật sự thiếu nền', detail: selected ? `Ngày ${selected.date}: nguồn ${selected.baseDemandSource}, số bán ghi nhận ${fmt(selected.sales)}.` : 'Không có ngày dữ liệu để kiểm tra.' },
+        { title: 'B2 · Giữ nguyên số 0 thật', detail: 'Ngày có bằng chứng nguồn và bán bằng 0 không được đổi thành số dương.' },
+        { title: 'B3 · Tìm ngày sạch quan sát', detail: `Tìm ±${policy.referenceRadius}, mở tối đa ±${policy.maxReferenceRadius}; cần tối thiểu ${policy.minimumReferences} nguồn và lấy tối đa 14 ngày gần nhất.` },
+        { title: 'B4 · Loại nguồn không hợp lệ', detail: 'Loại ngày khuyến mãi, thiếu hàng, mất nguồn và mọi ngày đã được ước lượng.' },
+        { title: 'B5 · Tính trung vị', detail: selected?.referenceDates.length ? `Median từ ${selected.referenceDates.length} ngày: ${selected.referenceDates.join(', ')}.` : 'Không có tập tham chiếu đã chọn cho ngày đang soi.', substitution: selected?.referenceMedian === null || selected?.referenceMedian === undefined ? undefined : `B_fill = ${fmt(selected.referenceMedian)}` },
+        { title: 'B6 · Bàn giao dữ liệu ngày', detail: `${filledCount} ngày đã được bổ sung; ${unresolvedCount} ngày vẫn chưa đủ căn cứ và được giữ nguyên vị trí thời gian.`, tone: unresolvedCount ? 'warn' : 'good' },
+      ],
+      contract: STAGE_TRACE_CONTRACTS[stage],
+    };
+  }
   let trace: StageTrace;
-  switch (stage) {
+  const traceStage = (stage > 5 ? stage - 1 : stage) as Exclude<StageNumber, 20>;
+  switch (traceStage) {
     case 1: trace = stage1(state, policy); break;
     case 2: trace = stage2(state, policy, focus); break;
     case 3: trace = stage3(state, policy, focus); break;
@@ -1576,5 +1638,6 @@ export function buildStageTrace(stage: StageNumber, state: Readonly<SkuPipelineS
     case 18: trace = stage18(state); break;
     case 19: trace = stage19(state); break;
   }
-  return { ...trace, contract: STAGE_TRACE_CONTRACTS[stage] };
+  const mappedTrace = stage > 5 ? shiftLegacyTrace(trace) : trace;
+  return { ...mappedTrace, contract: STAGE_TRACE_CONTRACTS[stage] };
 }

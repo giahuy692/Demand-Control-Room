@@ -16,10 +16,10 @@ describe('RULE-04-004 — cụm CTKM gần như liên tục không tách đượ
   it('toàn bộ chuỗi bị hai mã CTKM liền kề phủ kín, không còn ngày sạch nào → cả cụm gộp lại vẫn insufficient, tạo task RULE-04-004', () => {
     const rows = Array.from({ length: totalDays }, (_, index) => {
       const date = dateAfter(start, index);
-      const code = index < totalDays / 2 ? 'KMA' : 'KMB';
+      const code = index < totalDays / 2 ? 101 : 102;
       return fixtureDailyRecord({ sku: 'P1', date, openStock: 10, closeStock: 9, sales: 5, totalStockDelta: -1, promoCode: code });
     });
-    const dataset = realDatasetFromRows(rows);
+    const dataset = realDatasetFromRows(rows, { extractionCompleted: false });
     const engine = new SimulationEngine();
     engine.setDataset(dataset);
     const runDate = dateAfter(start, totalDays + 5);
@@ -29,13 +29,13 @@ describe('RULE-04-004 — cụm CTKM gần như liên tục không tách đượ
     const s2 = engine.run(2, s1, policy);
     const s3 = engine.run(3, s2, policy);
     const s4 = engine.run(4, s3, policy);
-    const state = s4.states['P1'];
+    const state = s4.states['1'];
     const sourceRows = state.daily.filter(row => row.date >= start && row.date <= dateAfter(start, totalDays - 1));
 
     expect(sourceRows).toHaveLength(totalDays);
-    expect(sourceRows.every(row => row.promoCode === 'KMA' || row.promoCode === 'KMB')).toBe(true);
-    expect(sourceRows.every(row => row.baseSource === 'insufficient')).toBe(true);
-    const tasks = s4.exceptions.filter(task => task.skuId === 'P1');
+    expect(sourceRows.every(row => row.promoCode === '101' || row.promoCode === '102')).toBe(true);
+    expect(sourceRows.every(row => row.baseDemandSource === 'PROMOTION_UNRESOLVED')).toBe(true);
+    const tasks = s4.exceptions.filter(task => task.skuId === '1');
     expect(tasks.some(task => task.ruleId === 'RULE-04-004' && task.code === 'BASELINE_NOT_IDENTIFIABLE')).toBe(true);
     expect(Number(s4.summary['Ngày không xác định được nền'])).toBeGreaterThan(0);
     expect(s4.audit.some(line => line.includes('[RULE-04-004]'))).toBe(true);
@@ -46,7 +46,7 @@ describe('RULE-04-004 — cụm CTKM gần như liên tục không tách đượ
       const date = dateAfter(start, index);
       const inFirstPromo = index >= 20 && index < 25;
       const inSecondPromo = index >= 35 && index < 40;
-      const promoCode = inFirstPromo ? 'KMA' : inSecondPromo ? 'KMB' : null;
+      const promoCode = inFirstPromo ? 101 : inSecondPromo ? 102 : null;
       return fixtureDailyRecord({ sku: 'P1', date, openStock: 10, closeStock: 9, sales: 5, totalStockDelta: -1, promoCode });
     });
     const dataset = realDatasetFromRows(rows);
@@ -59,11 +59,11 @@ describe('RULE-04-004 — cụm CTKM gần như liên tục không tách đượ
     const s2 = engine.run(2, s1, policy);
     const s3 = engine.run(3, s2, policy);
     const s4 = engine.run(4, s3, policy);
-    const s4State = s4.states['P1'];
+    const s4State = s4.states['1'];
 
-    const promoRows = s4State.daily.filter(row => row.promoCode === 'KMA' || row.promoCode === 'KMB');
+    const promoRows = s4State.daily.filter(row => row.promoCode === '101' || row.promoCode === '102');
     expect(promoRows.length).toBeGreaterThan(0);
-    const tasks = s4.exceptions.filter(task => task.skuId === 'P1');
+    const tasks = s4.exceptions.filter(task => task.skuId === '1');
     expect(tasks.some(task => task.ruleId === 'RULE-04-004')).toBe(false);
   });
 });

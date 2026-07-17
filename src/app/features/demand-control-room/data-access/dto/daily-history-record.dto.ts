@@ -1,47 +1,31 @@
 import { JsonObjectReader } from '../../../../core/json/json-object-reader.class';
 import { DataContractError } from '../../../../core/errors/data-contract-error.class';
+import { DEEP_PROMO_MECHANISM_TYPES, PromotionClass, StockStatus } from '../../domain/models';
 
 /**
- * MỘT dòng lịch sử ngày theo hợp đồng DEMAND-SIMULATION-DATASET-V1.
- *
- * SAI KHÁC CÓ CHỦ ĐÍCH so với bản nháp handoff (salesRecords/stockRecords tách riêng):
- * giữ dạng MERGED sales+stock của DAILY-SOURCE-V2 vì (1) việc ghép sales↔stock theo
- * ngày đã được thực hiện và kiểm thử ở build-time (tools/demand-data), (2) nguồn thật
- * hiện KHÔNG có storeCode/barcode tách dòng — tách hai mảng lúc này là dựng hợp đồng
- * cho dữ liệu chưa tồn tại. Khi nguồn có storeCode thật, nâng contractVersion.
- *
- * Bất biến null/0 (DEC-006/007): `hasSalesRecord=false ⇔ sales=null` — không bao giờ
- * suy diễn 0 khi không có bằng chứng, không bao giờ giữ số khi cờ nói không có bằng chứng.
+ * MỘT dòng lịch sử ngày theo hợp đồng DEMAND-SIMULATION-DATASET-V1 (Schema mới 2026-07).
+ * Mock lẫn real đều phải qua đúng lớp này — không có schema riêng cho dữ liệu giả.
  */
 export class DailyHistoryRecordDto {
-  readonly sku!: string;
+  readonly storeCode!: number;
+  readonly productCode!: number;
+  readonly barcode!: string | null;
+  readonly productName!: string | null;
   readonly date!: string;
-  /**
-   * `null` CHỈ hợp lệ trên dòng isValidationActual (bán sau ngày cắt stock của nguồn —
-   * SQL stock dừng ở ProcessingEndDate nên không có bằng chứng tồn; không được bịa 0).
-   * Dòng lịch sử bắt buộc có số tồn.
-   */
+  readonly hasSalesRecord!: boolean;
+  readonly sales!: number | null;
+  readonly price!: number | null;
+  readonly promotionCode!: number | null;
+  readonly promotionName!: string | null;
+  readonly promotionStartDate!: string | null;
+  readonly promotionEndDate!: string | null;
+  readonly promotionType!: number | null;
+  readonly promotionMechanismType!: number | null;
+  readonly promotionClass!: PromotionClass;
   readonly openStock!: number | null;
   readonly closeStock!: number | null;
-  readonly sales!: number | null;
-  readonly hasSalesRecord!: boolean;
-  readonly isZeroSaleInferred!: boolean;
-  readonly returnQty!: number | null;
-  readonly hasReturnRecord!: boolean;
-  readonly inventoryNetMovement!: number | null;
-  readonly hasInventoryMovement!: boolean;
-  readonly totalStockDelta!: number;
-  readonly receiptHour!: string | null;
-  readonly hasReceiptRecord!: boolean;
-  readonly receiptTimeSource!: 'RECEIPT_DATE' | 'CREATE_TIME_FALLBACK' | 'UNRESOLVED' | null;
-  readonly promoCode!: string | null;
-  readonly promoName!: string | null;
-  readonly price!: number | null;
-  readonly productName!: string | null;
-  readonly isOpeningAnchor!: boolean;
-  readonly isReferenceOnly!: boolean;
-  readonly isHistoryRecord!: boolean;
-  readonly isValidationActual!: boolean;
+  readonly receiptHour!: number | null;
+  readonly stockStatus!: StockStatus;
 
   private constructor(props: Omit<DailyHistoryRecordDto, never>) {
     Object.assign(this, props);
@@ -51,43 +35,34 @@ export class DailyHistoryRecordDto {
   static fromUnknown(value: unknown, path: string): DailyHistoryRecordDto {
     const row = JsonObjectReader.read(value, path);
     const record = new DailyHistoryRecordDto({
-      sku: row.requiredString('sku'),
+      storeCode: row.requiredNumber('storeCode'),
+      productCode: row.requiredNumber('productCode'),
+      barcode: row.nullableString('barcode'),
+      productName: row.nullableString('productName'),
       date: row.isoDate('date'),
-      // Tồn có thể ÂM hợp lệ (NEGATIVE_REVIEW ở scaffold) — chỉ yêu cầu hữu hạn.
+      hasSalesRecord: row.requiredBoolean('hasSalesRecord'),
+      sales: row.nullableNumber('sales'),
+      price: row.nullableNumber('price'),
+      promotionCode: row.nullableNumber('promotionCode'),
+      promotionName: row.nullableString('promotionName'),
+      promotionStartDate: row.nullableString('promotionStartDate'),
+      promotionEndDate: row.nullableString('promotionEndDate'),
+      promotionType: row.nullableNumber('promotionType'),
+      promotionMechanismType: row.nullableNumber('promotionMechanismType'),
+      promotionClass: row.literal('promotionClass', ['NO_PROMOTION', 'ALWAYS_ON', 'DEEP_PROMO', 'PROMOTION_UNRESOLVED']),
       openStock: row.nullableNumber('openStock'),
       closeStock: row.nullableNumber('closeStock'),
-      sales: row.nullableNumber('sales'),
-      hasSalesRecord: row.requiredBoolean('hasSalesRecord'),
-      isZeroSaleInferred: row.requiredBoolean('isZeroSaleInferred'),
-      returnQty: row.nullableNumber('returnQty'),
-      hasReturnRecord: row.requiredBoolean('hasReturnRecord'),
-      inventoryNetMovement: row.nullableNumber('inventoryNetMovement'),
-      hasInventoryMovement: row.requiredBoolean('hasInventoryMovement'),
-      totalStockDelta: row.requiredNumber('totalStockDelta'),
-      receiptHour: validateReceiptHour(row.nullableString('receiptHour'), `${path}.receiptHour`),
-      hasReceiptRecord: row.requiredBoolean('hasReceiptRecord'),
-      receiptTimeSource: row.nullableLiteral('receiptTimeSource', ['RECEIPT_DATE', 'CREATE_TIME_FALLBACK', 'UNRESOLVED']),
-      promoCode: row.nullableString('promoCode'),
-      promoName: row.nullableString('promoName'),
-      price: row.nullableNumber('price'),
-      productName: row.nullableString('productName'),
-      isOpeningAnchor: row.requiredBoolean('isOpeningAnchor'),
-      isReferenceOnly: row.requiredBoolean('isReferenceOnly'),
-      isHistoryRecord: row.requiredBoolean('isHistoryRecord'),
-      isValidationActual: row.requiredBoolean('isValidationActual'),
+      receiptHour: row.nullableNumber('receiptHour'),
+      stockStatus: row.literal('stockStatus', ['CALCULATED', 'NEGATIVE_STOCK', 'ANCHOR_MISSING']),
     });
     assertPairInvariant(record.hasSalesRecord, record.sales, path, 'hasSalesRecord', 'sales');
-    assertPairInvariant(record.hasReturnRecord, record.returnQty, path, 'hasReturnRecord', 'returnQty');
-    assertPairInvariant(record.hasInventoryMovement, record.inventoryNetMovement, path, 'hasInventoryMovement', 'inventoryNetMovement');
-    if (record.isHistoryRecord && record.isValidationActual) {
-      throw new DataContractError(path, 'một dòng không được vừa isHistoryRecord vừa isValidationActual.');
+    if (record.sales !== null && record.sales < 0) {
+      throw new DataContractError(`${path}.sales`, `sales=${record.sales} phải >= 0.`);
     }
     if ((record.openStock === null) !== (record.closeStock === null)) {
       throw new DataContractError(path, 'openStock và closeStock phải cùng null hoặc cùng có số.');
     }
-    if (record.openStock === null && !record.isValidationActual) {
-      throw new DataContractError(path, 'dòng lịch sử bắt buộc có bằng chứng tồn — chỉ dòng isValidationActual được phép openStock/closeStock=null.');
-    }
+    assertPromotionClassInvariant(record, path);
     return record;
   }
 }
@@ -95,12 +70,23 @@ export class DailyHistoryRecordDto {
 /** hasRecord=false ⇔ value=null — vi phạm ở cả hai chiều đều bị chặn, không tự sửa. */
 function assertPairInvariant(hasRecord: boolean, value: number | null, path: string, flagKey: string, valueKey: string): void {
   if (hasRecord && value === null) throw new DataContractError(`${path}.${valueKey}`, `${flagKey}=true nhưng ${valueKey}=null.`);
-  if (!hasRecord && value !== null) throw new DataContractError(`${path}.${valueKey}`, `${flagKey}=false nhưng ${valueKey}=${value} — vi phạm bất biến null/0 (không suy diễn số khi không có bằng chứng).`);
+  if (!hasRecord && value !== null) throw new DataContractError(`${path}.${valueKey}`, `${flagKey}=false nhưng ${valueKey}=${value} — vi phạm bất biến null/0.`);
 }
 
-function validateReceiptHour(value: string | null, path: string): string | null {
-  if (value !== null && !/^\d{2}:\d{2}$/.test(value)) {
-    throw new DataContractError(path, `"${value}" không phải giờ dạng HH:MM.`);
+/**
+ * Bất biến phân loại CTKM (02-Hop-dong-du-lieu-dau-vao.md):
+ * DEEP_PROMO ⇔ tbl_POLPromotion.[Type] ∈ {2, 7}. Nguồn nào (SQL export hay mock
+ * generator) vi phạm đều bị chặn tại đây — không tự sửa lại phân loại.
+ */
+function assertPromotionClassInvariant(record: DailyHistoryRecordDto, path: string): void {
+  const isDeepMechanism = record.promotionMechanismType !== null && DEEP_PROMO_MECHANISM_TYPES.includes(record.promotionMechanismType);
+  if (record.promotionClass === 'DEEP_PROMO' && !isDeepMechanism) {
+    throw new DataContractError(`${path}.promotionClass`, `DEEP_PROMO nhưng promotionMechanismType=${record.promotionMechanismType} ∉ {${DEEP_PROMO_MECHANISM_TYPES.join(', ')}}.`);
   }
-  return value;
+  if (record.promotionCode !== null && isDeepMechanism && record.promotionClass !== 'DEEP_PROMO') {
+    throw new DataContractError(`${path}.promotionClass`, `promotionMechanismType=${record.promotionMechanismType} ∈ {${DEEP_PROMO_MECHANISM_TYPES.join(', ')}} thì promotionClass phải là DEEP_PROMO, nhận được ${record.promotionClass}.`);
+  }
+  if (record.promotionClass === 'NO_PROMOTION' && record.promotionCode !== null) {
+    throw new DataContractError(`${path}.promotionClass`, `NO_PROMOTION nhưng promotionCode=${record.promotionCode} — ngày có CTKM phải mang class ALWAYS_ON/DEEP_PROMO/PROMOTION_UNRESOLVED.`);
+  }
 }

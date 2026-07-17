@@ -47,13 +47,54 @@ export function testEngine(): SimulationEngine {
  * Các spec Chặng 1–4 vẫn đi qua đúng DTO + mapper production, không dựng domain object tắt.
  */
 export function realDatasetFromRows(rows: Record<string, unknown>[], metadataOverrides: Record<string, unknown> = {}): SimulationDataset {
-  const skus = [...new Set(rows.map(row => String(row['sku'])))].sort();
-  const dates = rows.map(row => String(row['date'])).sort();
+  const mappedRows = rows.map(row => {
+    const sku = String(row['sku'] ?? row['productCode'] ?? '1');
+    const numericCode = Number(sku.replace('SKU-', '')) || 1;
+    const isPromo = row['promoCode'] !== undefined && row['promoCode'] !== null && row['promoCode'] !== '';
+    // `promoCode` là shorthand "ngày KM sâu" của spec — nó thắng class mặc định NO_PROMOTION
+    // của fixtureDailyRecord (bất biến DTO cấm NO_PROMOTION kèm promotionCode); class khác
+    // NO_PROMOTION do spec chỉ định rõ (ALWAYS_ON/PROMOTION_UNRESOLVED) vẫn được giữ.
+    const explicitClass = row['promotionClass'];
+    const promotionClass = isPromo
+      ? (explicitClass && explicitClass !== 'NO_PROMOTION' ? explicitClass : 'DEEP_PROMO')
+      : (explicitClass ?? 'NO_PROMOTION');
+    return {
+      storeCode: 11,
+      productCode: numericCode,
+      barcode: sku,
+      productName: String(row['productName'] ?? 'Sản phẩm kiểm thử'),
+      date: String(row['date']),
+      hasSalesRecord: row['hasSalesRecord'] ?? (row['sales'] !== null && row['sales'] !== undefined),
+      sales: row['sales'] !== undefined ? row['sales'] : 2,
+      price: Number(row['price'] ?? 100000),
+      promotionCode: row['promoCode']
+        ? (typeof row['promoCode'] === 'number'
+            ? row['promoCode']
+            : (/^\d+$/.test(String(row['promoCode']))
+                ? Number(row['promoCode'])
+                : 999))
+        : null,
+      promotionName: row['promoName'] ?? null,
+      promotionStartDate: null,
+      promotionEndDate: null,
+      promotionType: null,
+      // Bất biến DTO: DEEP_PROMO ⇔ mechanismType ∈ {2, 7} — fixture mặc định 2 cho ngày KM sâu
+      // (?? cố ý nuốt cả null: fixtureDailyRecord đầy đủ luôn mang mechanismType=null sẵn).
+      promotionMechanismType: row['promotionMechanismType'] ?? (promotionClass === 'DEEP_PROMO' ? 2 : null),
+      promotionClass,
+      openStock: row['openStock'] !== undefined ? row['openStock'] : 10,
+      closeStock: row['closeStock'] !== undefined ? row['closeStock'] : 8,
+      receiptHour: row['receiptHour'] !== undefined ? (typeof row['receiptHour'] === 'number' ? row['receiptHour'] : (row['receiptHour'] ? Number(String(row['receiptHour']).slice(0, 2)) : null)) : null,
+      stockStatus: row['stockCalculationStatus'] === 'NEGATIVE_REVIEW' ? 'NEGATIVE_STOCK' : (row['stockCalculationStatus'] === 'ANCHOR_MISSING' ? 'ANCHOR_MISSING' : 'CALCULATED'),
+    };
+  });
+  const skus = [...new Set(mappedRows.map(row => row.productCode.toString()))].sort();
+  const dates = mappedRows.map(row => row.date).sort();
   const maxDate = dates.at(-1) ?? '2026-01-01';
   const raw = fixtureDataset({
     datasetKind: 'REAL',
     products: skus.map(sku => fixtureProduct({ id: sku, name: 'SKU thật', price: 100000, purchasePrice: 70000, type: 'REAL', category: 'ERP' })),
-    dailyRecords: rows,
+    dailyRecords: mappedRows,
     metadata: {
       runDate: maxDate,
       sourceWatermarks: { sales: maxDate, stock: maxDate },

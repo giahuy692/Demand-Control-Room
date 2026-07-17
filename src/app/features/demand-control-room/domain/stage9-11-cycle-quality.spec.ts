@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { SimulationEngine } from './simulation-engine';
 import { StageNumber, StageSnapshot } from './models';
@@ -15,8 +15,8 @@ function countByStatus(snapshot: StageSnapshot, status: string): number {
   return Object.values(snapshot.states).reduce((sum, state) => sum + state.cycles.filter(cycle => cycle.status === status).length, 0);
 }
 
-describe('Chặng 9-11 — log breakdown chất lượng chu kỳ khóa (LOCKED_OBSERVED/LOCKED_ADJUSTED/LOCKED_FALLBACK)', () => {
-  for (const stage of [9, 10, 11] as const) {
+describe('Chặng 10-12 — log breakdown chất lượng chu kỳ khóa (LOCKED_OBSERVED/LOCKED_ADJUSTED/LOCKED_FALLBACK)', () => {
+  for (const stage of [10, 11, 12] as const) {
     it(`Chặng ${stage}: summary tách đúng 3 loại chu kỳ khóa, khớp với số đếm trực tiếp trên state.cycles`, () => {
       const snapshot = runTo(stage);
 
@@ -32,3 +32,4 @@ describe('Chặng 9-11 — log breakdown chất lượng chu kỳ khóa (LOCKED_
     });
   }
 });
+

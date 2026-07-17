@@ -79,7 +79,7 @@ describe('DemandSimulationDatasetDto — hợp đồng DEMAND-SIMULATION-DATASET
   });
 
   it('§3.14 — dòng ngày mang SKU không có trong products bị chặn', () => {
-    const raw = fixtureDataset({ dailyRecords: [fixtureDailyRecord({ sku: 'SKU-KHONG-TON-TAI' })] });
+    const raw = fixtureDataset({ dailyRecords: [fixtureDailyRecord({ productCode: 999 })] });
     expect(() => DemandSimulationDatasetDto.fromUnknown(raw)).toThrowError(/UNKNOWN_SKU/);
   });
 
@@ -93,13 +93,40 @@ describe('DemandSimulationDatasetDto — hợp đồng DEMAND-SIMULATION-DATASET
     expect(() => DemandSimulationDatasetDto.fromUnknown(raw)).toThrowError(DataContractError);
   });
 
-  it('§3.12 — dòng isValidationActual trước runDate bị chặn', () => {
-    const raw = fixtureDataset({ dailyRecords: [fixtureDailyRecord({ date: '2026-05-01', isHistoryRecord: false, isValidationActual: true })] });
-    expect(() => DemandSimulationDatasetDto.fromUnknown(raw)).toThrowError(/VALIDATION_WINDOW/);
-  });
-
   it('sản phẩm trùng id bị chặn', () => {
     const raw = fixtureDataset({ products: [fixtureProduct(), fixtureProduct()], dailyRecords: [fixtureDailyRecord()] });
     expect(() => DemandSimulationDatasetDto.fromUnknown(raw)).toThrowError(/DUPLICATE_PRODUCT/);
+  });
+
+  it('bất biến DEEP_PROMO ⇔ mechanismType ∈ {2,7}: DEEP_PROMO với mechanismType khác bị chặn', () => {
+    const raw = fixtureDataset({ dailyRecords: [fixtureDailyRecord({ promotionCode: 101, promotionClass: 'DEEP_PROMO', promotionMechanismType: 1 })] });
+    expect(() => DemandSimulationDatasetDto.fromUnknown(raw)).toThrowError(/DEEP_PROMO nhưng promotionMechanismType=1/);
+  });
+
+  it('bất biến DEEP_PROMO ⇔ mechanismType ∈ {2,7}: mechanismType=7 mà khai ALWAYS_ON bị chặn', () => {
+    const raw = fixtureDataset({ dailyRecords: [fixtureDailyRecord({ promotionCode: 101, promotionClass: 'ALWAYS_ON', promotionMechanismType: 7 })] });
+    expect(() => DemandSimulationDatasetDto.fromUnknown(raw)).toThrowError(/phải là DEEP_PROMO/);
+  });
+
+  it('NO_PROMOTION kèm promotionCode bị chặn — ngày có CTKM phải mang class thật', () => {
+    const raw = fixtureDataset({ dailyRecords: [fixtureDailyRecord({ promotionCode: 101, promotionClass: 'NO_PROMOTION' })] });
+    expect(() => DemandSimulationDatasetDto.fromUnknown(raw)).toThrowError(/NO_PROMOTION nhưng promotionCode=101/);
+  });
+
+  it('mechanismType 2/7 hợp lệ với DEEP_PROMO; ALWAYS_ON hợp lệ với mechanism khác — mock/real cùng một luật', () => {
+    const raw = fixtureDataset({
+      dailyRecords: [
+        fixtureDailyRecord({ date: '2026-05-01', promotionCode: 101, promotionClass: 'DEEP_PROMO', promotionMechanismType: 2 }),
+        fixtureDailyRecord({ date: '2026-05-02', promotionCode: 102, promotionClass: 'ALWAYS_ON', promotionMechanismType: 1, openStock: 8, closeStock: 8 }),
+      ],
+    });
+    expect(() => DemandSimulationDatasetDto.fromUnknown(raw)).not.toThrow();
+  });
+
+  it('promotion interval mang promotionClass không hợp lệ bị chặn; vắng mặt mặc định DEEP_PROMO (tương thích ngược)', () => {
+    const bad = fixtureDataset({ promotionIntervals: [{ sku: null, code: 'KM01', name: null, startDate: '2026-06-01', endDate: '2026-06-10', promotionClass: 'GIẢM_SÂU' }] });
+    expect(() => DemandSimulationDatasetDto.fromUnknown(bad)).toThrowError(DataContractError);
+    const legacy = fixtureDataset({ promotionIntervals: [{ sku: null, code: 'KM01', name: null, startDate: '2026-06-01', endDate: '2026-06-10' }] });
+    expect(DemandSimulationDatasetDto.fromUnknown(legacy).promotionIntervals[0].promotionClass).toBe('DEEP_PROMO');
   });
 });

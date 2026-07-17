@@ -12,7 +12,7 @@ function runTo(stage: StageNumber, policy = DEFAULT_POLICY): StageSnapshot {
   return snapshot!;
 }
 
-describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1–C19', () => {
+describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1–C20', () => {
   it('C1 không đọc lịch sử SKU vượt ngoài số chu kỳ đầy đủ của phiên', () => {
     const policy = { ...DEFAULT_POLICY, historyYears: 2 };
     const snapshot = runTo(1, policy);
@@ -25,7 +25,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C8 gán ưu tiên vốn theo từng ô AX…CZ, không suy rộng theo A/B/C', () => {
-    const snapshot = runTo(8);
+    const snapshot = runTo(9);
     for (const state of Object.values(snapshot.states)) {
       const { abc, xyz } = state.classification;
       if (abc === 'N/A' || xyz === 'D' || xyz === null) continue;
@@ -38,7 +38,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C11 không tự LOCKED khi tài liệu chưa có ngưỡng P25 được phê duyệt', () => {
-    const snapshot = runTo(11);
+    const snapshot = runTo(12);
     for (const state of Object.values(snapshot.states)) {
       expect(state.forecast?.lockStatus).not.toBe('locked');
       if (state.forecast?.model === 'PurchasePlan') expect(state.forecast.lockStatus).toBe('exception');
@@ -46,7 +46,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C13 chỉ đọc kế hoạch CTKM đã xác nhận từ input SKU', () => {
-    const snapshot = runTo(13);
+    const snapshot = runTo(14);
     for (const state of Object.values(snapshot.states)) {
       const base = state.forecast?.baseForecast ?? [];
       const factor = state.promoConfidence === 'auto' ? state.promoFactor ?? 1 : 1;
@@ -59,7 +59,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C14 tính I_free theo từng mốc và không cộng lô chưa xác nhận', () => {
-    const snapshot = runTo(14);
+    const snapshot = runTo(15);
     for (const state of Object.values(snapshot.states)) {
       const expectedInbound = state.definition.inboundPlan.filter(item => item.confirmed).reduce((sum, item) => sum + item.quantity, 0);
       const final = state.supplyMilestones.at(-1)!;
@@ -69,7 +69,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C15 lấy LT̄/σLT từ lịch sử lead time của SKU và giữ nguyên cảnh báo ràng buộc', () => {
-    const snapshot = runTo(15);
+    const snapshot = runTo(16);
     for (const state of Object.values(snapshot.states)) {
       const audit = state.safetyStockAudit;
       if (!audit || !state.definition.leadTimeHistoryDays.length) continue;
@@ -83,7 +83,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C16 tính Qraw rồi áp MOQ làm sàn (không phải bội số) và làm tròn theo bước đặt hàng — doc(26) §8.2/§8.3', () => {
-    const snapshot = runTo(16);
+    const snapshot = runTo(17);
     for (const state of Object.values(snapshot.states)) {
       const plan = state.orderPlan!;
       if (plan.warnings.length) continue;
@@ -99,7 +99,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C17 không vượt ngân sách, cấp theo bội số bước đặt hàng và không cấp dưới MOQ — doc(26) §17.8.2', () => {
-    const snapshot = runTo(17);
+    const snapshot = runTo(18);
     const fundedValue = Object.values(snapshot.states).reduce((sum, state) => sum + (state.budgetAllocation?.fundedValue ?? 0), 0);
     expect(fundedValue).toBeLessThanOrEqual(DEFAULT_POLICY.periodBudget);
     for (const state of Object.values(snapshot.states)) {
@@ -112,7 +112,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C18 không tính lại số đặt và chỉ phát hành dòng qua đủ ba cổng', () => {
-    const snapshot = runTo(18);
+    const snapshot = runTo(19);
     for (const state of Object.values(snapshot.states)) {
       const decision = state.releaseDecision!;
       if (decision.status === 'issued') {
@@ -125,7 +125,7 @@ describe('hợp đồng đối chiếu trực tiếp Tài liệu giải pháp C1
   });
 
   it('C19 tính WAPE trên actual và chỉ tạo đề xuất cho phiên tương lai', () => {
-    const snapshot = runTo(19);
+    const snapshot = runTo(20);
     for (const state of Object.values(snapshot.states)) {
       const audit = state.postAudit!;
       const actual = state.definition.actualDemand;

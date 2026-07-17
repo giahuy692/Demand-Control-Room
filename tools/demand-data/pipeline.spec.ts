@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { splitDataLine, readDelimitedFile } from './csv-reader.mjs';
 import { validateDataset } from './data-contract.mjs';
 import { buildMockDailyRows, buildMockProducts, fullCycleCount, MOCK_CYCLE_LENGTH, MOCK_HISTORY_YEARS, MOCK_RUN_DATE } from './mock-generator.mjs';
+import { isoDateFrom, requiredNumber } from './normalizers.mjs';
 
 describe('mock-generator.mjs', () => {
   it('giữ đúng cửa sổ lịch đã khóa trong baseline', () => {
@@ -44,15 +45,17 @@ describe('data-contract.mjs — validator CLI (§12.16–18)', () => {
         runMode: 'PLANNING_SIMULATION', runDate: '2026-06-01', calendarScaffold: 'PRESCAFFOLDED',
         historyYears: 3, cycleLengthDays: 15, storeCode: 'M', storeScopeStatus: 'SYNTHETIC_FIXTURE',
         portfolioMode: 'SELECTED_SKU_SIMULATION', extractIsTruncated: true,
-        sourceWatermarks: { sales: null, stock: null },
+        sourceWatermarks: { sales: '2026-05-31', stock: '2026-05-31' }, extractionCompleted: true,
         qualityGates: { stockReconciliation: 'PASS', stockMismatchSkuCount: 0 },
         rowCounts: { dailyRecords: 1, products: 1 }, policyOverrides: {},
       },
-      products: [{ id: 'S1' }],
+      products: [{ id: 'SKU-011' }],
       dailyRecords: [{
-        sku: 'S1', date: '2026-05-01', openStock: 1, closeStock: 1, sales: 0, hasSalesRecord: true,
-        isZeroSaleInferred: false, returnQty: null, hasReturnRecord: false, inventoryNetMovement: null,
-        hasInventoryMovement: false, isHistoryRecord: true, isValidationActual: false,
+        storeCode: 11, productCode: 11, barcode: '11', productName: 'Prod 11', date: '2026-05-01',
+        openStock: 1, closeStock: 1, sales: 0, hasSalesRecord: true, price: 10,
+        promotionCode: null, promotionName: null, promotionStartDate: null, promotionEndDate: null,
+        promotionType: null, promotionMechanismType: null, promotionClass: 'NO_PROMOTION',
+        receiptHour: null, stockStatus: 'CALCULATED',
       }],
       promotionIntervals: [],
     }));
@@ -65,12 +68,13 @@ describe('data-contract.mjs — validator CLI (§12.16–18)', () => {
   it('§12.18 — không đổi null thành 0: hasSalesRecord=false + sales=0 bị chặn', () => {
     const dataset = minimalDataset();
     (dataset['dailyRecords'] as Record<string, unknown>[])[0]['hasSalesRecord'] = false;
+    (dataset['dailyRecords'] as Record<string, unknown>[])[0]['sales'] = 0;
     expect(validateDataset(dataset).join('\n')).toMatch(/vi phạm null\/0/);
   });
 
   it('§12.17 — SKU không thuộc products (lệch cohort) bị chặn', () => {
     const dataset = minimalDataset();
-    (dataset['dailyRecords'] as Record<string, unknown>[])[0]['sku'] = 'S2';
+    (dataset['dailyRecords'] as Record<string, unknown>[])[0]['productCode'] = 12;
     expect(validateDataset(dataset).join('\n')).toMatch(/UNKNOWN_SKU/);
   });
 
@@ -102,5 +106,29 @@ describe('hai file dataset đã build đạt hợp đồng CLI', () => {
   ])('%s', path => {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
     expect(validateDataset(parsed)).toEqual([]);
+  });
+
+  it('REAL sparse không tự xác nhận ngày thiếu sales row là zero', () => {
+    const parsed = JSON.parse(readFileSync('src/assets/demand-planning/datasets/real.dataset.json', 'utf8')) as {
+      dailyRecords: { hasSalesRecord: boolean; sales: number | null }[];
+    };
+    const hasSparseDay = parsed.dailyRecords.some(r => !r.hasSalesRecord && r.sales === null);
+    expect(hasSparseDay).toBe(true);
+  });
+
+  it('sales trong REAL JSON bằng đúng tổng Sales theo SKU-ngày của CSV', () => {
+    const csvRows = readDelimitedFile('Sql/sales-history.csv', ['ProductCode', 'Date', 'Sales', 'HasSalesRecord']);
+    const expected = new Map<string, number>();
+    for (const row of csvRows) {
+      if (row.HasSalesRecord !== '1') continue;
+      const key = `${row.ProductCode}|${isoDateFrom(row.Date)}`;
+      expected.set(key, (expected.get(key) ?? 0) + requiredNumber(row.Sales, key));
+    }
+    const parsed = JSON.parse(readFileSync('src/assets/demand-planning/datasets/real.dataset.json', 'utf8')) as {
+      dailyRecords: { productCode: number; date: string; sales: number | null; hasSalesRecord: boolean }[];
+    };
+    const actual = new Map(parsed.dailyRecords.filter(row => row.hasSalesRecord).map(row => [`${row.productCode}|${row.date}`, row.sales]));
+    expect(actual.size).toBe(expected.size);
+    for (const [key, qty] of expected) expect(actual.get(key), key).toBe(qty);
   });
 });

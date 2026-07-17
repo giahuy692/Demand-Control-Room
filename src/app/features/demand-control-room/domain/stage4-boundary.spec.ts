@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { qualifySelection, selectReferences } from './simulation-engine';
 import { DEFAULT_POLICY } from './policy';
-import { DailyRecord } from './models';
+import { BaseDemandSource, DailyRecord, PromotionStatus, SalesObservationStatus, StockoutStatus, TechnicalFillStatus } from './models';
 
 function record(index: number): DailyRecord {
   return {
-    sku: 'TEST', date: `2026-01-${String(index + 1).padStart(2, '0')}`, openStock: 10, closeStock: 9, sales: 5,
-    salesStatus: 'OBSERVED', isReferenceOnly: false, stockSource: 'OBSERVED', stockCalculationStatus: 'CALCULATED',
-    hasRecord: true, receiptHour: null, promoCode: null, isStockout: false, stockoutReviewRequired: false, stockoutReason: null,
-    baseDemand: null, baseSource: null, referenceDates: [], beforeReferenceDates: [], afterReferenceDates: [],
+    sku: 'TEST', barcode: 'TEST', date: `2026-01-${String(index + 1).padStart(2, '0')}`, openStock: 10, closeStock: 9, sales: 5,
+    salesObservationStatus: SalesObservationStatus.RECORDED_SALE, isReferenceOnly: false, stockSource: 'OBSERVED', stockCalculationStatus: 'CALCULATED',
+    hasSalesRecord: true, receiptHour: null, promoCode: null, promotionStatus: PromotionStatus.NONE, stockoutStatus: StockoutStatus.NONE,
+    baseDemand: null, baseDemandSource: BaseDemandSource.SOURCE_DATA_GAP, isCleanObservedReference: false, technicalFillStatus: TechnicalFillStatus.NOT_APPLICABLE,
+    referenceDates: [], referenceEvidence: [], beforeReferenceDates: [], afterReferenceDates: [],
     referenceMedian: null, balanceStatus: null, selectionReason: '',
   };
 }

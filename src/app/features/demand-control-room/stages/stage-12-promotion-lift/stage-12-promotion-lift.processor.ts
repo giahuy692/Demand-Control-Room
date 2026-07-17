@@ -25,6 +25,6 @@ export function runStage12(previous: StageSnapshot, policy: SimulationPolicy): S
   }
   return createSnapshot(12, policy, states, { 'Hệ số tự khóa': Object.values(states).filter(state => state.promoConfidence === 'auto').length, 'Cần duyệt': Object.values(states).filter(state => state.promoConfidence === 'low' || state.promoConfidence === 'suggest-only').length, 'Bị chặn': Object.values(states).filter(state => state.promoConfidence === 'blocked').length, 'Không có mẫu': Object.values(states).filter(state => state.promoConfidence === 'none').length }, [
     'K = bán ghi nhận / nền tự nhiên theo vùng CTKM.', 'K < 1 được giữ làm bằng chứng và chuyển REVIEW, không tự nâng lên 1,00.',
-    '[RULE-12-001] Chỉ học K từ vùng CTKM đủ căn cứ, không bị stockout làm méo (buildPromoRegionSamples loại hasStockout/missingBase); CTKM thường trực không tạo vùng vì đã bị loại khỏi promoCode trước Chặng 2.',
+    '[RULE-12-001] Chỉ học K từ vùng CTKM đủ căn cứ, không bị stockout làm méo (buildPromoRegionSamples loại hasStockout/missingBase); CTKM thường trực không tạo vùng vì đã bị loại khỏi promoCode trước Chặng 2; ngày ALWAYS_ON giữ Sales làm nền tự nhiên nên cũng không tạo vùng học K.',
   ]);
 }

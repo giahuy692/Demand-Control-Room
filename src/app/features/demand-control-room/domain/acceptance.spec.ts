@@ -2,16 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY } from './policy';
 import { buildCycles, SimulationEngine } from './simulation-engine';
 import { applyPromoFactor, calculateFreeStock, calculateTrend, classifyAbcRows, classifySeasonPosition, classifyXyz, croston, detectPulse, isStockout, median, populationStdev, promoBaseline, safetyStock, stockoutBaseline } from './math';
-import { DailyRecord } from './models';
+import { BaseDemandSource, DailyRecord, PromotionStatus, SalesObservationStatus, StockoutStatus, TechnicalFillStatus } from './models';
 import { buildPromoRegionSamples } from './promo-analysis';
 import { testEngine } from '../data-access/testing/file-dataset.testing';
 
-function dailyRecord(index: number, baseDemand: number | null, baseSource: DailyRecord['baseSource']): DailyRecord {
+function dailyRecord(index: number, baseDemand: number | null, baseDemandSource: BaseDemandSource): DailyRecord {
   return {
-    sku: 'TEST', date: `2026-01-${String(index + 1).padStart(2, '0')}`, openStock: 10, closeStock: 9, sales: baseDemand ?? 5,
-    salesStatus: 'OBSERVED', isReferenceOnly: false, stockSource: 'OBSERVED', stockCalculationStatus: 'CALCULATED',
-    hasRecord: true,
-    receiptHour: null, promoCode: null, isStockout: false, stockoutReviewRequired: false, stockoutReason: null, baseDemand, baseSource, referenceDates: [],
+    sku: 'TEST', barcode: 'TEST', date: `2026-01-${String(index + 1).padStart(2, '0')}`, openStock: 10, closeStock: 9, sales: baseDemand ?? 5,
+    salesObservationStatus: SalesObservationStatus.RECORDED_SALE, isReferenceOnly: false, stockSource: 'OBSERVED', stockCalculationStatus: 'CALCULATED',
+    hasSalesRecord: true, receiptHour: null, promoCode: null, promotionStatus: PromotionStatus.NONE, stockoutStatus: StockoutStatus.NONE,
+    baseDemand, baseDemandSource, isCleanObservedReference: baseDemandSource === BaseDemandSource.CLEAN_OBSERVED_SALE, technicalFillStatus: TechnicalFillStatus.NOT_APPLICABLE, referenceDates: [], referenceEvidence: [],
     beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null, balanceStatus: null, selectionReason: '',
   };
 }
@@ -25,11 +25,11 @@ describe('21 acceptance tests từ Developer Spec', () => {
   });
 
   it('T02 · Chặng 2: nhập 13:00 sau cutoff là stockout', () => {
-    expect(isStockout({ openStock: 0, closeStock: 20, sales: 0, receiptHour: '13:00', hasRecord: true }, '10:00')).toBe(true);
+    expect(isStockout({ openStock: 0, closeStock: 20, receiptHour: 13 }, '10:00')).toBe(true);
   });
 
   it('T03 · Chặng 2: trống cả ngày luôn là stockout, không có heuristic SKU thưa', () => {
-    expect(isStockout({ openStock: 0, closeStock: 0, sales: 0, receiptHour: null, hasRecord: true }, '10:00')).toBe(true);
+    expect(isStockout({ openStock: 0, closeStock: 0, receiptHour: null }, '10:00')).toBe(true);
   });
 
   it('T04 · Chặng 3: max(8, median 18/20/21/19) = 19,5', () => {
@@ -49,13 +49,13 @@ describe('21 acceptance tests từ Developer Spec', () => {
   });
 
   it('T08 · Chặng 5: chu kỳ không có ngày đủ căn cứ là empty và không khóa', () => {
-    const cycle = buildCycles(Array.from({ length: 15 }, (_, index) => dailyRecord(index, null, 'insufficient')), 15, 3, 7)[0];
+    const cycle = buildCycles(Array.from({ length: 15 }, (_, index) => dailyRecord(index, null, BaseDemandSource.SOURCE_DATA_GAP)), 15, 3, 7)[0];
     expect(cycle.emptyCycle).toBe(true);
     expect(cycle.locked).toBe(false);
   });
 
   it('T09 · Chặng 5: chu kỳ thiếu hai ngày được lấp và khóa', () => {
-    const records = Array.from({ length: 15 }, (_, index) => dailyRecord(index, index < 2 ? null : 10, index < 2 ? 'insufficient' : 'clean'));
+    const records = Array.from({ length: 15 }, (_, index) => dailyRecord(index, index < 2 ? null : 10, index < 2 ? BaseDemandSource.SOURCE_DATA_GAP : BaseDemandSource.CLEAN_OBSERVED_SALE));
     const cycle = buildCycles(records, 15, 3, 7)[0];
     expect(cycle.locked).toBe(true);
     expect(cycle.technicalFillDays).toBe(2);
@@ -115,11 +115,17 @@ describe('21 acceptance tests từ Developer Spec', () => {
   });
 
   it('T18b · Chặng 12: mỗi vùng CTKM chỉ tạo một K từ tổng Q / tổng nền', () => {
-    const first = { ...dailyRecord(0, 10, 'promo-normalized'), promoCode: 'KM-A', sales: 20 };
-    const second = { ...dailyRecord(1, 30, 'promo-normalized'), promoCode: 'KM-A', sales: 30 };
+    const first = { ...dailyRecord(0, 10, BaseDemandSource.PROMOTION_BASELINE), promoCode: 'KM-A', promotionStatus: PromotionStatus.PROMOTION, promotionClass: 'DEEP_PROMO' as const, sales: 20 };
+    const second = { ...dailyRecord(1, 30, BaseDemandSource.PROMOTION_BASELINE), promoCode: 'KM-A', promotionStatus: PromotionStatus.PROMOTION, promotionClass: 'DEEP_PROMO' as const, sales: 30 };
     const samples = buildPromoRegionSamples([first, second]);
     expect(samples).toHaveLength(1);
     expect(samples[0].factor).toBe(1.25);
+  });
+
+  it('T18c · Chặng 12: ngày ALWAYS_ON giữ Sales làm nền — KHÔNG tạo vùng học K, không bị blocked oan', () => {
+    const first = { ...dailyRecord(0, 10, BaseDemandSource.CLEAN_OBSERVED_SALE), promoCode: '888', promotionClass: 'ALWAYS_ON' as const, sales: 10 };
+    const second = { ...dailyRecord(1, 12, BaseDemandSource.CLEAN_OBSERVED_SALE), promoCode: '888', promotionClass: 'ALWAYS_ON' as const, sales: 12 };
+    expect(buildPromoRegionSamples([first, second])).toHaveLength(0);
   });
 
   it('T19 · Chặng 13: nền 150, KM 5/15 ngày, K=1,5 cho 175', () => {

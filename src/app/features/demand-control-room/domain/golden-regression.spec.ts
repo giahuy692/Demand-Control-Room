@@ -7,7 +7,7 @@ import { testEngine } from '../data-access/testing/file-dataset.testing';
 /**
  * GOLDEN REGRESSION — Commit 1 (Baseline characterization) của kế hoạch refactor.
  *
- * Chốt lại hành vi hiện tại của pipeline 19 chặng trên dữ liệu giả (seeded, deterministic)
+ * Chốt lại hành vi hiện tại của pipeline 20 chặng trên dữ liệu giả (seeded, deterministic)
  * TRƯỚC khi di chuyển file/tách stage/đổi kiến trúc. Mọi diff snapshot sau này phải được
  * giải thích là "chủ đích đổi nghiệp vụ" hoặc coi là regression — không được cập nhật
  * snapshot mà không đối chiếu (Nguyên tắc §11 Commit 1 / §12.36 của handoff).
@@ -17,7 +17,7 @@ import { testEngine } from '../data-access/testing/file-dataset.testing';
  */
 
 const GOLDEN_SKUS = ['SKU-001', 'SKU-002', 'SKU-003'] as const;
-const ALL_STAGES = Array.from({ length: 19 }, (_, index) => (index + 1) as StageNumber);
+const ALL_STAGES = Array.from({ length: 20 }, (_, index) => (index + 1) as StageNumber);
 
 function runAllStages(): ReadonlyMap<StageNumber, StageSnapshot> {
   const engine = testEngine();
@@ -55,7 +55,12 @@ function cycleSeries(state: SkuPipelineState): string[] {
 
 /** Đầu ra mà TỪNG chặng ghi vào state — fingerprint theo chặng để khoanh vùng regression. */
 function stageFingerprint(stage: StageNumber, state: SkuPipelineState): unknown {
-  switch (stage) {
+  if (stage === 5) return {
+    baseSources: countBy(state.daily.map(row => row.baseDemandSource)),
+    technicalFillDays: state.daily.filter(row => row.baseDemandSource === 'TECHNICAL_FILL').length,
+    unresolvedDays: state.daily.filter(row => row.baseDemand === null).length,
+  };
+  switch ((stage > 5 ? stage - 1 : stage) as Exclude<StageNumber, 20>) {
     case 1: return {
       days: state.daily.length,
       referenceOnlyDays: state.referenceOnlyDaily.length,
@@ -64,13 +69,13 @@ function stageFingerprint(stage: StageNumber, state: SkuPipelineState): unknown 
       lastDate: state.daily.at(-1)?.date ?? null,
     };
     case 2: return {
-      stockouts: state.daily.filter(row => row.isStockout).length,
-      stockoutReasons: countBy(state.daily.filter(row => row.isStockout).map(row => row.stockoutReason)),
-      reviewRequired: state.daily.filter(row => row.stockoutReviewRequired).length,
+      stockouts: state.daily.filter(row => row.stockoutStatus !== 'NONE').length,
+      stockoutReasons: countBy(state.daily.filter(row => row.stockoutStatus !== 'NONE').map(row => row.stockoutStatus)),
+      reviewRequired: state.daily.filter(row => ['DEPLETION_REVIEW', 'NEGATIVE_STOCK_REVIEW'].includes(row.stockoutStatus)).length,
     };
     case 3:
     case 4: return {
-      baseSources: countBy(state.daily.map(row => row.baseSource)),
+      baseSources: countBy(state.daily.map(row => row.baseDemandSource)),
       baseDemandSum: sumBaseDemand(state),
     };
     case 5: return { cycles: cycleSeries(state) };
@@ -118,7 +123,7 @@ function stageFingerprint(stage: StageNumber, state: SkuPipelineState): unknown 
   }
 }
 
-describe('Golden regression — baseline 19 chặng trước refactor (mock, deterministic)', () => {
+describe('Golden regression — baseline 20 chặng (mock, deterministic)', () => {
   const snapshots = runAllStages();
 
   it('summary toàn danh mục của từng chặng khớp baseline', () => {
@@ -128,7 +133,7 @@ describe('Golden regression — baseline 19 chặng trước refactor (mock, det
   });
 
   for (const sku of GOLDEN_SKUS) {
-    it(`fingerprint 19 chặng của ${sku} khớp baseline`, () => {
+    it(`fingerprint 20 chặng của ${sku} khớp baseline`, () => {
       const fingerprints: Record<string, unknown> = {};
       for (const stage of ALL_STAGES) {
         const state = snapshots.get(stage)!.states[sku];

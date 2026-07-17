@@ -7,12 +7,12 @@ interface LogEntry { id: number; time: string; html: string; }
 interface Tip { h: string; t: string; }
 
 const PHASES: PhaseDef[] = [
-  { id: 'p1', code: 1, name: 'Làm sạch dữ liệu & sức mua cơ bản', desc: 'Biến số bán ghi nhận thành chuỗi sức mua cơ bản sạch — không bị kéo thấp bởi stockout, không bị kéo cao bởi CTKM.', range: 'Chặng 1–5', cssVar: '--ph1', stages: 5, start: 1, end: 5 },
-  { id: 'p2', code: 2, name: 'Phân loại & gán chính sách', desc: 'Xếp hạng ABC theo giá trị, XYZ/D theo độ đều, rồi gán chính sách vận hành theo ma trận 9 ô.', range: 'Chặng 6–8', cssVar: '--ph2', stages: 3, start: 6, end: 8 },
-  { id: 'p3', code: 3, name: 'Cấu trúc nhu cầu, dự báo nền & CTKM', desc: 'Mở đúng mô hình dự báo theo nhóm X/Y/Z/D qua các cửa quyết định, rồi áp hệ số CTKM tương lai.', range: 'Chặng 9–13', cssVar: '--ph3', stages: 5, start: 9, end: 13 },
-  { id: 'p4', code: 4, name: 'Nguồn hàng', desc: 'Chuẩn hoá tồn kho, hàng đang về và cam kết để tính vị thế tồn khả dụng thực sự dùng được.', range: 'Chặng 14', cssVar: '--ph4', stages: 1, start: 14, end: 14 },
-  { id: 'p5', code: 5, name: 'Dự trữ & số cần mua', desc: 'Tính tồn kho an toàn và số lượng cần đặt trước ngân sách, đúng điều kiện MOQ/quy cách mua.', range: 'Chặng 15–16', cssVar: '--ph5', stages: 2, start: 15, end: 16 },
-  { id: 'p6', code: 6, name: 'Ngân sách, phát hành & học lại', desc: 'Phân bổ ngân sách theo ưu tiên, chốt số lượng phát hành, rồi hậu kiểm để đề xuất chỉnh kỳ sau.', range: 'Chặng 17–19', cssVar: '--ph6', stages: 3, start: 17, end: 19 },
+  { id: 'p1', code: 1, name: 'Làm sạch dữ liệu & sức mua cơ bản', desc: 'Biến số bán ghi nhận thành chuỗi sức mua cơ bản sạch — không bị kéo thấp bởi stockout, không bị kéo cao bởi CTKM.', range: 'Chặng 1–6', cssVar: '--ph1', stages: 6, start: 1, end: 6 },
+  { id: 'p2', code: 2, name: 'Phân loại & gán chính sách', desc: 'Xếp hạng ABC theo giá trị, XYZ/D theo độ đều, rồi gán chính sách vận hành theo ma trận 9 ô.', range: 'Chặng 7–9', cssVar: '--ph2', stages: 3, start: 7, end: 9 },
+  { id: 'p3', code: 3, name: 'Cấu trúc nhu cầu, dự báo nền & CTKM', desc: 'Mở đúng mô hình dự báo theo nhóm X/Y/Z/D qua các cửa quyết định, rồi áp hệ số CTKM tương lai.', range: 'Chặng 10–14', cssVar: '--ph3', stages: 5, start: 10, end: 14 },
+  { id: 'p4', code: 4, name: 'Nguồn hàng', desc: 'Chuẩn hoá tồn kho, hàng đang về và cam kết để tính vị thế tồn khả dụng thực sự dùng được.', range: 'Chặng 15', cssVar: '--ph4', stages: 1, start: 15, end: 15 },
+  { id: 'p5', code: 5, name: 'Dự trữ & số cần mua', desc: 'Tính tồn kho an toàn và số lượng cần đặt trước ngân sách, đúng điều kiện MOQ/quy cách mua.', range: 'Chặng 16–17', cssVar: '--ph5', stages: 2, start: 16, end: 17 },
+  { id: 'p6', code: 6, name: 'Ngân sách, phát hành & học lại', desc: 'Phân bổ ngân sách theo ưu tiên, chốt số lượng phát hành, rồi hậu kiểm để đề xuất chỉnh kỳ sau.', range: 'Chặng 18–20', cssVar: '--ph6', stages: 3, start: 18, end: 20 },
 ];
 
 /** Nhóm nhu cầu (XYZ/D) mà mỗi node phụ thuộc riêng của Chặng 11 chỉ thuộc về — dùng để tô 'skipped' cho các nhánh SKU hiện tại không đi qua. */
@@ -29,59 +29,59 @@ const TOOLTIPS: Record<string, Tip> = {
   n5: { h: 'Chặng 5 · Gate', t: 'Quyết định chu kỳ có thiếu ngày / chưa đủ căn cứ cần lấp nền, hay đã đủ 15 ngày nền.' },
   n5a: { h: 'Chặng 5 · Sub', t: 'Lấp nền cho ngày thiếu hoặc ngày chưa đủ căn cứ trong chu kỳ.' },
   n5b: { h: 'Chặng 5 · Sub', t: 'Chu kỳ đã đủ 15 ngày nền, không cần lấp thêm.' },
-  n5c: { h: 'Chặng 5', t: 'Gom sức mua cơ bản cấp ngày thành chu kỳ 15 ngày — đầu ra chuẩn cho toàn bộ các chặng phân loại và dự báo phía sau.' },
-  n6: { h: 'Chặng 6', t: 'Phân loại mã hàng theo mức độ quan trọng tài chính (A/B/C) dựa trên giá trị tiêu thụ năm hoá.' },
-  n7: { h: 'Chặng 7', t: 'Phân biệt nhu cầu bán đều, dao động, bán thưa hay chưa đủ căn cứ (X/Y/Z/D) để tránh đặt hàng sai cách với mã bán thưa.' },
-  n8: { h: 'Chặng 8', t: 'Ghép ABC và XYZ thành ma trận 9 ô để chọn cách quản lý tồn kho, ưu tiên vốn và mức phục vụ đề xuất.' },
-  n11r: { h: 'Chặng 11 · Router', t: 'Phân luồng SKU theo nhóm nhu cầu để mở đúng tập ứng viên mô hình dự báo nền — không SKU nào chạy mọi mô hình.' },
-  nD: { h: 'Chặng 11 · Sub', t: 'Nhóm D (chưa đủ căn cứ): dùng kế hoạch Thu mua (MD) hoặc mượn mã tương tự.' },
+  n5c: { h: 'Chặng 6', t: 'Gom sức mua cơ bản cấp ngày thành chu kỳ 15 ngày — đầu ra chuẩn cho toàn bộ các chặng phân loại và dự báo phía sau.' },
+  n6: { h: 'Chặng 7', t: 'Phân loại mã hàng theo mức độ quan trọng tài chính (A/B/C) dựa trên giá trị tiêu thụ năm hoá.' },
+  n7: { h: 'Chặng 8', t: 'Phân biệt nhu cầu bán đều, dao động, bán thưa hay chưa đủ căn cứ (X/Y/Z/D) để tránh đặt hàng sai cách với mã bán thưa.' },
+  n8: { h: 'Chặng 9', t: 'Ghép ABC và XYZ thành ma trận 9 ô để chọn cách quản lý tồn kho, ưu tiên vốn và mức phục vụ đề xuất.' },
+  n11r: { h: 'Chặng 12 · Router', t: 'Phân luồng SKU theo nhóm nhu cầu để mở đúng tập ứng viên mô hình dự báo nền — không SKU nào chạy mọi mô hình.' },
+  nD: { h: 'Chặng 12 · Sub', t: 'Nhóm D (chưa đủ căn cứ): dùng kế hoạch Thu mua (MD) hoặc mượn mã tương tự.' },
   nZg: { h: 'Gate · Z-PULSE', t: 'Nhóm Z — đo khoảng cách giữa các chu kỳ có nhu cầu > 0; ổn định đủ căn cứ thì mở nhịp phát sinh, không thì xét Croston.' },
-  nX1: { h: 'Chặng 11 · Sub', t: 'Nhóm X: thêm SES (san mũ đơn) làm mô hình ứng viên mặc định.' },
-  n9: { h: 'Chặng 9 · Gate Y-SEASON', t: 'Chỉ nhóm Y: có vị trí mùa vụ lặp lại đủ căn cứ qua các vòng năm để mở Holt-Winters hay không.' },
-  nZ2: { h: 'Chặng 11 · Sub', t: 'Vận hành mô hình nhịp phát sinh nếu Z-PULSE đạt, ngược lại xét Croston cho nhóm Z.' },
-  nXg: { h: 'Gate · 11X-TREND', t: 'Nhóm X: 12 chu kỳ gần nhất chia 3 đoạn, hai mức đổi liên tiếp cùng chiều và đạt ngưỡng thì mở Holt.' },
-  nYhw: { h: 'Chặng 11 · Sub', t: 'Y-SEASON đạt: vận hành Holt-Winters cho nhóm Y có mùa vụ.' },
-  n10: { h: 'Chặng 10 · Gate Y-TREND', t: 'Chỉ nhóm Y không mùa vụ: 12 chu kỳ gần nhất chia 3 đoạn, kiểm tra xu hướng để bật công tắc Holt hoặc SES.' },
-  nX3: { h: 'Chặng 11 · Sub', t: '11X-TREND đạt: thêm Holt làm ứng viên cho nhóm X.' },
-  nYholt: { h: 'Chặng 11 · Sub', t: 'Y-TREND đạt: vận hành Holt cho nhóm Y không mùa vụ nhưng có xu hướng.' },
-  nYses: { h: 'Chặng 11 · Sub', t: 'Y-TREND không đạt: dùng SES hoặc xem là nền ổn định cho nhóm Y.' },
-  nSNg: { h: 'Gate · 11XY-SN', t: 'Nhóm X/Y: thử vòng lặp ngắn 2–12 chu kỳ trên tập học; đủ vòng, đủ dữ liệu và đạt ngưỡng giống nhau thì mở Seasonal-naïve.' },
-  nSN: { h: 'Chặng 11 · Sub', t: '11XY-SN đạt: thêm Seasonal-naïve vào danh sách ứng viên mô hình.' },
-  nBT: { h: 'Chặng 11', t: 'Chọn và kiểm tra ngược toàn bộ ứng viên trên cùng tập kiểm tra, khoá mô hình dự báo nền thắng cho SKU.' },
-  n12: { h: 'Chặng 12', t: 'Học hệ số nhân CTKM (sức mua thực tế cao/thấp hơn nền bao nhiêu lần) từ các CTKM lịch sử tương tự.' },
-  n13: { h: 'Chặng 13', t: 'Biến dự báo nền thành dự báo cuối bằng cách nhân hệ số CTKM khi có kế hoạch CTKM tương lai đã xác nhận.' },
-  n14: { h: 'Chặng 14', t: 'Chuẩn hoá tồn kho, hàng đang về, hàng đã giữ và điều kiện nguồn hàng để xác định tồn khả dụng thực sự dùng được.' },
-  n15: { h: 'Chặng 15', t: 'Tính lượng hàng đệm cần giữ thêm để không thiếu hàng khi nhu cầu lệch dự báo hoặc lead time biến động.' },
-  n16: { h: 'Chặng 16', t: 'Tính số lượng cần đặt để đủ nhu cầu và đệm an toàn, đúng điều kiện MOQ/quy cách mua, chưa xét ngân sách.' },
-  n17: { h: 'Chặng 17', t: 'Khi ngân sách không đủ mua hết đề xuất, xếp dòng đặt hàng vào 3 rổ ưu tiên: mua trước, mua sau, hoặc hoãn.' },
-  n18: { h: 'Chặng 18', t: 'Cổng cuối chốt số lượng đặt hàng sau MOQ, cấp tiền và duyệt ngoại lệ — phát hành ngay hoặc chờ duyệt.' },
-  n19: { h: 'Chặng 19', t: 'Đo lường quyết định đã phát hành đúng/sai ở khâu nào (nền, mô hình, CTKM, nguồn hàng, tồn an toàn, MOQ, ngân sách) để đề xuất chỉnh kỳ sau.' },
+  nX1: { h: 'Chặng 12 · Sub', t: 'Nhóm X: thêm SES (san mũ đơn) làm mô hình ứng viên mặc định.' },
+  n9: { h: 'Chặng 10 · Gate Y-SEASON', t: 'Chỉ nhóm Y: có vị trí mùa vụ lặp lại đủ căn cứ qua các vòng năm để mở Holt-Winters hay không.' },
+  nZ2: { h: 'Chặng 12 · Sub', t: 'Vận hành mô hình nhịp phát sinh nếu Z-PULSE đạt, ngược lại xét Croston cho nhóm Z.' },
+  nXg: { h: 'Gate · 12X-TREND', t: 'Nhóm X: 12 chu kỳ gần nhất chia 3 đoạn, hai mức đổi liên tiếp cùng chiều và đạt ngưỡng thì mở Holt.' },
+  nYhw: { h: 'Chặng 12 · Sub', t: 'Y-SEASON đạt: vận hành Holt-Winters cho nhóm Y có mùa vụ.' },
+  n10: { h: 'Chặng 11 · Gate Y-TREND', t: 'Chỉ nhóm Y không mùa vụ: 12 chu kỳ gần nhất chia 3 đoạn, kiểm tra xu hướng để bật công tắc Holt hoặc SES.' },
+  nX3: { h: 'Chặng 12 · Sub', t: '12X-TREND đạt: thêm Holt làm ứng viên cho nhóm X.' },
+  nYholt: { h: 'Chặng 12 · Sub', t: 'Y-TREND đạt: vận hành Holt cho nhóm Y không mùa vụ nhưng có xu hướng.' },
+  nYses: { h: 'Chặng 12 · Sub', t: 'Y-TREND không đạt: dùng SES hoặc xem là nền ổn định cho nhóm Y.' },
+  nSNg: { h: 'Gate · 12XY-SN', t: 'Nhóm X/Y: thử vòng lặp ngắn 2–12 chu kỳ trên tập học; đủ vòng, đủ dữ liệu và đạt ngưỡng giống nhau thì mở Seasonal-naïve.' },
+  nSN: { h: 'Chặng 12 · Sub', t: '12XY-SN đạt: thêm Seasonal-naïve vào danh sách ứng viên mô hình.' },
+  nBT: { h: 'Chặng 12', t: 'Chọn và kiểm tra ngược toàn bộ ứng viên trên cùng tập kiểm tra, khoá mô hình dự báo nền thắng cho SKU.' },
+  n12: { h: 'Chặng 13', t: 'Học hệ số nhân CTKM (sức mua thực tế cao/thấp hơn nền bao nhiêu lần) từ các CTKM lịch sử tương tự.' },
+  n13: { h: 'Chặng 14', t: 'Biến dự báo nền thành dự báo cuối bằng cách nhân hệ số CTKM khi có kế hoạch CTKM tương lai đã xác nhận.' },
+  n14: { h: 'Chặng 15', t: 'Chuẩn hoá tồn kho, hàng đang về, hàng đã giữ và điều kiện nguồn hàng để xác định tồn khả dụng thực sự dùng được.' },
+  n15: { h: 'Chặng 16', t: 'Tính lượng hàng đệm cần giữ thêm để không thiếu hàng khi nhu cầu lệch dự báo hoặc lead time biến động.' },
+  n16: { h: 'Chặng 17', t: 'Tính số lượng cần đặt để đủ nhu cầu và đệm an toàn, đúng điều kiện MOQ/quy cách mua, chưa xét ngân sách.' },
+  n17: { h: 'Chặng 18', t: 'Khi ngân sách không đủ mua hết đề xuất, xếp dòng đặt hàng vào 3 rổ ưu tiên: mua trước, mua sau, hoặc hoãn.' },
+  n18: { h: 'Chặng 19', t: 'Cổng cuối chốt số lượng đặt hàng sau MOQ, cấp tiền và duyệt ngoại lệ — phát hành ngay hoặc chờ duyệt.' },
+  n19: { h: 'Chặng 20', t: 'Đo lường quyết định đã phát hành đúng/sai ở khâu nào (nền, mô hình, CTKM, nguồn hàng, tồn an toàn, MOQ, ngân sách) để đề xuất chỉnh kỳ sau.' },
 };
 
-const STAGE_TOTAL = 19;
+const STAGE_TOTAL = 20;
 
 @Component({
   selector: 'app-journey-map',
   standalone: true,
   template: `
     <div class="jm-backdrop" (click)="closed.emit()" aria-hidden="true"></div>
-    <div class="jm-dialog" role="dialog" aria-modal="true" aria-label="Governance Control Center — 19 chặng xử lý">
+    <div class="jm-dialog" role="dialog" aria-modal="true" aria-label="Governance Control Center — 20 chặng xử lý">
 
       <header class="jm-head">
         <div class="jm-title">
           <span class="jm-glyph" aria-hidden="true">⇶</span>
           <div>
-            <p>DEMAND PLANNING &amp; REPLENISHMENT · 19 CHẶNG · 6 PHA · 5 CỬA QUYẾT ĐỊNH</p>
+            <p>DEMAND PLANNING &amp; REPLENISHMENT · 20 CHẶNG · 6 PHA · 5 CỬA QUYẾT ĐỊNH</p>
             <h2>Governance Control Center</h2>
           </div>
         </div>
         <div class="jm-tools">
           <div class="jm-progress" title="Tiến độ phiên mô phỏng">
             <div class="jm-ring" [style.--pct]="pct()"></div>
-            <span>Tiến độ <b>{{ doneStages() }}/19</b></span>
+            <span>Tiến độ <b>{{ doneStages() }}/20</b></span>
           </div>
           <button type="button" class="jm-btn" (click)="resetAll()" [disabled]="running()">↺ Reset</button>
-          <button type="button" class="jm-btn primary" (click)="runSimulation()" [disabled]="running() || doneStages() >= 19"><span class="jm-dot"></span>Run Simulation</button>
+          <button type="button" class="jm-btn primary" (click)="runSimulation()" [disabled]="running() || doneStages() >= 20"><span class="jm-dot"></span>Run Simulation</button>
           <button type="button" class="jm-btn close" (click)="closed.emit()" aria-label="Đóng sơ đồ">✕</button>
         </div>
       </header>
@@ -114,7 +114,7 @@ const STAGE_TOTAL = 19;
 
         <main class="jm-canvas-wrap" [class.dimmed]="activePhase() !== null">
           <div class="jm-canvas-inner">
-            <svg #flowSvg class="jm-flow" viewBox="0 0 1656 3446" role="img" aria-label="Sơ đồ 19 chặng xử lý Demand Planning &amp; Replenishment Governance">
+            <svg #flowSvg class="jm-flow" viewBox="0 0 1656 3446" role="img" aria-label="Sơ đồ 20 chặng xử lý Demand Planning &amp; Replenishment Governance">
               <defs>
                 <marker id="jm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7f8798"/></marker>
                 <marker id="jm-arrow-dep" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#555d6e"/></marker>
@@ -216,51 +216,51 @@ const STAGE_TOTAL = 19;
   <text class="t" x="475.0" y="646.0">Đưa CTKM về mức tự nhiên</text>
   <text class="m" x="475.0" y="662.0">khử méo do khuyến mãi</text>
 </g>
-<g class="node gate" data-id="n5" data-phase="p1" tabindex="0" style="--pc:var(--ph1)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node gate" data-id="n5" data-phase="p1" data-stage="5" tabindex="0" style="--pc:var(--ph1)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <path class="shape" d="M 775,756 L 825,806 L 775,856 L 725,806 Z"/>
   <circle class="status-dot" cx="834.0" cy="754.0" r="4"/>
   <text class="t" x="775.0" y="804.0" text-anchor="middle">Cần lấp nền?</text>
   <text class="k" x="775.0" y="817.0" text-anchor="middle">GATE</text>
 </g>
-<g class="node proc" data-id="n5a" data-phase="p1" tabindex="0" style="--pc:var(--ph1)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n5a" data-phase="p1" data-stage="5" tabindex="0" style="--pc:var(--ph1)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="146" y="900" width="410" height="62" rx="9"/>
   <circle class="status-dot" cx="545.0" cy="911.0" r="4"/>
   <text class="k" x="157.0" y="916.0">SUB-BƯỚC</text>
   <text class="t" x="157.0" y="934.0">5A · Lấp nền</text>
   <text class="m" x="157.0" y="950.0">ngày thiếu / chưa đủ căn cứ</text>
 </g>
-<g class="node proc" data-id="n5b" data-phase="p1" tabindex="0" style="--pc:var(--ph1)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n5b" data-phase="p1" data-stage="5" tabindex="0" style="--pc:var(--ph1)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="888" y="900" width="410" height="62" rx="9"/>
   <circle class="status-dot" cx="1287.0" cy="911.0" r="4"/>
   <text class="k" x="899.0" y="916.0">SUB-BƯỚC</text>
   <text class="t" x="899.0" y="934.0">5B · Không cần lấp nền</text>
   <text class="m" x="899.0" y="950.0">đã đủ 15 ngày nền</text>
 </g>
-<g class="node proc" data-id="n5c" data-phase="p1" data-stage="5" tabindex="0" style="--pc:var(--ph1)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n5c" data-phase="p1" data-stage="6" tabindex="0" style="--pc:var(--ph1)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="1044" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="1055.0" r="4"/>
-  <text class="k" x="475.0" y="1060.0">CHẶNG 5</text>
+  <text class="k" x="475.0" y="1060.0">CHẶNG 6</text>
   <text class="t" x="475.0" y="1078.0">Gộp sức mua theo chu kỳ</text>
   <text class="m" x="475.0" y="1094.0">chuẩn 15 ngày/chu kỳ</text>
 </g>
-<g class="node proc" data-id="n6" data-phase="p2" data-stage="6" tabindex="0" style="--pc:var(--ph2)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n6" data-phase="p2" data-stage="7" tabindex="0" style="--pc:var(--ph2)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="146" y="1188" width="410" height="62" rx="9"/>
   <circle class="status-dot" cx="545.0" cy="1199.0" r="4"/>
-  <text class="k" x="157.0" y="1204.0">CHẶNG 6</text>
+  <text class="k" x="157.0" y="1204.0">CHẶNG 7</text>
   <text class="t" x="157.0" y="1222.0">Phân loại ABC</text>
   <text class="m" x="157.0" y="1238.0">giá trị tiêu thụ năm hoá</text>
 </g>
-<g class="node proc" data-id="n7" data-phase="p2" data-stage="7" tabindex="0" style="--pc:var(--ph2)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n7" data-phase="p2" data-stage="8" tabindex="0" style="--pc:var(--ph2)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="888" y="1188" width="410" height="62" rx="9"/>
   <circle class="status-dot" cx="1287.0" cy="1199.0" r="4"/>
-  <text class="k" x="899.0" y="1204.0">CHẶNG 7</text>
+  <text class="k" x="899.0" y="1204.0">CHẶNG 8</text>
   <text class="t" x="899.0" y="1222.0">Phân loại XYZ/D</text>
   <text class="m" x="899.0" y="1238.0">độ đều · độ thưa</text>
 </g>
-<g class="node proc" data-id="n8" data-phase="p2" data-stage="8" tabindex="0" style="--pc:var(--ph2)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n8" data-phase="p2" data-stage="9" tabindex="0" style="--pc:var(--ph2)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="1332" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="1343.0" r="4"/>
-  <text class="k" x="475.0" y="1348.0">CHẶNG 8</text>
+  <text class="k" x="475.0" y="1348.0">CHẶNG 9</text>
   <text class="t" x="475.0" y="1366.0">Gán chính sách ABC × XYZ</text>
   <text class="m" x="475.0" y="1382.0">ma trận 9 ô</text>
 </g>
@@ -275,7 +275,7 @@ const STAGE_TOTAL = 19;
   <rect class="shape" x="40" y="1620" width="304" height="62" rx="9"/>
   <circle class="status-dot" cx="333.0" cy="1631.0" r="4"/>
   <text class="k" x="51.0" y="1636.0">SUB-BƯỚC</text>
-  <text class="t" x="51.0" y="1654.0">11D · MD / mượn mã</text>
+  <text class="t" x="51.0" y="1654.0">12D · MD / mượn mã</text>
   <text class="m" x="51.0" y="1670.0">nhóm D</text>
 </g>
 <g class="node gate" data-id="nZg" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
@@ -288,66 +288,66 @@ const STAGE_TOTAL = 19;
   <rect class="shape" x="782" y="1620" width="198" height="62" rx="9"/>
   <circle class="status-dot" cx="969.0" cy="1631.0" r="4"/>
   <text class="k" x="793.0" y="1636.0">SUB-BƯỚC</text>
-  <text class="t" x="793.0" y="1654.0">11X · + SES</text>
+  <text class="t" x="793.0" y="1654.0">12X · + SES</text>
   <text class="m" x="793.0" y="1670.0">nhóm X</text>
 </g>
-<g class="node gate" data-id="n9" data-phase="p3" data-stage="9" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node gate" data-id="n9" data-phase="p3" data-stage="10" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <path class="shape" d="M 1199,1620 L 1249,1670 L 1199,1720 L 1149,1670 Z"/>
   <circle class="status-dot" cx="1258.0" cy="1618.0" r="4"/>
   <text class="t" x="1199.0" y="1668.0" text-anchor="middle">Y-SEASON</text>
-  <text class="k" x="1199.0" y="1681.0" text-anchor="middle">CHẶNG 9</text>
+  <text class="k" x="1199.0" y="1681.0" text-anchor="middle">CHẶNG 10</text>
 </g>
 <g class="node proc" data-id="nZ2" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="1764" width="198" height="62" rx="9"/>
   <circle class="status-dot" cx="651.0" cy="1775.0" r="4"/>
   <text class="k" x="475.0" y="1780.0">SUB-BƯỚC</text>
-  <text class="t" x="475.0" y="1798.0">11Z · Croston / nhịp</text>
+  <text class="t" x="475.0" y="1798.0">12Z · Croston / nhịp</text>
   <text class="m" x="475.0" y="1814.0">phát sinh</text>
 </g>
 <g class="node gate" data-id="nXg" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <path class="shape" d="M 881,1764 L 931,1814 L 881,1864 L 831,1814 Z"/>
   <circle class="status-dot" cx="940.0" cy="1762.0" r="4"/>
-  <text class="t" x="881.0" y="1812.0" text-anchor="middle">11X-TREND</text>
+  <text class="t" x="881.0" y="1812.0" text-anchor="middle">12X-TREND</text>
   <text class="k" x="881.0" y="1825.0" text-anchor="middle">GATE</text>
 </g>
 <g class="node proc" data-id="nYhw" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="994" y="1764" width="304" height="62" rx="9"/>
   <circle class="status-dot" cx="1287.0" cy="1775.0" r="4"/>
   <text class="k" x="1005.0" y="1780.0">SUB-BƯỚC</text>
-  <text class="t" x="1005.0" y="1798.0">11Y · Holt-Winters</text>
+  <text class="t" x="1005.0" y="1798.0">12Y · Holt-Winters</text>
   <text class="m" x="1005.0" y="1814.0">mùa vụ đạt</text>
 </g>
-<g class="node gate" data-id="n10" data-phase="p3" data-stage="10" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node gate" data-id="n10" data-phase="p3" data-stage="11" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <path class="shape" d="M 1411,1764 L 1461,1814 L 1411,1864 L 1361,1814 Z"/>
   <circle class="status-dot" cx="1470.0" cy="1762.0" r="4"/>
   <text class="t" x="1411.0" y="1812.0" text-anchor="middle">Y-TREND</text>
-  <text class="k" x="1411.0" y="1825.0" text-anchor="middle">CHẶNG 10</text>
+  <text class="k" x="1411.0" y="1825.0" text-anchor="middle">CHẶNG 11</text>
 </g>
 <g class="node proc" data-id="nX3" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="782" y="1908" width="198" height="62" rx="9"/>
   <circle class="status-dot" cx="969.0" cy="1919.0" r="4"/>
   <text class="k" x="793.0" y="1924.0">SUB-BƯỚC</text>
-  <text class="t" x="793.0" y="1942.0">11X · + Holt</text>
+  <text class="t" x="793.0" y="1942.0">12X · + Holt</text>
   <text class="m" x="793.0" y="1958.0">trend đạt</text>
 </g>
 <g class="node proc" data-id="nYholt" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="1206" y="1908" width="198" height="62" rx="9"/>
   <circle class="status-dot" cx="1393.0" cy="1919.0" r="4"/>
   <text class="k" x="1217.0" y="1924.0">SUB-BƯỚC</text>
-  <text class="t" x="1217.0" y="1942.0">11Y · Holt</text>
+  <text class="t" x="1217.0" y="1942.0">12Y · Holt</text>
   <text class="m" x="1217.0" y="1958.0">trend đạt</text>
 </g>
 <g class="node proc" data-id="nYses" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="1418" y="1908" width="198" height="62" rx="9"/>
   <circle class="status-dot" cx="1605.0" cy="1919.0" r="4"/>
   <text class="k" x="1429.0" y="1924.0">SUB-BƯỚC</text>
-  <text class="t" x="1429.0" y="1942.0">11Y · SES</text>
+  <text class="t" x="1429.0" y="1942.0">12Y · SES</text>
   <text class="m" x="1429.0" y="1958.0">nền ổn định</text>
 </g>
 <g class="node gate" data-id="nSNg" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <path class="shape" d="M 987,2052 L 1037,2102 L 987,2152 L 937,2102 Z"/>
   <circle class="status-dot" cx="1046.0" cy="2050.0" r="4"/>
-  <text class="t" x="987.0" y="2100.0" text-anchor="middle">11XY-SN</text>
+  <text class="t" x="987.0" y="2100.0" text-anchor="middle">12XY-SN</text>
   <text class="k" x="987.0" y="2113.0" text-anchor="middle">GATE</text>
 </g>
 <g class="node proc" data-id="nSN" data-phase="p3" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
@@ -357,66 +357,66 @@ const STAGE_TOTAL = 19;
   <text class="t" x="793.0" y="2230.0">+ Seasonal-naïve</text>
   <text class="m" x="793.0" y="2246.0">ứng viên bổ sung</text>
 </g>
-<g class="node proc" data-id="nBT" data-phase="p3" data-stage="11" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="nBT" data-phase="p3" data-stage="12" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="358" y="2340" width="940" height="62" rx="9"/>
   <circle class="status-dot" cx="1287.0" cy="2351.0" r="4"/>
-  <text class="k" x="369.0" y="2356.0">CHẶNG 11</text>
+  <text class="k" x="369.0" y="2356.0">CHẶNG 12</text>
   <text class="t" x="369.0" y="2374.0">Kiểm tra ngược &amp; khoá mô hình nền</text>
   <text class="m" x="369.0" y="2390.0">backtest toàn bộ ứng viên</text>
 </g>
-<g class="node proc" data-id="n12" data-phase="p3" data-stage="12" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n12" data-phase="p3" data-stage="13" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="40" y="2340" width="304" height="62" rx="9"/>
   <circle class="status-dot" cx="333.0" cy="2351.0" r="4"/>
-  <text class="k" x="51.0" y="2356.0">CHẶNG 12</text>
+  <text class="k" x="51.0" y="2356.0">CHẶNG 13</text>
   <text class="t" x="51.0" y="2374.0">Hệ số CTKM lịch sử</text>
   <text class="m" x="51.0" y="2390.0">học từ CTKM quá khứ</text>
 </g>
-<g class="node proc" data-id="n13" data-phase="p3" data-stage="13" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n13" data-phase="p3" data-stage="14" tabindex="0" style="--pc:var(--ph3)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="2484" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="2495.0" r="4"/>
-  <text class="k" x="475.0" y="2500.0">CHẶNG 13</text>
+  <text class="k" x="475.0" y="2500.0">CHẶNG 14</text>
   <text class="t" x="475.0" y="2518.0">Áp CTKM tương lai</text>
   <text class="m" x="475.0" y="2534.0">nhân hệ số vào dự báo nền</text>
 </g>
-<g class="node proc" data-id="n14" data-phase="p4" data-stage="14" tabindex="0" style="--pc:var(--ph4)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n14" data-phase="p4" data-stage="15" tabindex="0" style="--pc:var(--ph4)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="2628" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="2639.0" r="4"/>
-  <text class="k" x="475.0" y="2644.0">CHẶNG 14</text>
+  <text class="k" x="475.0" y="2644.0">CHẶNG 15</text>
   <text class="t" x="475.0" y="2662.0">Chuẩn hoá nguồn hàng</text>
   <text class="m" x="475.0" y="2678.0">tồn khả dụng thực sự</text>
 </g>
-<g class="node proc" data-id="n15" data-phase="p5" data-stage="15" tabindex="0" style="--pc:var(--ph5)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n15" data-phase="p5" data-stage="16" tabindex="0" style="--pc:var(--ph5)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="2772" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="2783.0" r="4"/>
-  <text class="k" x="475.0" y="2788.0">CHẶNG 15</text>
+  <text class="k" x="475.0" y="2788.0">CHẶNG 16</text>
   <text class="t" x="475.0" y="2806.0">Tồn kho an toàn</text>
   <text class="m" x="475.0" y="2822.0">đệm theo mức phục vụ</text>
 </g>
-<g class="node proc" data-id="n16" data-phase="p5" data-stage="16" tabindex="0" style="--pc:var(--ph5)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n16" data-phase="p5" data-stage="17" tabindex="0" style="--pc:var(--ph5)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="2916" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="2927.0" r="4"/>
-  <text class="k" x="475.0" y="2932.0">CHẶNG 16</text>
+  <text class="k" x="475.0" y="2932.0">CHẶNG 17</text>
   <text class="t" x="475.0" y="2950.0">Số cần đặt trước ngân sách</text>
   <text class="m" x="475.0" y="2966.0">quy tròn theo MOQ</text>
 </g>
-<g class="node proc" data-id="n17" data-phase="p6" data-stage="17" tabindex="0" style="--pc:var(--ph6)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n17" data-phase="p6" data-stage="18" tabindex="0" style="--pc:var(--ph6)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="3060" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="3071.0" r="4"/>
-  <text class="k" x="475.0" y="3076.0">CHẶNG 17</text>
+  <text class="k" x="475.0" y="3076.0">CHẶNG 18</text>
   <text class="t" x="475.0" y="3094.0">Chọn dòng cấp tiền</text>
   <text class="m" x="475.0" y="3110.0">3 rổ ưu tiên</text>
 </g>
-<g class="node proc" data-id="n18" data-phase="p6" data-stage="18" tabindex="0" style="--pc:var(--ph6)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n18" data-phase="p6" data-stage="19" tabindex="0" style="--pc:var(--ph6)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="3204" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="3215.0" r="4"/>
-  <text class="k" x="475.0" y="3220.0">CHẶNG 18</text>
+  <text class="k" x="475.0" y="3220.0">CHẶNG 19</text>
   <text class="t" x="475.0" y="3238.0">Chốt &amp; phát hành</text>
   <text class="m" x="475.0" y="3254.0">PO hoặc chờ duyệt</text>
 </g>
-<g class="node proc" data-id="n19" data-phase="p6" data-stage="19" tabindex="0" style="--pc:var(--ph6)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
+<g class="node proc" data-id="n19" data-phase="p6" data-stage="20" tabindex="0" style="--pc:var(--ph6)" (mouseenter)="onNodeHover($event)" (mousemove)="onNodeMove($event)" (mouseleave)="onNodeLeave()" (focus)="onNodeHover($event)" (blur)="onNodeLeave()">
   <rect class="shape" x="464" y="3348" width="622" height="62" rx="9"/>
   <circle class="status-dot" cx="1075.0" cy="3359.0" r="4"/>
-  <text class="k" x="475.0" y="3364.0">CHẶNG 19</text>
+  <text class="k" x="475.0" y="3364.0">CHẶNG 20</text>
   <text class="t" x="475.0" y="3382.0">Hậu kiểm &amp; đề xuất kỳ sau</text>
   <text class="m" x="475.0" y="3398.0">đo lệch, tạo đề xuất</text>
 </g>
@@ -454,8 +454,8 @@ const STAGE_TOTAL = 19;
             <div class="jm-panel-title" style="padding:0 0 2px;">5 cửa quyết định</div>
             <div class="jm-gate-row"><span class="gname">Y-SEASON</span><span class="gdesc">Nhóm Y có mùa vụ lặp lại đủ căn cứ → mở Holt-Winters.</span></div>
             <div class="jm-gate-row"><span class="gname">Y-TREND</span><span class="gdesc">Nhóm Y không mùa vụ, 2 mức đổi cùng chiều đạt ngưỡng → mở Holt.</span></div>
-            <div class="jm-gate-row"><span class="gname">11X-TREND</span><span class="gdesc">Nhóm X, 2 mức đổi cùng chiều đạt ngưỡng → mở Holt.</span></div>
-            <div class="jm-gate-row"><span class="gname">11XY-SN</span><span class="gdesc">Vòng lặp ngắn 2–12 CK đạt ngưỡng giống nhau → mở Seasonal-naïve.</span></div>
+            <div class="jm-gate-row"><span class="gname">12X-TREND</span><span class="gdesc">Nhóm X, 2 mức đổi cùng chiều đạt ngưỡng → mở Holt.</span></div>
+            <div class="jm-gate-row"><span class="gname">12XY-SN</span><span class="gdesc">Vòng lặp ngắn 2–12 CK đạt ngưỡng giống nhau → mở Seasonal-naïve.</span></div>
             <div class="jm-gate-row"><span class="gname">Z-PULSE</span><span class="gdesc">Khoảng cách phát sinh nhu cầu ổn định → mở nhịp phát sinh, không thì Croston.</span></div>
           </div>
 
@@ -757,7 +757,7 @@ export class JourneyMapComponent implements AfterViewInit, OnDestroy {
     }
 
     const subIds = ['n11r', 'nD', 'nZg', 'nZ2', 'nX1', 'nXg', 'nX3', 'nYhw', 'nYholt', 'nYses', 'nSNg', 'nSN'];
-    if (cs < 7 || !state) {
+    if (cs < 8 || !state) {
       for (const id of subIds) { const el = this.byId.get(id); if (el) el.dataset['status'] = 'pending'; }
     } else {
       const xyz = state.classification.xyz;
@@ -771,17 +771,17 @@ export class JourneyMapComponent implements AfterViewInit, OnDestroy {
         switch (id) {
           case 'n11r': done = true; break;
           case 'nD': case 'nZg': case 'nZ2': case 'nX1': case 'nXg': done = true; break;
-          case 'nX3': done = cs >= 11 && model === 'Holt'; break;
-          case 'nYhw': done = cs >= 9 && state.seasonality === 'confirmed'; break;
-          case 'nYholt': done = cs >= 10 && state.seasonality !== 'confirmed' && (state.trend === 'up' || state.trend === 'down'); break;
-          case 'nYses': done = cs >= 10 && state.seasonality !== 'confirmed' && state.trend !== 'up' && state.trend !== 'down'; break;
-          case 'nSNg': done = (xyz === 'X' || xyz === 'Y') && cs >= 11; break;
-          case 'nSN': done = (xyz === 'X' || xyz === 'Y') && cs >= 11 && model === 'SeasonalNaive'; break;
+          case 'nX3': done = cs >= 12 && model === 'Holt'; break;
+          case 'nYhw': done = cs >= 10 && state.seasonality === 'confirmed'; break;
+          case 'nYholt': done = cs >= 11 && state.seasonality !== 'confirmed' && (state.trend === 'up' || state.trend === 'down'); break;
+          case 'nYses': done = cs >= 11 && state.seasonality !== 'confirmed' && state.trend !== 'up' && state.trend !== 'down'; break;
+          case 'nSNg': done = (xyz === 'X' || xyz === 'Y') && cs >= 12; break;
+          case 'nSN': done = (xyz === 'X' || xyz === 'Y') && cs >= 12 && model === 'SeasonalNaive'; break;
           default: done = false;
         }
         if (id === 'nSNg' && xyz !== 'X' && xyz !== 'Y') { el.dataset['status'] = 'skipped'; continue; }
         if (id === 'nSN' && xyz !== 'X' && xyz !== 'Y') { el.dataset['status'] = 'skipped'; continue; }
-        el.dataset['status'] = done ? 'completed' : cs >= 11 ? 'skipped' : 'pending';
+        el.dataset['status'] = done ? 'completed' : cs >= 12 ? 'skipped' : 'pending';
       }
     }
 
@@ -818,21 +818,22 @@ export class JourneyMapComponent implements AfterViewInit, OnDestroy {
   private logStageEvent(stage: number, state: Readonly<SkuPipelineState> | null): void {
     if (!state) { this.pushLog(`<b>Chặng ${stage}</b> — hoàn tất.`); return; }
     switch (stage) {
-      case 5: this.pushLog(`<b>Chặng 5</b> — Gộp chu kỳ hoàn tất, ${state.cycles.filter(c => c.locked).length} chu kỳ khoá.`); break;
-      case 6: this.pushLog(`<b>Chặng 6</b> — Phân loại ABC: nhóm <b>${state.classification.abc}</b>.`); break;
-      case 7: this.pushLog(`<b>Chặng 7</b> — Phân loại XYZ/D: nhóm <b>${state.classification.xyz ?? 'BLOCKED'}</b>.`); break;
-      case 8: this.pushLog(`<b>Chặng 8</b> — Chính sách: ${state.serviceLevel ? `mức phục vụ ${state.serviceLevel}%` : state.capitalPriority}.`); break;
-      case 9: if (state.classification.xyz === 'Y') this.pushLog(`<b>Gate Y-SEASON</b> — ${state.seasonality === 'confirmed' ? 'Đạt: mở Holt-Winters.' : 'Không đạt.'}`); break;
-      case 10: if (state.classification.xyz === 'Y' && state.seasonality !== 'confirmed') this.pushLog(`<b>Gate Y-TREND</b> — ${state.trend === 'up' || state.trend === 'down' ? 'Đạt: mở Holt.' : 'Không đạt: dùng SES.'}`); break;
-      case 11: this.pushLog(`<b>Chặng 11</b> — Khoá mô hình nền: <b>${state.forecast?.model ?? '—'}</b>.`); break;
-      case 12: this.pushLog(`<b>Chặng 12</b> — Hệ số CTKM: ${state.promoFactor != null ? state.promoFactor.toFixed(2) : 'không có'} (${state.promoConfidence}).`); break;
-      case 13: this.pushLog(`<b>Chặng 13</b> — Dự báo cuối đã áp CTKM cho ${state.finalForecast.length} chu kỳ.`); break;
-      case 14: this.pushLog(`<b>Chặng 14</b> — Hàng tự do: ${state.freeStock ?? 0}.`); break;
-      case 15: this.pushLog(`<b>Chặng 15</b> — Tồn an toàn: ${state.safetyStock ?? 'chính sách riêng'}.`); break;
-      case 16: this.pushLog(`<b>Chặng 16</b> — Số đặt sau MOQ: ${state.orderPlan?.orderQuantity ?? '—'}.`); break;
-      case 17: this.pushLog(`<b>Chặng 17</b> — Số được cấp vốn: ${state.budgetAllocation?.fundedQuantity ?? '—'}.`); break;
-      case 18: this.pushLog(`<b>Chặng 18</b> — Trạng thái phát hành: ${state.releaseDecision?.status ?? '—'}.`); break;
-      case 19: this.pushLog(`<b>Chặng 19</b> — Hậu kiểm hoàn tất.`); break;
+      case 5: this.pushLog(`<b>Chặng 5</b> — Lấp nền ngày hoàn tất; còn ${state.daily.filter(day => day.baseDemand == null).length} ngày thiếu nền.`); break;
+      case 6: this.pushLog(`<b>Chặng 6</b> — Gộp chu kỳ hoàn tất, ${state.cycles.filter(c => c.locked).length} chu kỳ khoá.`); break;
+      case 7: this.pushLog(`<b>Chặng 7</b> — Phân loại ABC: nhóm <b>${state.classification.abc}</b>.`); break;
+      case 8: this.pushLog(`<b>Chặng 8</b> — Phân loại XYZ/D: nhóm <b>${state.classification.xyz ?? 'BLOCKED'}</b>.`); break;
+      case 9: this.pushLog(`<b>Chặng 9</b> — Chính sách: ${state.serviceLevel ? `mức phục vụ ${state.serviceLevel}%` : state.capitalPriority}.`); break;
+      case 10: if (state.classification.xyz === 'Y') this.pushLog(`<b>Gate Y-SEASON</b> — ${state.seasonality === 'confirmed' ? 'Đạt: mở Holt-Winters.' : 'Không đạt.'}`); break;
+      case 11: if (state.classification.xyz === 'Y' && state.seasonality !== 'confirmed') this.pushLog(`<b>Gate Y-TREND</b> — ${state.trend === 'up' || state.trend === 'down' ? 'Đạt: mở Holt.' : 'Không đạt: dùng SES.'}`); break;
+      case 12: this.pushLog(`<b>Chặng 12</b> — Khoá mô hình nền: <b>${state.forecast?.model ?? '—'}</b>.`); break;
+      case 13: this.pushLog(`<b>Chặng 13</b> — Hệ số CTKM: ${state.promoFactor != null ? state.promoFactor.toFixed(2) : 'không có'} (${state.promoConfidence}).`); break;
+      case 14: this.pushLog(`<b>Chặng 14</b> — Dự báo cuối đã áp CTKM cho ${state.finalForecast.length} chu kỳ.`); break;
+      case 15: this.pushLog(`<b>Chặng 15</b> — Hàng tự do: ${state.freeStock ?? 0}.`); break;
+      case 16: this.pushLog(`<b>Chặng 16</b> — Tồn an toàn: ${state.safetyStock ?? 'chính sách riêng'}.`); break;
+      case 17: this.pushLog(`<b>Chặng 17</b> — Số đặt sau MOQ: ${state.orderPlan?.orderQuantity ?? '—'}.`); break;
+      case 18: this.pushLog(`<b>Chặng 18</b> — Số được cấp vốn: ${state.budgetAllocation?.fundedQuantity ?? '—'}.`); break;
+      case 19: this.pushLog(`<b>Chặng 19</b> — Trạng thái phát hành: ${state.releaseDecision?.status ?? '—'}.`); break;
+      case 20: this.pushLog(`<b>Chặng 20</b> — Hậu kiểm hoàn tất.`); break;
       default: this.pushLog(`<b>Chặng ${stage}</b> — hoàn tất.`);
     }
   }

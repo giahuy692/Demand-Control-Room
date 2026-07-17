@@ -1,4 +1,15 @@
-import { DailyRecord, SalesStatus, StockCalculationStatus } from './models';
+import { ExtractMetadata, PromotionInterval } from './catalog';
+import {
+  BaseDemandSource,
+  DailyRecord,
+  isBaselineExcludedPromo,
+  PromotionClass,
+  PromotionStatus,
+  SalesObservationStatus,
+  StockCalculationStatus,
+  StockoutStatus,
+  TechnicalFillStatus,
+} from './models';
 
 function addDaysIso(iso: string, amount: number): string {
   const date = new Date(`${iso}T00:00:00Z`);
@@ -6,61 +17,108 @@ function addDaysIso(iso: string, amount: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function classifySalesStatus(sales: number | null): SalesStatus {
-  // DEC-W03 (chờ dữ liệu): chưa có trạng thái POS-đầy-đủ theo ngày để phân biệt
-  // CONFIRMED_ZERO/OUTSIDE_ACTIVE_PERIOD khỏi SOURCE_UNKNOWN — mọi dòng nguồn thật
-  // hiện tại luôn có Sales là số cụ thể (ingest bắt buộc), nên chỉ 2 nhánh này thật sự đạt tới.
-  if (sales === null) return 'SOURCE_UNKNOWN';
-  return sales > 0 ? 'OBSERVED' : 'OBSERVED_ZERO';
-}
-
-/** RULE-02-003 — tồn âm PHẢI giữ nguyên số âm và gắn NEGATIVE_REVIEW, không tự đổi thành 0. */
-function classifyStockStatus(openStock: number, closeStock: number, carriedFromMissingAnchor: boolean): StockCalculationStatus {
-  if (carriedFromMissingAnchor) return 'ANCHOR_MISSING';
+function classifyStockStatus(openStock: number | null, closeStock: number | null): StockCalculationStatus {
+  if (openStock === null || closeStock === null) return 'ANCHOR_MISSING';
   if (openStock < 0 || closeStock < 0) return 'NEGATIVE_REVIEW';
   return 'CALCULATED';
 }
 
-function scaffoldRecord(sku: string, date: string, isReferenceOnly: boolean, openStock: number, closeStock: number, stockCalculationStatus: StockCalculationStatus): DailyRecord {
+function salesObservation(date: string, hasSalesRecord: boolean, sales: number | null, metadata: ExtractMetadata): Pick<DailyRecord, 'hasSalesRecord' | 'sales' | 'salesObservationStatus'> {
+  if (hasSalesRecord) {
+    if (sales === null || sales < 0) throw new Error(`Bất biến sales vỡ tại ${date}: hasSalesRecord=true yêu cầu sales >= 0.`);
+    return { hasSalesRecord: true, sales, salesObservationStatus: SalesObservationStatus.RECORDED_SALE };
+  }
+  if (metadata.extractionCompleted && date <= metadata.salesDataThroughDate) {
+    return { hasSalesRecord: false, sales: 0, salesObservationStatus: SalesObservationStatus.CONFIRMED_ZERO };
+  }
+  return { hasSalesRecord: false, sales: null, salesObservationStatus: SalesObservationStatus.SOURCE_DATA_GAP };
+}
+
+function promotionFor(date: string, intervals: readonly PromotionInterval[]): { code: string | null; promotionClass: PromotionClass | null } {
+  const active = intervals.filter(interval => interval.startDate <= date && date <= interval.endDate);
+  if (!active.length) return { code: null, promotionClass: null };
+  const codes = [...new Set(active.map(interval => interval.code))];
+  // Nhiều CTKM chồng ngày: chỉ cần MỘT chương trình kích cầu mạnh/chưa phân loại là ngày
+  // đó không còn là mức bán tự nhiên — lấy class "mạnh nhất" theo thứ tự loại trừ baseline.
+  const classes = active.map(interval => interval.promotionClass);
+  const promotionClass: PromotionClass = classes.includes('DEEP_PROMO')
+    ? 'DEEP_PROMO'
+    : classes.includes('PROMOTION_UNRESOLVED')
+      ? 'PROMOTION_UNRESOLVED'
+      : 'ALWAYS_ON';
+  return { code: codes.join('|'), promotionClass };
+}
+
+/** promotionStatus đi theo phân loại CTKM: chỉ DEEP_PROMO (mechanismType 2/7) mới loại ngày khỏi baseline (Chặng 3 → Chặng 4). */
+function promotionStatusFor(promotionClass: PromotionClass): PromotionStatus {
+  return isBaselineExcludedPromo(promotionClass) ? PromotionStatus.PROMOTION : PromotionStatus.NONE;
+}
+
+function scaffoldRecord(sku: string, barcode: string, date: string, isReferenceOnly: boolean, stock: number | null, metadata: ExtractMetadata, promoCode: string | null, promotionClass: PromotionClass): DailyRecord {
   return {
-    sku, date, openStock: openStock ?? 0, closeStock: closeStock ?? 0, sales: null, receiptHour: null, promoCode: null, hasRecord: false, isZeroSaleInferred: false,
-    salesStatus: 'SOURCE_UNKNOWN', isStockout: false, stockoutReason: null, stockoutReviewRequired: false, baseDemand: null, baseSource: null,
-    referenceDates: [], beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null,
-    balanceStatus: null, selectionReason: '', isReferenceOnly,
-    stockSource: 'CARRIED_FORWARD', stockCalculationStatus,
+    sku, barcode, date, openStock: stock, closeStock: stock,
+    ...salesObservation(date, false, null, metadata),
+    isReferenceOnly, stockCalculationStatus: classifyStockStatus(stock, stock), stockSource: 'CARRIED_FORWARD',
+    receiptHour: null, promoCode, promotionStatus: promotionStatusFor(promotionClass),
+    stockoutStatus: StockoutStatus.NONE, baseDemand: null, baseDemandSource: BaseDemandSource.SOURCE_DATA_GAP,
+    isCleanObservedReference: false, technicalFillStatus: TechnicalFillStatus.NOT_APPLICABLE,
+    referenceDates: [], referenceEvidence: [], beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null,
+    balanceStatus: null, selectionReason: '',
+    storeCode: 11,
+    productCode: Number(sku.replace('SKU-', '')) || 1,
+    promotionName: null,
+    promotionStartDate: null,
+    promotionEndDate: null,
+    promotionType: null,
+    promotionMechanismType: null,
+    promotionClass,
+    stockStatus: stock === null ? 'ANCHOR_MISSING' : stock < 0 ? 'NEGATIVE_STOCK' : 'CALCULATED',
   };
 }
 
-/**
- * RULE-01-001 (04 §4) — tạo lịch liên tục cho một SKU trong [startIso, endIso] (hai đầu bao gồm).
- * Ngày đã có trong `sourceRows` được giữ nguyên (chỉ gán lại salesStatus/isReferenceOnly/trạng thái
- * tồn); ngày không có nguồn thật được chèn thêm dạng scaffold: hasRecord=false, sales=null,
- * salesStatus='SOURCE_UNKNOWN' — KHÔNG được suy diễn thành bán=0 [DEC-006, DEC-007, GT-01, GT-02].
- * `isReferenceOnlyAt(iso)` phân loại ngày nào thuộc vùng đọc tham chiếu trước khung xử lý (RULE-01-003).
- *
- * RULE-02-003/02-Hop-dong-du-lieu-dau-vao.md §6 — ngày scaffold mang tồn cuối ngày trước sang
- * (O_d=C_{d-1}, C_d=O_d), gắn stockSource=CARRIED_FORWARD; ngày đầu tiên của cả khoảng không có
- * mốc trước đó (`openingAnchor=null`) được gắn ANCHOR_MISSING thay vì suy diễn tồn=0. Tồn âm được
- * mang tiếp NGUYÊN VẸN (không clamp 0) và tiếp tục gắn NEGATIVE_REVIEW ở các ngày kế tiếp.
- */
-export function buildCalendarScaffold(sku: string, sourceRows: readonly DailyRecord[], startIso: string, endIso: string, isReferenceOnlyAt: (iso: string) => boolean, openingAnchor: number | null = null): DailyRecord[] {
-  const bySourceDate = new Map<string, DailyRecord>();
-  for (const row of sourceRows) bySourceDate.set(row.date, row); // Trùng ngày: giữ bản ghi cuối cùng — không nhân đôi ngày trong lịch.
+/** Tạo lịch SKU × ngày, left join nguồn thưa và phân loại ngày không có sales bằng watermark đã xác nhận. */
+export function buildCalendarScaffold(
+  sku: string,
+  sourceRows: readonly DailyRecord[],
+  startIso: string,
+  endIso: string,
+  isReferenceOnlyAt: (iso: string) => boolean,
+  metadata: ExtractMetadata = { salesDataThroughDate: '0000-01-01', stockDataThroughDate: '0000-01-01', extractionCompleted: false },
+  promotionIntervals: readonly PromotionInterval[] = [],
+  openingAnchor: number | null = null,
+): DailyRecord[] {
+  const bySourceDate = new Map(sourceRows.map(row => [row.date, row]));
   const result: DailyRecord[] = [];
+  const barcode = sourceRows[0]?.barcode ?? sku;
   let previousClose = openingAnchor;
-  for (let iso = startIso; iso <= endIso; iso = addDaysIso(iso, 1)) {
-    const existing = bySourceDate.get(iso);
-    const isReferenceOnly = isReferenceOnlyAt(iso);
+  for (let date = startIso; date <= endIso; date = addDaysIso(date, 1)) {
+    const existing = bySourceDate.get(date);
+    const intervalPromo = promotionFor(date, promotionIntervals);
+    const promoCode = [existing?.promoCode, intervalPromo.code].filter(Boolean).join('|') || null;
     if (existing) {
-      const stockCalculationStatus = classifyStockStatus(existing.openStock, existing.closeStock, false);
-      result.push({ ...existing, salesStatus: classifySalesStatus(existing.sales), isReferenceOnly, stockSource: 'OBSERVED', stockCalculationStatus });
-      previousClose = existing.closeStock;
+      const openStock = existing.openStock;
+      const closeStock = existing.closeStock;
+      // Dòng nguồn là thẩm quyền phân loại của chính nó (PromotionClass do SQL/DTO tính từ
+      // tbl_POLPromotion.[Type]); interval chỉ bổ sung khi dòng nguồn KHÔNG ghi nhận CTKM
+      // (ngày trong khoảng KM nhưng bán không gắn mã). Không còn mặc nhiên ép DEEP_PROMO.
+      const promotionClass: PromotionClass = !promoCode
+        ? 'NO_PROMOTION'
+        : existing.promotionClass !== 'NO_PROMOTION'
+          ? existing.promotionClass
+          : intervalPromo.promotionClass ?? 'DEEP_PROMO';
+      result.push({
+        ...existing,
+        ...salesObservation(date, existing.hasSalesRecord, existing.sales, metadata),
+        promoCode,
+        promotionStatus: promotionStatusFor(promotionClass),
+        isReferenceOnly: isReferenceOnlyAt(date),
+        stockSource: 'OBSERVED',
+        stockCalculationStatus: classifyStockStatus(openStock, closeStock),
+        promotionClass,
+      });
+      previousClose = closeStock;
     } else {
-      const anchorMissing = previousClose === null;
-      const value = previousClose ?? 0;
-      const stockCalculationStatus = classifyStockStatus(value, value, anchorMissing);
-      result.push(scaffoldRecord(sku, iso, isReferenceOnly, value, value, stockCalculationStatus));
-      previousClose = value;
+      result.push(scaffoldRecord(sku, barcode, date, isReferenceOnlyAt(date), previousClose, metadata, promoCode, intervalPromo.promotionClass ?? (promoCode ? 'DEEP_PROMO' : 'NO_PROMOTION')));
     }
   }
   return result;

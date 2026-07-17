@@ -17,9 +17,9 @@ function processor(
 }
 
 describe('DemandStageRegistry', () => {
-  it('đăng ký đủ 19 stage theo dependency, không còn switch dispatch', () => {
+  it('đăng ký đủ 20 stage theo dependency, không còn switch dispatch', () => {
     const registry = new DemandStageRegistry([...DEFAULT_DEMAND_STAGE_PROCESSORS].reverse());
-    expect(registry.ordered.map(item => item.id)).toEqual(Array.from({ length: 19 }, (_, index) => index + 1));
+    expect(registry.ordered.map(item => item.id)).toEqual(Array.from({ length: 20 }, (_, index) => index + 1));
   });
 
   it('chặn id trùng, dependency thiếu và dependency cycle', () => {

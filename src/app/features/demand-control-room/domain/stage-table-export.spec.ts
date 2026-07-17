@@ -9,7 +9,7 @@ function runAllStages(): Partial<Record<StageNumber, StageSnapshot>> {
   const engine = testEngine();
   const snapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
   let previous: StageSnapshot | null = null;
-  for (let number = 1; number <= 19; number++) {
+  for (let number = 1; number <= 20; number++) {
     const stage = number as StageNumber;
     previous = engine.run(stage, previous, DEFAULT_POLICY);
     snapshots[stage] = previous;
@@ -22,7 +22,7 @@ describe('stage-table-export', () => {
   const selectedSkuId = Object.keys(snapshots[1]!.states)[0];
 
   it('mọi chặng đã chạy đều có dữ liệu xuất cho bảng audit/insight đang xem', { timeout: 60_000 }, () => {
-    for (let number = 1; number <= 19; number++) {
+    for (let number = 1; number <= 20; number++) {
       const stage = number as StageNumber;
       const exportData = buildStageTableExport(snapshots[stage]!, selectedSkuId, DEFAULT_POLICY);
 
@@ -37,19 +37,21 @@ describe('stage-table-export', () => {
     const exportData = buildStageTableExport(snapshots[4]!, selectedSkuId, DEFAULT_POLICY)!;
 
     expect(exportData.columns).toEqual(expect.arrayContaining([
-      'date', 'salesStatus', 'stockCalculationStatus', 'baseDemand',
-      'referenceMedian', 'beforeReferenceDates', 'afterReferenceDates', 'selectionReason',
+      'sku', 'date', 'hasSalesRecord', 'salesObservationStatus', 'sales',
+      'openStock', 'closeStock', 'receiptHour', 'promotionStatus', 'stockoutStatus',
+      'baseDemand', 'baseDemandSource', 'isCleanObservedReference', 'technicalFillStatus',
+      'referenceDatesUsed', 'referenceEvidence', 'reason',
     ]));
     expect(exportData.rows[0]['sku']).toBe(selectedSkuId);
   });
 
-  it('Chặng 6 và 8 xuất dữ liệu toàn danh mục, không chỉ SKU đang chọn', () => {
-    const stage6 = buildStageTableExport(snapshots[6]!, selectedSkuId, DEFAULT_POLICY)!;
-    const stage8 = buildStageTableExport(snapshots[8]!, selectedSkuId, DEFAULT_POLICY)!;
+  it('Chặng 7 và 9 xuất dữ liệu toàn danh mục, không chỉ SKU đang chọn', () => {
+    const stage7 = buildStageTableExport(snapshots[7]!, selectedSkuId, DEFAULT_POLICY)!;
+    const stage9 = buildStageTableExport(snapshots[9]!, selectedSkuId, DEFAULT_POLICY)!;
 
-    expect(stage6.scope).toBe('Toàn danh mục');
-    expect(stage6.rows.length).toBe(Object.keys(snapshots[6]!.states).length);
-    expect(stage8.rows.map(row => row['cell'])).toEqual(expect.arrayContaining(['AX', 'BY', 'CZ', 'D/N-A']));
+    expect(stage7.scope).toBe('Toàn danh mục');
+    expect(stage7.rows.length).toBe(Object.keys(snapshots[7]!.states).length);
+    expect(stage9.rows.map(row => row['cell'])).toEqual(expect.arrayContaining(['AX', 'BY', 'CZ', 'D/N-A']));
   });
 
   it('CSV giữ metadata và escape đúng dấu phẩy, nháy kép, xuống dòng', () => {

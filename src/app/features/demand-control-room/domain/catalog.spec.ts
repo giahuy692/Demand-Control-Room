@@ -6,22 +6,14 @@ import { parseHachiBusinessRoles } from './catalog';
 describe('SimulationDataset domain mapping', () => {
   it('giữ null khác zero', () => {
     const dataset = realDatasetFromRows([
-      fixtureDailyRecord({ sku: 'P1', date: '2026-01-01', sales: null, hasSalesRecord: false, openStock: 10, closeStock: 10, totalStockDelta: 0 }),
-      fixtureDailyRecord({ sku: 'P1', date: '2026-01-02', sales: 0, hasSalesRecord: true, openStock: 10, closeStock: 10, totalStockDelta: 0 }),
+      fixtureDailyRecord({ sku: '1', date: '2026-01-01', sales: null, hasSalesRecord: false, openStock: 10, closeStock: 10, totalStockDelta: 0 }),
+      fixtureDailyRecord({ sku: '1', date: '2026-01-02', sales: 0, hasSalesRecord: true, openStock: 10, closeStock: 10, totalStockDelta: 0 }),
     ]);
 
-    expect(dataset.dailyBySku['P1'].map(row => row.sales)).toEqual([null, 0]);
-    expect(dataset.dailyBySku['P1'].map(row => row.salesStatus)).toEqual(['SOURCE_UNKNOWN', 'OBSERVED_ZERO']);
+    expect(dataset.dailyBySku['1'].map(row => row.sales)).toEqual([null, 0]);
+    expect(dataset.dailyBySku['1'].map(row => row.salesObservationStatus)).toEqual(['SOURCE_DATA_GAP', 'RECORDED_SALE']);
   });
 
-  it('loại opening anchor khỏi chuỗi học', () => {
-    const dataset = realDatasetFromRows([
-      fixtureDailyRecord({ sku: 'P1', date: '2025-12-31', isOpeningAnchor: true }),
-      fixtureDailyRecord({ sku: 'P1', date: '2026-01-01' }),
-    ]);
-
-    expect(dataset.dailyBySku['P1'].map(row => row.date)).toEqual(['2026-01-01']);
-  });
 });
 
 describe('parseHachiBusinessRoles', () => {

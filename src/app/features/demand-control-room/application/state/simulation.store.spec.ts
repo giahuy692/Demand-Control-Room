@@ -3,6 +3,7 @@ import { SimulationEngine } from '../../domain/simulation-engine';
 import { emptyClassification } from '../../stages/stage-support';
 import { SimulationStore } from './simulation.store';
 import { fileDatasetService } from '../../data-access/testing/file-dataset.testing';
+import { BaseDemandSource, StockoutStatus } from '../../domain/models';
 
 describe('SimulationStore synchronization invariants', () => {
   it('khởi tạo ở Chặng 1 nhưng chưa chạy snapshot nào', () => {
@@ -14,23 +15,23 @@ describe('SimulationStore synchronization invariants', () => {
     expect(store.view().state).toBeNull();
   });
 
-  it('giữ snapshot Chặng 6 bất biến sau khi tự chạy Chặng 7', async () => {
+  it('giữ snapshot Chặng 7 bất biến sau khi tự chạy Chặng 8', async () => {
     const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
-    await store.selectStage(6);
-    const snapshot6 = store.snapshots()[6]!;
-    const before = JSON.stringify(snapshot6);
-    expect(store.stageLabel(snapshot6.states['SKU-005'], 6)).toBe(snapshot6.states['SKU-005'].classification.abc);
     await store.selectStage(7);
-    expect(JSON.stringify(store.snapshots()[6])).toBe(before);
+    const snapshot7 = store.snapshots()[7]!;
+    const before = JSON.stringify(snapshot7);
+    expect(store.stageLabel(snapshot7.states['SKU-005'], 7)).toBe(snapshot7.states['SKU-005'].classification.abc);
+    await store.selectStage(8);
+    expect(JSON.stringify(store.snapshots()[7])).toBe(before);
   });
 
-  it('click thẳng Chặng 8 tự chạy tuần tự 1→8 và đổi SKU cùng snapshot', async () => {
+  it('click thẳng Chặng 9 tự chạy tuần tự 1→9 và đổi SKU cùng snapshot', async () => {
     const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
-    await store.selectStage(8);
-    expect(store.completedStage()).toBe(8);
-    expect(Object.keys(store.snapshots())).toHaveLength(8);
+    await store.selectStage(9);
+    expect(store.completedStage()).toBe(9);
+    expect(Object.keys(store.snapshots())).toHaveLength(9);
     store.selectSku('SKU-005');
-    const state = store.snapshots()[8]!.states['SKU-005'];
+    const state = store.snapshots()[9]!.states['SKU-005'];
     expect(store.view().state?.definition.id).toBe('SKU-005');
     // §8 LỆNH CODEX — serviceLevel=null KHÔNG luôn là 'D'; phải phân đúng nhánh BLOCKED/N-A/D subtype/POLICY_PENDING.
     const expectedLabel = state.classification.classificationStatus === 'CLASSIFICATION_BLOCKED' ? 'BLOCKED'
@@ -39,7 +40,7 @@ describe('SimulationStore synchronization invariants', () => {
       : state.serviceLevel === null ? 'POLICY_PENDING'
       : `${state.classification.abc}${state.classification.xyz}`;
     expect(store.stageLabel(store.view().state)).toBe(expectedLabel);
-    await store.selectStage(6);
+    await store.selectStage(7);
     expect(store.stageLabel(store.view().state)).toBe(store.view().state?.classification.abc);
   });
 
@@ -50,7 +51,7 @@ describe('SimulationStore synchronization invariants', () => {
       classification: { ...emptyClassification(), abc: 'B' as const, xyz: 'X' as const, classificationStatus: 'CLASSIFIED' as const, dSubtype: null },
       serviceLevel: null,
     };
-    expect(store.stageLabel(state, 8)).toBe('POLICY_PENDING');
+    expect(store.stageLabel(state, 9)).toBe('POLICY_PENDING');
   });
 
   it('§8 LỆNH CODEX — stageLabel trả D subtype khi xyz=D và abc không phải N/A', () => {
@@ -59,7 +60,7 @@ describe('SimulationStore synchronization invariants', () => {
       classification: { ...emptyClassification(), abc: 'B' as const, xyz: 'D' as const, classificationStatus: 'CLASSIFIED' as const, dSubtype: 'D_NEW' as const },
       serviceLevel: null,
     };
-    expect(store.stageLabel(state, 8)).toBe('D_NEW');
+    expect(store.stageLabel(state, 9)).toBe('D_NEW');
   });
 
   it('đổi tham số phiên giữ nguyên chặng active và tự chạy lại đến chặng đó', async () => {
@@ -94,18 +95,19 @@ describe('SimulationStore synchronization invariants', () => {
     const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
     await store.selectStage(4);
     const stage3 = store.snapshots()[3]!.states['SKU-001'];
-    const distorted = stage3.daily.find(row => row.isStockout && !row.promoCode && row.referenceDates.length >= 3)!;
+    const distorted = stage3.daily.find(row => row.stockoutStatus !== StockoutStatus.NONE && !row.promoCode && row.referenceDates.length >= 3)!;
     expect(distorted.balanceStatus).not.toBeNull();
     expect(distorted.referenceMedian).not.toBeNull();
     expect([...distorted.beforeReferenceDates, ...distorted.afterReferenceDates]).toEqual(distorted.referenceDates);
     expect(distorted.referenceDates.every(date => {
       const reference = stage3.daily.find(row => row.date === date)!;
-      return !reference.isStockout && !reference.promoCode && reference.baseSource === 'clean';
+      return reference.stockoutStatus === StockoutStatus.NONE && !reference.promoCode
+        && (reference.baseDemandSource === BaseDemandSource.CLEAN_OBSERVED_SALE || reference.baseDemandSource === BaseDemandSource.CLEAN_OBSERVED_ZERO);
     })).toBe(true);
-    const promoAtStage3 = stage3.daily.find(row => row.promoCode && row.baseSource === 'promo-defer')!;
+    const promoAtStage3 = stage3.daily.find(row => row.promoCode && row.baseDemandSource === BaseDemandSource.PROMOTION_UNRESOLVED)!;
     const promoAtStage4 = store.snapshots()[4]!.states['SKU-001'].daily.find(row => row.date === promoAtStage3.date)!;
     expect(promoAtStage3.baseDemand).toBeNull();
-    expect(promoAtStage4.baseSource).toMatch(/promo-normalized|insufficient/);
+    expect([BaseDemandSource.PROMOTION_BASELINE, BaseDemandSource.PROMOTION_UNRESOLVED]).toContain(promoAtStage4.baseDemandSource);
   });
 
   it('§6.1 LỆNH CODEX — allExceptions gộp ngoại lệ từ nhiều chặng đã chạy, dedupe theo id, không trùng lặp', async () => {

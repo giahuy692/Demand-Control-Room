@@ -30,8 +30,8 @@ export function sampleStdev(values: readonly number[]): number {
  * toàn kiểu dữ liệu mà KHÔNG coi null là 0 — nếu bất biến bị vi phạm, báo lỗi rõ
  * ràng thay vì âm thầm tính sai.
  */
-export function requireObservedSales(record: Pick<DailyRecord, 'sku' | 'date' | 'sales' | 'hasRecord'>): number {
-  if (record.sales === null) throw new Error(`Bất biến vỡ: SKU ${record.sku} ngày ${record.date} có hasRecord=true nhưng sales=null — không được coi ngày này là đã quan sát.`);
+export function requireObservedSales(record: Pick<DailyRecord, 'sku' | 'date' | 'sales' | 'hasSalesRecord'>): number {
+  if (!record.hasSalesRecord || record.sales === null) throw new Error(`Bất biến vỡ: SKU ${record.sku} ngày ${record.date} không có sales row hợp lệ.`);
   return record.sales;
 }
 
@@ -40,15 +40,16 @@ export function requireObservedSales(record: Pick<DailyRecord, 'sku' | 'date' | 
  * lời gọi chưa truyền tham số này (test cũ, dữ liệu giả); chỉ khi gọi từ Chặng 2 thật với trạng
  * thái ANCHOR_MISSING/UNRESOLVED thì mới chặn đánh dấu stockout tự động.
  */
-export function isStockout(record: Pick<DailyRecord, 'openStock' | 'closeStock' | 'sales' | 'receiptHour' | 'hasRecord'>, cutoffHour = '10:00', stockCalculationStatus: StockCalculationStatus = 'CALCULATED'): boolean {
+export function isStockout(record: Pick<DailyRecord, 'openStock' | 'closeStock' | 'receiptHour'>, cutoffHour = '10:00', stockCalculationStatus: StockCalculationStatus = 'CALCULATED'): boolean {
   // RULE-02-001 — không đủ căn cứ tính tồn thì không được kết luận stockout tự động.
   if (stockCalculationStatus === 'ANCHOR_MISSING' || stockCalculationStatus === 'UNRESOLVED') return false;
   // lateReceipt chỉ cần tồn đầu/cuối/giờ nhập (nguồn sổ tồn kho, tin được kể cả
   // ngày không có giao dịch bán) nên không cần gate theo hasRecord.
-  const lateReceipt = record.openStock === 0 && record.closeStock > 0 && !!record.receiptHour && record.receiptHour > cutoffHour;
+  const [cutoffHours, cutoffMinutes] = cutoffHour.split(':').map(Number);
+  const lateReceipt = record.openStock === 0 && record.closeStock !== null && record.closeStock > 0 && record.receiptHour !== null && record.receiptHour > cutoffHours + cutoffMinutes / 60;
   // emptyAllDay cần Q=0 đã XÁC NHẬN — ngày không có bản ghi (hasRecord=false)
   // không được suy diễn thành bán=0 [nguyên tắc bất biến #2, C1 §3].
-  const emptyAllDay = record.hasRecord && record.openStock === 0 && record.closeStock === 0 && record.sales === 0;
+  const emptyAllDay = record.openStock === 0 && record.closeStock === 0;
   return lateReceipt || emptyAllDay;
 }
 
@@ -85,7 +86,7 @@ export function classifyPromoRegionPolicy(codes: readonly string[], unknownRevie
 }
 
 export function stockoutBaseline(sales: number, references: readonly number[]): number | null {
-  return references.length >= 3 ? Math.max(sales, median(references)) : null;
+  return references.length >= 3 ? median(references) : null;
 }
 
 export function promoBaseline(references: readonly number[]): number | null {

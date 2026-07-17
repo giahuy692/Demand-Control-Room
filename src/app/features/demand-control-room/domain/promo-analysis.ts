@@ -1,4 +1,4 @@
-import { DailyRecord } from './models';
+import { DailyRecord, isBaselineExcludedPromo } from './models';
 
 export interface PromoRegionSample {
   startDate: string;
@@ -15,11 +15,15 @@ export interface PromoRegionSample {
 /** Dựng đúng vùng/cụm CTKM mà Chặng 4 đã xử lý, sau đó tính một mẫu K cho cả vùng. */
 export function buildPromoRegionSamples(daily: readonly DailyRecord[]): PromoRegionSample[] {
   const regions: { rows: DailyRecord[]; codes: string[] }[] = [];
+  // Vùng học K phải khớp đúng vùng Chặng 4 đã chuẩn hóa: chỉ ngày DEEP_PROMO (mech 2/7).
+  // Ngày ALWAYS_ON/PROMOTION_UNRESOLVED giữ Sales làm nền tự nhiên nên KHÔNG tạo vùng —
+  // tránh SKU chỉ có ưu đãi thường trực bị báo 'blocked' oan dù không có gì phải học.
+  const isRegionDay = (row: DailyRecord): boolean => !!row.promoCode && isBaselineExcludedPromo(row.promotionClass);
   for (let index = 0; index < daily.length; index++) {
-    if (!daily[index].promoCode) continue;
+    if (!isRegionDay(daily[index])) continue;
     const code = daily[index].promoCode!;
     const rows = [daily[index]];
-    while (index + 1 < daily.length && daily[index + 1].promoCode === code) rows.push(daily[++index]);
+    while (index + 1 < daily.length && isRegionDay(daily[index + 1]) && daily[index + 1].promoCode === code) rows.push(daily[++index]);
 
     const previous = regions.at(-1);
     if (previous) {
@@ -41,8 +45,8 @@ export function buildPromoRegionSamples(daily: readonly DailyRecord[]): PromoReg
     const missingUnknownSales = region.rows.some(row => row.sales === null);
     const actualSales = region.rows.reduce((sum, row) => sum + (row.sales ?? 0), 0);
     const naturalBase = region.rows.reduce((sum, row) => sum + (row.baseDemand ?? 0), 0);
-    const hasStockout = region.rows.some(row => row.isStockout);
-    const missingBase = region.rows.some(row => row.baseSource !== 'promo-normalized' || row.baseDemand === null);
+    const hasStockout = region.rows.some(row => row.stockoutStatus !== 'NONE');
+    const missingBase = region.rows.some(row => row.baseDemandSource !== 'PROMOTION_BASELINE' || row.baseDemand === null);
     const rejectionReason = hasStockout
       ? 'Vùng có stockout, số bán bị bóp méo.'
       : missingUnknownSales

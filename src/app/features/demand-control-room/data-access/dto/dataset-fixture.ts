@@ -6,7 +6,7 @@
 
 export function fixtureProduct(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    id: 'SKU-T01',
+    id: '1',
     name: 'Sản phẩm kiểm thử',
     type: 'AX-stable',
     price: 100000,
@@ -47,29 +47,25 @@ export function fixtureProduct(overrides: Record<string, unknown> = {}): Record<
 
 export function fixtureDailyRecord(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    sku: 'SKU-T01',
+    storeCode: 11,
+    productCode: 1,
+    barcode: '1',
+    productName: 'Sản phẩm kiểm thử',
     date: '2026-05-01',
+    hasSalesRecord: true,
+    sales: 2,
+    price: 100000,
+    promotionCode: null,
+    promotionName: null,
+    promotionStartDate: null,
+    promotionEndDate: null,
+    promotionType: null,
+    promotionMechanismType: null,
+    promotionClass: 'NO_PROMOTION',
     openStock: 10,
     closeStock: 8,
-    sales: 2,
-    hasSalesRecord: true,
-    isZeroSaleInferred: false,
-    returnQty: null,
-    hasReturnRecord: false,
-    inventoryNetMovement: null,
-    hasInventoryMovement: false,
-    totalStockDelta: -2,
     receiptHour: null,
-    hasReceiptRecord: false,
-    receiptTimeSource: null,
-    promoCode: null,
-    promoName: null,
-    price: 100000,
-    productName: 'Sản phẩm kiểm thử',
-    isOpeningAnchor: false,
-    isReferenceOnly: false,
-    isHistoryRecord: true,
-    isValidationActual: false,
+    stockStatus: 'CALCULATED',
     ...overrides,
   };
 }
@@ -82,12 +78,13 @@ export function fixtureDataset(overrides: {
   promotionIntervals?: Record<string, unknown>[];
   root?: Record<string, unknown>;
 } = {}): Record<string, unknown> {
-  const products = overrides.products ?? [fixtureProduct()];
-  const dailyRecords = overrides.dailyRecords ?? [
-    fixtureDailyRecord({ date: '2026-05-01' }),
-    fixtureDailyRecord({ date: '2026-05-02', sales: 0, totalStockDelta: 0, openStock: 8, closeStock: 8 }),
-  ];
   const datasetKind = overrides.datasetKind ?? 'MOCK';
+  const defaultId = datasetKind === 'MOCK' ? 'SKU-001' : '1';
+  const products = overrides.products ?? [fixtureProduct({ id: defaultId })];
+  const dailyRecords = overrides.dailyRecords ?? [
+    fixtureDailyRecord({ barcode: defaultId, date: '2026-05-01' }),
+    fixtureDailyRecord({ barcode: defaultId, date: '2026-05-02', sales: 0, openStock: 8, closeStock: 8 }),
+  ];
   return {
     contractVersion: 'DEMAND-SIMULATION-DATASET-V1',
     datasetId: 'fixture-2026-06-01',
@@ -103,7 +100,8 @@ export function fixtureDataset(overrides: {
       storeScopeStatus: 'GLOBAL_POS_AGGREGATE',
       portfolioMode: 'SELECTED_SKU_SIMULATION',
       extractIsTruncated: true,
-      sourceWatermarks: datasetKind === 'REAL' ? { sales: '2026-06-15', stock: '2026-06-15' } : { sales: null, stock: null },
+      sourceWatermarks: { sales: '2026-06-15', stock: '2026-06-15' },
+      extractionCompleted: true,
       qualityGates: { stockReconciliation: 'PASS', stockMismatchSkuCount: 0 },
       rowCounts: { dailyRecords: dailyRecords.length, products: products.length },
       policyOverrides: {},

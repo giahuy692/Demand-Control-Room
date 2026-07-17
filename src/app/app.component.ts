@@ -11,15 +11,12 @@ import {
 } from './features/demand-control-room/domain/stage-insights';
 import { explainLearningCell, LearningColumn } from './features/demand-control-room/domain/forecast-models';
 import { exceptionSeverity, SimulationStore, viNumberFormat } from './features/demand-control-room/application/state/simulation.store';
-import { JourneyMapComponent } from './features/demand-control-room/ui/components/journey-map.component';
 import { MathFormulaComponent } from './features/demand-control-room/ui/components/math-formula.component';
-import { ComparisonReportComponent } from './features/demand-control-room/ui/components/comparison-report.component';
-import { SimulationReportComponent } from './features/demand-control-room/ui/components/simulation-report.component';
 import { buildStageTableExport, encodeStageTableCsv } from './features/demand-control-room/domain/stage-table-export';
 
 const AUDIT_ROW_LIMIT = 300;
 
-type DemandChartBarKind = 'observed' | 'adjusted' | 'missing' | 'forecast' | 'inferred';
+type DemandChartBarKind = 'observed' | 'adjusted' | 'missing' | 'forecast' | 'inferred' | 'stockout' | 'promo';
 
 interface DemandChartBar {
   key: string;
@@ -63,36 +60,45 @@ function normalizeDemandBars(
 }
 
 function buildDemandStructureChart(stage: StageNumber, state: Readonly<SkuPipelineState>): DemandStructureChart | null {
-  // Chặng 1–4 làm việc ở cấp NGÀY — hiển thị 60 ngày; từ Chặng 3–4 ngày đã chuẩn hóa nền
-  // (baseSource stockout-lifted/promo-normalized) hiện dạng "đã chỉnh nền" thay vì thiếu.
-  if (stage <= 4) {
+  // Chặng 1–2 hiển thị sales quan sát; Chặng 3–4 phải hiển thị baseDemand do chặng tạo ra.
+  // Không fallback về sales ở Chặng 3–4 vì sẽ che khuất ngày chưa xử lý được.
+  if (stage <= 5) {
     const bars = state.daily.slice(-60).map(row => {
-      const adjusted = row.baseDemand !== null && row.baseSource !== null && row.baseSource !== 'clean';
-      const value = row.baseDemand ?? (row.hasRecord && row.sales !== null ? row.sales : null);
+      const adjusted = row.baseDemand !== null && !['CLEAN_OBSERVED_SALE', 'CLEAN_OBSERVED_ZERO'].includes(row.baseDemandSource);
+      const value = stage <= 2 ? row.sales : row.baseDemand;
       return {
         key: row.date,
         label: row.date.slice(5),
         value,
-        kind: value === null ? 'missing' as const : adjusted ? 'adjusted' as const : row.isZeroSaleInferred ? 'inferred' as const : 'observed' as const,
+        kind: value === null ? 'missing' as const : row.promoCode ? 'promo' as const : row.stockoutStatus !== 'NONE' ? 'stockout' as const : adjusted ? 'adjusted' as const : row.salesObservationStatus === 'CONFIRMED_ZERO' ? 'inferred' as const : 'observed' as const,
         tooltip: value !== null
-          ? `${row.date} · ${adjusted ? `Nền đã chỉnh (${row.baseSource}): ` : row.isZeroSaleInferred ? 'Bán = 0 (Không lịch sử): ' : 'Bán xác nhận: '}${value.toLocaleString('vi-VN')}`
-          : `${row.date} · ${row.hasRecord ? row.salesStatus : 'Không có bản ghi nguồn'} · không được coi là bán 0`,
+          ? `${row.date} · ${row.promoCode ? `CTKM (${row.promotionName?.trim() || 'chưa có tên'}): ` : row.stockoutStatus !== 'NONE' ? 'STOCKOUT: ' : adjusted ? `Nền đã chỉnh (${row.baseDemandSource}): ` : row.salesObservationStatus === 'CONFIRMED_ZERO' ? 'Bán xác nhận bằng 0: ' : 'Bán ghi nhận: '}${value.toLocaleString('vi-VN')}`
+          : `${row.date} · ${row.salesObservationStatus} · không được coi là bán 0`,
       };
     });
     const observedCount = bars.filter(bar => bar.kind !== 'missing').length;
+    const stageSubtitle = stage === 1
+      ? 'sales quan sát và độ phủ nguồn'
+      : stage === 2
+        ? 'sales quan sát và trạng thái stockout'
+        : stage === 3
+          ? 'nhu cầu nền sau xử lý stockout'
+          : stage === 4
+            ? 'nhu cầu nền sau xử lý CTKM'
+            : 'nhu cầu nền sau lấp các ngày còn thiếu';
     const subtitle = observedCount
-      ? '60 ngày lịch gần nhất · dữ liệu bán xác nhận'
-      : '60 ngày lịch gần nhất · KHÔNG có ngày bán xác nhận nào trong cửa sổ này — kiểm tra phạm vi dữ liệu nguồn';
+      ? `60 ngày lịch gần nhất · ${stageSubtitle}`
+      : `60 ngày lịch gần nhất · KHÔNG có ${stage <= 2 ? 'ngày bán xác nhận' : 'nhu cầu nền đã xử lý'} trong cửa sổ này`;
     return normalizeDemandBars(bars, subtitle, 'đơn vị/ngày');
   }
 
-  // Chặng 14–19 mang finalForecast của Chặng 13 đi tiếp — vẫn hiển thị cấu trúc nền + dự báo cuối.
-  const future = stage >= 13
+  // Chặng 15–20 mang finalForecast của Chặng 14 đi tiếp — vẫn hiển thị cấu trúc nền + dự báo cuối.
+  const future = stage >= 14
     ? state.finalForecast.slice(0, 6)
-    : stage >= 11
+    : stage >= 12
       ? (state.forecast?.baseForecast ?? []).slice(0, 6)
       : [];
-  const historyLimit = stage === 9 ? 48 : stage === 10 ? 12 : 24;
+  const historyLimit = stage === 10 ? 48 : stage === 11 ? 12 : 24;
   const history = state.cycles.slice(-historyLimit).map(cycle => ({
     key: `CK-${cycle.cycleIndex}`,
     label: `CK${cycle.cycleIndex}`,
@@ -109,9 +115,9 @@ function buildDemandStructureChart(stage: StageNumber, state: Readonly<SkuPipeli
     label: `F+${index + 1}`,
     value,
     kind: 'forecast' as const,
-    tooltip: `Dự báo ${index + 1}/${future.length}: ${value.toLocaleString('vi-VN')} đơn vị/chu kỳ${stage >= 13 ? ' · sau điều chỉnh CTKM tương lai' : ' · dự báo nền'}`,
+    tooltip: `Dự báo ${index + 1}/${future.length}: ${value.toLocaleString('vi-VN')} đơn vị/chu kỳ${stage >= 14 ? ' · sau điều chỉnh CTKM tương lai' : ' · dự báo nền'}`,
   }));
-  const forecastLabel = stage >= 13 ? 'dự báo cuối' : 'dự báo nền';
+  const forecastLabel = stage >= 14 ? 'dự báo cuối' : 'dự báo nền';
   const subtitle = future.length
     ? `${history.length} chu kỳ nền + ${future.length} kỳ ${forecastLabel}`
     : `${history.length} chu kỳ nền gần nhất · chu kỳ chưa khóa không bị coi là 0`;
@@ -121,7 +127,7 @@ function buildDemandStructureChart(stage: StageNumber, state: Readonly<SkuPipeli
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [FormsModule, KeyValuePipe, JourneyMapComponent, MathFormulaComponent, ComparisonReportComponent, SimulationReportComponent],
+  imports: [FormsModule, KeyValuePipe, MathFormulaComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -134,30 +140,37 @@ export class AppComponent implements OnInit {
   readonly rightMode = signal<'catalog' | 'context'>('catalog');
   readonly auditDate = signal<string | null>(null);
   readonly auditRowsExpanded = signal(false);
-  readonly journeyOpen = signal(false);
   readonly contextCollapsed = signal(false);
   readonly exceptionQueueOpen = signal(false);
-  readonly currentView = signal<'simulation' | 'report' | 'simulation-report'>('simulation');
 
-  setView(view: 'simulation' | 'report' | 'simulation-report'): void {
-    this.currentView.set(view);
-    if (view === 'report') {
-      void this.store.generateReportData();
-    }
-  }
   readonly auditCollapsed = signal(false);
-  readonly processCollapsed = signal(false);
+  readonly processCollapsed = signal(true);
+  readonly headerCollapsed = signal(false);
   readonly processPanelWidth = signal<number | null>(650);
   readonly traceStepOverrides = signal<Record<number, boolean>>({});
   private processResize: { pointerId: number; startX: number; startWidth: number } | null = null;
   readonly phases = [
-    { number: 1, label: 'Clean data', range: '01—05' },
-    { number: 2, label: 'Phân loại', range: '06—08' },
-    { number: 3, label: 'Dự báo & KM', range: '09—13' },
-    { number: 4, label: 'Nguồn hàng', range: '14' },
-    { number: 5, label: 'Dự trữ & số mua', range: '15—16' },
-    { number: 6, label: 'Vốn & hậu kiểm', range: '17—19' },
+    { number: 1, label: 'Làm sạch', range: '01—06' },
+    { number: 2, label: 'Phân loại', range: '07—09' },
+    { number: 3, label: 'Dự báo & KM', range: '10—14' },
+    { number: 4, label: 'Nguồn hàng', range: '15' },
+    { number: 5, label: 'Dự trữ & số mua', range: '16—17' },
+    { number: 6, label: 'Vốn & hậu kiểm', range: '18—20' },
   ];
+
+  /**
+   * Sort key + nhãn hiển thị của từng SKU được tính MỘT lần cho mỗi (snapshot, chặng) —
+   * trước đây comparator và template filter lại mảng daily (~1800 ngày/SKU) trong từng lần
+   * so sánh/render, khiến mọi chu kỳ change detection (kể cả hover) quét lại hàng trăm nghìn phần tử.
+   */
+  private readonly skuSortMeta = computed(() => {
+    const meta = new Map<string, { key: readonly [number, number]; label: string }>();
+    const states = this.currentStageStates();
+    if (!states) return meta;
+    const stage = this.store.activeStage();
+    for (const [id, state] of Object.entries(states)) meta.set(id, buildSkuSortMeta(state, stage));
+    return meta;
+  });
 
   readonly visibleCatalog = computed(() => {
     const query = this.searchQuery().trim().toLocaleLowerCase('vi');
@@ -165,16 +178,18 @@ export class AppComponent implements OnInit {
       ? this.store.catalog.filter(sku => `${sku.id} ${sku.name} ${sku.category}`.toLocaleLowerCase('vi').includes(query))
       : [...this.store.catalog];
 
-    const states = this.currentStageStates();
-    if (!states) {
+    const meta = this.skuSortMeta();
+    if (!meta.size) {
       return filtered.sort((a, b) => a.id.localeCompare(b.id));
     }
 
-    const stage = this.store.activeStage();
     return filtered.sort((a, b) => {
-      const aState = states[a.id] ?? null;
-      const bState = states[b.id] ?? null;
-      return compareSkus(a, b, aState, bState, stage);
+      const metaA = meta.get(a.id) ?? null;
+      const metaB = meta.get(b.id) ?? null;
+      if (!metaA && !metaB) return a.id.localeCompare(b.id);
+      if (!metaA) return 1;
+      if (!metaB) return -1;
+      return metaB.key[0] - metaA.key[0] || metaB.key[1] - metaA.key[1] || a.id.localeCompare(b.id);
     });
   });
   readonly summaryEntries = computed(() => Object.entries(this.store.view().summary));
@@ -216,10 +231,12 @@ export class AppComponent implements OnInit {
     return textParts.length ? textParts.join(' · ') : '0 điểm cần soi';
   });
 
-  readonly stockouts = computed(() => this.auditDailyRows().filter(row => row.isStockout));
+  readonly stockouts = computed(() => this.auditDailyRows().filter(row => row.stockoutStatus !== 'NONE'));
   readonly temporaryBases = computed(() => this.auditDailyRows().filter(row => ['unbalanced', 'fixed', 'insufficient'].includes(row.balanceStatus!)));
   readonly promos = computed(() => this.auditDailyRows().filter(row => !!row.promoCode));
   readonly unlockedCycles = computed(() => this.auditCycles().filter(c => !c.locked));
+  /** Chặng 5 — ngày được lấp kỹ thuật hoặc vẫn chưa đủ căn cứ sau khi lấp. */
+  readonly stage5FillDays = computed(() => this.auditDailyRows().filter(row => row.technicalFillStatus === 'FILLED' || row.technicalFillStatus === 'UNRESOLVED'));
   readonly selectedStage5Cycle = computed(() => {
     const cycleIndex = this.highlightedCycleIndex();
     return (cycleIndex === null ? null : this.auditCycles().find(cycle => cycle.cycleIndex === cycleIndex))
@@ -263,7 +280,7 @@ export class AppComponent implements OnInit {
   });
   readonly forecastAudit = computed(() => {
     const state = this.store.selectedState();
-    return state && this.store.activeStage() >= 11 ? buildForecastAudit(state) : null;
+    return state && this.store.activeStage() >= 12 ? buildForecastAudit(state) : null;
   });
 
   // ── Hover giải thích cách tính từng ô của bảng học C11 ──
@@ -308,7 +325,7 @@ export class AppComponent implements OnInit {
     wape: 'Weighted Absolute Percentage Error = Σ|Y − F| / ΣY trên pha TEST — trung bình mỗi 100 đơn vị bán thực thì dự báo lệch bao nhiêu đơn vị. Đây là thước đo chính để so hai mô hình.',
     bias: 'Bias = (ΣF − ΣY) / ΣY trên pha TEST — đo độ lệch HỆ THỐNG. Dương: mô hình dự báo cao hơn thực (nguy cơ thừa hàng); âm: thấp hơn thực (nguy cơ thiếu hàng). Gần 0 là cân.',
     lock: 'REVIEW: tài liệu chưa ban hành ngưỡng P25 chính thức nên không mô hình nào được tự khóa — kết quả cần người duyệt. EXCEPTION: không đo được sai số (thiếu TEST).',
-    future: 'Dự báo NỀN cho 6 chu kỳ tới, sinh từ trạng thái L/T/S cuối cùng (chưa áp hệ số CTKM — việc đó thuộc Chặng 13). Xu hướng khi dự phóng bị chặn ±15%.',
+    future: 'Dự báo NỀN cho 6 chu kỳ tới, sinh từ trạng thái L/T/S cuối cùng (chưa áp hệ số khuyến mãi — việc đó thuộc Chặng 14). Xu hướng khi dự phóng bị chặn ±15%.',
   };
   readonly promoAudit = computed(() => {
     const state = this.store.selectedState();
@@ -382,7 +399,7 @@ export class AppComponent implements OnInit {
   constructor(readonly store: SimulationStore) {}
 
   ngOnInit() {
-    void this.store.selectDataSource('real', 19);
+    void this.store.selectDataSource('real', 20);
   }
 
   get runDate(): string { return this.store.policy().runDate; }
@@ -396,10 +413,20 @@ export class AppComponent implements OnInit {
   get periodBudget(): number { return this.store.policy().periodBudget; }
   set periodBudget(value: number) { void this.store.updatePolicy({ periodBudget: Math.max(0, Number(value)) }); }
 
+
   selectStage(stage: number): void {
+    this.auditDate.set(null);
     this.auditRowsExpanded.set(false);
     this.traceStepOverrides.set({});
+    this.highlightedCycleIndex.set(null);
+    this.currentAnomalyIndex.set({ type: '', index: -1 });
     void this.store.selectStage(stage as StageNumber);
+  }
+  goPrevious(): void {
+    if (this.store.activeStage() > 1) this.selectStage(this.store.activeStage() - 1);
+  }
+  goNext(): void {
+    if (this.store.activeStage() < 20) this.selectStage(this.store.activeStage() + 1);
   }
   selectDataSource(source: DataSourceId): void {
     const target = Math.max(1, this.store.activeStage(), this.store.completedStage()) as StageNumber;
@@ -496,6 +523,7 @@ export class AppComponent implements OnInit {
     switch (cycle.status) {
       case 'NO_SOURCE_RECORD': return 'KHÔNG CÓ NGUỒN';
       case 'BASELINE_UNRESOLVED': return 'CHƯA CÓ NỀN';
+      case 'BLOCKED_NO_VALID_BASELINE': return 'CHẶN · KHÔNG CÓ NỀN HỢP LỆ';
       case 'PARTIAL_BASELINE': return `THIẾU NỀN ${cycle.unresolvedDays}/${cycle.days}`;
       case 'LOCKED_OBSERVED': return 'KHÓA · QUAN SÁT';
       case 'LOCKED_ADJUSTED': return 'KHÓA · ĐÃ ĐIỀU CHỈNH';
@@ -512,6 +540,9 @@ export class AppComponent implements OnInit {
     if (cycle.status === 'BASELINE_UNRESOLVED') {
       return `${cycle.sourceRecordDays}/${cycle.days} ngày có bản ghi nguồn nhưng 0/${cycle.days} ngày xác định được Bₜ. Có nguồn không đồng nghĩa đã đủ ngày sạch đối chứng để tạo nền.`;
     }
+    if (cycle.status === 'BLOCKED_NO_VALID_BASELINE') {
+      return `0/${cycle.days} ngày có baseDemand hợp lệ; chu kỳ bị chặn và không được tạo ${cycle.days} ngày giả để đi tiếp.`;
+    }
     if (cycle.status === 'PARTIAL_BASELINE') {
       return `${cycle.days - cycle.unresolvedDays}/${cycle.days} ngày đã có Bₜ; còn ${cycle.unresolvedDays} ngày thiếu căn cứ nên Yⱼ chưa được khóa.`;
     }
@@ -520,15 +551,15 @@ export class AppComponent implements OnInit {
 
   cycleDayIssue(row: DailyRecord): string {
     const auditReason = row.selectionReason ? ` ${row.selectionReason}` : '';
-    if (!row.hasRecord) return `Không có bản ghi POS nguồn; sales là chưa biết, không phải 0.${auditReason}`;
+    if (row.salesObservationStatus === 'SOURCE_DATA_GAP') return `Nguồn sales chưa đủ; sales=null, không phải 0.${auditReason}`;
     if (row.promoCode) return `Ngày CTKM chưa tìm đủ ngày sạch đối chứng để chuẩn hóa.${auditReason}`;
-    if (row.isStockout) return `Ngày stockout chưa tìm đủ ngày sạch đối chứng để nâng nền.${auditReason}`;
-    if (row.baseSource === 'insufficient') return `Có bản ghi nguồn nhưng chưa đủ căn cứ tạo Bₜ.${auditReason}`;
+    if (row.stockoutStatus !== 'NONE') return `Ngày stockout/review chưa tìm đủ ngày sạch đối chứng để nâng nền.${auditReason}`;
+    if (['STOCKOUT_UNRESOLVED', 'PROMOTION_UNRESOLVED', 'SOURCE_DATA_GAP'].includes(row.baseDemandSource)) return `Chưa đủ căn cứ tạo Bₜ.${auditReason}`;
     return row.selectionReason || 'Chưa tìm được sức mua nền Bₜ cho ngày này.';
   }
 
   jumpToAnomaly(type: 'stockout' | 'promo'): void {
-    const rows = this.auditDailyRows().filter(item => type === 'stockout' ? item.isStockout : !!item.promoCode);
+    const rows = this.auditDailyRows().filter(item => type === 'stockout' ? item.stockoutStatus !== 'NONE' : !!item.promoCode);
     if (!rows.length) return;
     
     let current = this.currentAnomalyIndex();
@@ -560,248 +591,129 @@ export class AppComponent implements OnInit {
   isReferenceAfter(row: DailyRecord): boolean { return this.afterReferenceSet().has(row.date); }
 
   statusLabel(row: DailyRecord): string {
-    if (row.baseSource === 'technical-fill') return 'LẤP NỀN C5';
-    if (row.baseSource === 'promo-defer') return 'CHỜ C4';
+    if (row.baseDemandSource === 'TECHNICAL_FILL') return 'LẤP NỀN C5';
+    if (row.baseDemandSource === 'PROMOTION_UNRESOLVED') return 'CHỜ/THIẾU NỀN C4';
     if (row.balanceStatus === 'balanced') return 'CÂN BẰNG';
     if (row.balanceStatus === 'temporary') return 'TẠM · KIỂM TRA';
     if (row.balanceStatus === 'fixed') return 'KHÔNG CÂN BẰNG CỐ ĐỊNH';
-    if (row.balanceStatus === 'insufficient' || row.baseSource === 'insufficient') return 'THIẾU CĂN CỨ';
-    if (row.baseSource === 'clean') return 'DỮ LIỆU GỐC';
+    if (row.balanceStatus === 'insufficient' || row.baseDemand === null) return 'THIẾU CĂN CỨ';
+    if (row.isCleanObservedReference) return 'DỮ LIỆU GỐC';
     return 'CHƯA XỬ LÝ';
   }
 
   statusClass(row: DailyRecord): string {
-    if (row.baseSource === 'technical-fill') return 'fixed';
-    return row.balanceStatus ?? (row.baseSource === 'promo-defer' ? 'promo' : row.baseSource === 'clean' ? 'clean' : 'pending');
+    if (row.baseDemandSource === 'TECHNICAL_FILL') return 'fixed';
+    return row.balanceStatus ?? (row.promotionStatus === 'PROMOTION' ? 'promo' : row.isCleanObservedReference ? 'clean' : 'pending');
   }
 
-  // promoCode thật có thể là nhiều mã CTKM chồng ngày ghép bằng "|" (ví dụ
-  // "38216|38231|...|48729" khi 10 chương trình cùng hiệu lực một ngày) — hiện
-  // hết cả chuỗi trong ô nhỏ của bảng audit làm mất khả năng đọc; chỉ hiện mã
-  // đầu + số mã còn lại, để đầy đủ trong title (hover) cho ai cần đối chiếu.
-  promoChipLabel(promoCode: string): string {
-    const codes = promoCode.split('|');
-    return codes.length > 1 ? `${codes[0]} +${codes.length - 1}` : codes[0];
+  // Giao diện CHỈ binding TÊN CTKM, không binding mã (quyết định 2026-07-17). Một ngày có
+  // thể dính nhiều chương trình chồng nhau (promoCode ghép "|") nhưng nguồn chỉ mang tên
+  // của CTKM chính — hiện tên chính + số chương trình còn lại.
+  promoLabel(row: Pick<DailyRecord, 'promotionName' | 'promoCode'>): string {
+    const overlapCount = (row.promoCode ?? '').split('|').filter(Boolean).length;
+    const name = row.promotionName?.trim() || 'CTKM chưa có tên';
+    return overlapCount > 1 ? `${name} +${overlapCount - 1}` : name;
+  }
+
+  hasBarKind(chart: DemandStructureChart, kind: DemandChartBarKind): boolean {
+    return chart.bars.some(bar => bar.kind === kind);
   }
 
   getSkuSortValueLabel(sku: SkuDefinition): string {
-    const state = this.stateFor(sku.id);
-    const stage = this.store.activeStage();
-    if (!state) return '';
-    switch (stage) {
-      case 1: {
-        const count = state.daily.filter(day => day.hasRecord).length;
-        return `${count} ngày ghi nhận bán`;
-      }
-      case 2: {
-        const count = state.daily?.filter(d => d.isStockout).length ?? 0;
-        return `${count} SO`;
-      }
-      case 3: {
-        const count = state.daily?.filter(d => d.baseSource === 'stockout-lifted').length ?? 0;
-        return `${count} nâng nền`;
-      }
-      case 4: {
-        const count = state.daily?.filter(d => d.baseSource === 'promo-normalized').length ?? 0;
-        return `${count} chuẩn hóa`;
-      }
-      case 5: {
-        const locked = state.cycles?.filter(c => c.locked).length ?? 0;
-        const total = state.cycles?.length ?? 0;
-        return `${locked}/${total} CK`;
-      }
-      case 6: {
-        const val = state.classification?.annualValue ?? 0;
-        return this.formatCurrency(val);
-      }
-      case 7: {
-        const adi = state.classification?.adi;
-        const cv2 = state.classification?.cv2;
-        return `ADI: ${this.format(adi, 2)} · CV²: ${this.format(cv2, 2)}`;
-      }
-      case 8: {
-        const sl = state.serviceLevel;
-        return sl !== null ? `SL: ${sl}%` : 'Chính sách riêng';
-      }
-      case 9: {
-        const mapping: Record<string, string> = {
-          'confirmed': 'Mùa vụ',
-          'no-clear-season': 'Không rõ',
-          'insufficient-structure': 'Thiếu chu kỳ',
-          'not-applicable': 'Không áp dụng'
-        };
-        return mapping[state.seasonality] ?? state.seasonality;
-      }
-      case 10: {
-        const g1 = state.trendRates?.[0];
-        const g2 = state.trendRates?.[1];
-        if (g1 === null || g1 === undefined || g2 === null || g2 === undefined) return 'Không có xu hướng';
-        return `g₁: ${g1 > 0 ? '+' : ''}${this.format(g1 * 100, 1)}% · g₂: ${g2 > 0 ? '+' : ''}${this.format(g2 * 100, 1)}%`;
-      }
-      case 11: {
-        const wape = state.forecast?.wape;
-        return wape != null ? `WAPE: ${this.format(wape * 100, 1)}%` : 'Không có WAPE';
-      }
-      case 12: {
-        const k = state.promoFactor;
-        return k != null ? `K: ${this.format(k, 2)}` : 'K: —';
-      }
-      case 13: {
-        const sum = (state.finalForecast ?? []).reduce((a, b) => a + b, 0);
-        return `F: ${this.format(sum, 1)}`;
-      }
-      case 14: {
-        const free = state.freeStock;
-        return `Free: ${this.format(free)}`;
-      }
-      case 15: {
-        const ss = state.safetyStock;
-        return `SS: ${this.format(ss)}`;
-      }
-      case 16: {
-        const qty = state.orderPlan?.orderQuantity;
-        return `Đặt: ${this.format(qty)}`;
-      }
-      case 17: {
-        const cut = state.budgetAllocation?.cutQuantity ?? 0;
-        if (cut > 0) return `Cắt: ${this.format(cut)}`;
-        const funded = state.budgetAllocation?.fundedQuantity ?? 0;
-        return `Cấp: ${this.format(funded)}`;
-      }
-      case 18: {
-        const count = state.releaseDecision?.reasons?.length ?? 0;
-        return `${count} ngoại lệ`;
-      }
-      case 19: {
-        const wape = state.postAudit?.forecastWape;
-        if (wape != null) return `Audit WAPE: ${this.format(wape * 100, 1)}%`;
-        const so = state.postAudit?.stockoutUnits;
-        return so != null ? `Thiếu: ${this.format(so)}` : '';
-      }
-      default:
-        return '';
-    }
+    return this.skuSortMeta().get(sku.id)?.label ?? '';
   }
 
 }
 
-function compareSkus(
-  a: SkuDefinition,
-  b: SkuDefinition,
-  aState: Readonly<SkuPipelineState> | null,
-  bState: Readonly<SkuPipelineState> | null,
-  stage: StageNumber
-): number {
-  if (!aState && !bState) return a.id.localeCompare(b.id);
-  if (!aState) return 1;
-  if (!bState) return -1;
-
-  let valA = 0;
-  let valB = 0;
-
-  switch (stage) {
-    case 1:
-      valA = aState.daily.filter(day => day.hasRecord).length;
-      valB = bState.daily.filter(day => day.hasRecord).length;
-      break;
-    case 2:
-      valA = aState.daily?.filter(d => d.isStockout).length ?? 0;
-      valB = bState.daily?.filter(d => d.isStockout).length ?? 0;
-      break;
-    case 3:
-      valA = aState.daily?.filter(d => d.baseSource === 'stockout-lifted').length ?? 0;
-      valB = bState.daily?.filter(d => d.baseSource === 'stockout-lifted').length ?? 0;
-      break;
-    case 4:
-      valA = aState.daily?.filter(d => d.baseSource === 'promo-normalized').length ?? 0;
-      valB = bState.daily?.filter(d => d.baseSource === 'promo-normalized').length ?? 0;
-      break;
-    case 5:
-      valA = aState.cycles?.filter(c => c.locked).length ?? 0;
-      valB = bState.cycles?.filter(c => c.locked).length ?? 0;
-      break;
-    case 6:
-      valA = aState.classification?.annualValue ?? 0;
-      valB = bState.classification?.annualValue ?? 0;
-      break;
+/** Tính một lần cho mỗi (snapshot, chặng): [khóa sort chính, khóa phụ] giảm dần + nhãn hiển thị. */
+function buildSkuSortMeta(state: Readonly<SkuPipelineState>, stage: StageNumber): { key: readonly [number, number]; label: string } {
+  const format = (value: number | null | undefined, digits = 0): string =>
+    value === null || value === undefined ? '—' : viNumberFormat(digits).format(value);
+  if (stage === 5) {
+    const unresolved = state.daily.filter(day => day.baseDemand === null).length;
+    return { key: [-unresolved, 0], label: `${unresolved} ngày chưa đủ nền` };
+  }
+  switch ((stage > 5 ? stage - 1 : stage) as Exclude<StageNumber, 20>) {
+    case 1: {
+      const count = state.daily.filter(day => day.hasSalesRecord).length;
+      return { key: [count, 0], label: `${count} ngày ghi nhận bán` };
+    }
+    case 2: {
+      const count = state.daily.filter(d => d.stockoutStatus !== 'NONE').length;
+      return { key: [count, 0], label: `${count} SO` };
+    }
+    case 3: {
+      const count = state.daily.filter(d => d.baseDemandSource === 'STOCKOUT_BASELINE').length;
+      return { key: [count, 0], label: `${count} nâng nền` };
+    }
+    case 4: {
+      const count = state.daily.filter(d => d.baseDemandSource === 'PROMOTION_BASELINE').length;
+      return { key: [count, 0], label: `${count} chuẩn hóa` };
+    }
+    case 5: {
+      const locked = state.cycles.filter(c => c.locked).length;
+      return { key: [locked, 0], label: `${locked}/${state.cycles.length} CK` };
+    }
+    case 6: {
+      const val = state.classification.annualValue ?? 0;
+      return { key: [val, 0], label: `${viNumberFormat(0).format(val)} ₫` };
+    }
     case 7: {
       const order: Record<string, number> = { X: 4, Y: 3, Z: 2, D: 1, BLOCKED: 0 };
-      valA = order[aState.classification?.xyz ?? 'BLOCKED'] ?? 0;
-      valB = order[bState.classification?.xyz ?? 'BLOCKED'] ?? 0;
-      break;
+      return {
+        key: [order[state.classification.xyz ?? 'BLOCKED'] ?? 0, 0],
+        label: `ADI: ${format(state.classification.adi, 2)} · CV²: ${format(state.classification.cv2, 2)}`,
+      };
     }
     case 8:
-      valA = aState.serviceLevel ?? 0;
-      valB = bState.serviceLevel ?? 0;
-      break;
+      return { key: [state.serviceLevel ?? 0, 0], label: state.serviceLevel !== null ? `SL: ${state.serviceLevel}%` : 'Chính sách riêng' };
     case 9: {
       const order: Record<string, number> = { 'confirmed': 4, 'no-clear-season': 3, 'insufficient-structure': 2, 'not-applicable': 1 };
-      valA = order[aState.seasonality] ?? 0;
-      valB = order[bState.seasonality] ?? 0;
-      break;
+      const mapping: Record<string, string> = {
+        'confirmed': 'Mùa vụ', 'no-clear-season': 'Không rõ', 'insufficient-structure': 'Thiếu chu kỳ', 'not-applicable': 'Không áp dụng',
+      };
+      return { key: [order[state.seasonality] ?? 0, 0], label: mapping[state.seasonality] ?? state.seasonality };
     }
     case 10: {
-      const g1A = aState.trendRates?.[0] ?? 0;
-      const g2A = aState.trendRates?.[1] ?? 0;
-      const g1B = bState.trendRates?.[0] ?? 0;
-      const g2B = bState.trendRates?.[1] ?? 0;
-      valA = (Math.abs(g1A) + Math.abs(g2A)) / 2;
-      valB = (Math.abs(g1B) + Math.abs(g2B)) / 2;
-      break;
+      const [g1, g2] = state.trendRates;
+      const key: [number, number] = [(Math.abs(g1 ?? 0) + Math.abs(g2 ?? 0)) / 2, 0];
+      if (g1 === null || g1 === undefined || g2 === null || g2 === undefined) return { key, label: 'Không có xu hướng' };
+      return { key, label: `g₁: ${g1 > 0 ? '+' : ''}${format(g1 * 100, 1)}% · g₂: ${g2 > 0 ? '+' : ''}${format(g2 * 100, 1)}%` };
     }
-    case 11:
-      valA = aState.forecast?.wape ?? 0;
-      valB = bState.forecast?.wape ?? 0;
-      break;
+    case 11: {
+      const wape = state.forecast?.wape;
+      return { key: [wape ?? 0, 0], label: wape != null ? `WAPE: ${format(wape * 100, 1)}%` : 'Không có WAPE' };
+    }
     case 12:
-      valA = aState.promoFactor ?? 1;
-      valB = bState.promoFactor ?? 1;
-      break;
-    case 13:
-      valA = (aState.finalForecast ?? []).reduce((sum, v) => sum + v, 0);
-      valB = (bState.finalForecast ?? []).reduce((sum, v) => sum + v, 0);
-      break;
+      return { key: [state.promoFactor ?? 1, 0], label: state.promoFactor != null ? `K: ${format(state.promoFactor, 2)}` : 'K: —' };
+    case 13: {
+      const sum = state.finalForecast.reduce((a, b) => a + b, 0);
+      return { key: [sum, 0], label: `F: ${format(sum, 1)}` };
+    }
     case 14:
-      valA = aState.freeStock ?? 0;
-      valB = bState.freeStock ?? 0;
-      break;
+      return { key: [state.freeStock ?? 0, 0], label: `Free: ${format(state.freeStock)}` };
     case 15:
-      valA = aState.safetyStock ?? 0;
-      valB = bState.safetyStock ?? 0;
-      break;
+      return { key: [state.safetyStock ?? 0, 0], label: `SS: ${format(state.safetyStock)}` };
     case 16:
-      valA = aState.orderPlan?.orderQuantity ?? 0;
-      valB = bState.orderPlan?.orderQuantity ?? 0;
-      break;
+      return { key: [state.orderPlan?.orderQuantity ?? 0, 0], label: `Đặt: ${format(state.orderPlan?.orderQuantity)}` };
     case 17: {
-      const cutA = aState.budgetAllocation?.cutQuantity ?? 0;
-      const cutB = bState.budgetAllocation?.cutQuantity ?? 0;
-      if (cutA !== cutB) {
-        return cutB - cutA;
-      }
-      valA = aState.budgetAllocation?.orderValue ?? 0;
-      valB = bState.budgetAllocation?.orderValue ?? 0;
-      break;
+      const cut = state.budgetAllocation?.cutQuantity ?? 0;
+      const label = cut > 0 ? `Cắt: ${format(cut)}` : `Cấp: ${format(state.budgetAllocation?.fundedQuantity ?? 0)}`;
+      return { key: [cut, state.budgetAllocation?.orderValue ?? 0], label };
     }
-    case 18:
-      valA = aState.releaseDecision?.reasons?.length ?? 0;
-      valB = bState.releaseDecision?.reasons?.length ?? 0;
-      break;
+    case 18: {
+      const count = state.releaseDecision?.reasons.length ?? 0;
+      return { key: [count, 0], label: `${count} ngoại lệ` };
+    }
     case 19: {
-      const wapeA = aState.postAudit?.forecastWape ?? 0;
-      const wapeB = bState.postAudit?.forecastWape ?? 0;
-      if (wapeA !== wapeB) {
-        return wapeB - wapeA;
-      }
-      valA = aState.postAudit?.stockoutUnits ?? 0;
-      valB = bState.postAudit?.stockoutUnits ?? 0;
-      break;
+      const wape = state.postAudit?.forecastWape;
+      const so = state.postAudit?.stockoutUnits;
+      const label = wape != null ? `Audit WAPE: ${format(wape * 100, 1)}%` : so != null ? `Thiếu: ${format(so)}` : '';
+      return { key: [wape ?? 0, so ?? 0], label };
     }
+    default:
+      return { key: [0, 0], label: '' };
   }
-
-  if (valA !== valB) {
-    return valB - valA;
-  }
-
-  return a.id.localeCompare(b.id);
 }
+
+

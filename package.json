@@ -10,7 +10,8 @@
     "data:build:mock": "node tools/demand-data/build-mock-dataset.mjs",
     "data:build:real": "node tools/demand-data/build-real-dataset.mjs",
     "data:validate": "node tools/demand-data/validate-dataset.mjs",
-    "data:build": "npm run data:build:mock && npm run data:build:real && npm run data:validate"
+    "data:build": "npm run data:build:mock && npm run data:build:real && npm run data:validate",
+    "data:refresh": "npm run data:build:real && npm run data:validate"
   },
   "dependencies": {
     "@angular/common": "^21.2.0",

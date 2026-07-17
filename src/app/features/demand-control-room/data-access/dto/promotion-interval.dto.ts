@@ -1,11 +1,12 @@
 import { JsonObjectReader } from '../../../../core/json/json-object-reader.class';
 import { DataContractError } from '../../../../core/errors/data-contract-error.class';
+import { PromotionClass } from '../../domain/models';
 
 /**
- * Một khoảng CTKM [startDate, endDate] cấp dataset. Pipeline ingest hiện tại chưa xuất
- * bảng interval riêng (promo nằm inline `promoCode` trên từng dòng ngày) — mảng này
- * rỗng ở cả hai dataset cho tới khi SQL export RESULT SET interval; hợp đồng giữ sẵn
- * chỗ để không phải nâng contractVersion khi nguồn bổ sung.
+ * Một khoảng CTKM [startDate, endDate] cấp dataset — builder dựng từ các dòng ngày có
+ * promotionCode + start/end. Scaffold dùng nó để gắn mã và PHÂN LOẠI cho những ngày trong
+ * khoảng KM nhưng không có dòng nguồn. `promotionClass` vắng mặt (dataset build trước
+ * 2026-07) mặc định DEEP_PROMO — đúng hành vi cũ (mọi ngày interval đều bị coi là KM sâu).
  */
 export class PromotionIntervalDto {
   readonly sku!: string | null;
@@ -13,6 +14,7 @@ export class PromotionIntervalDto {
   readonly name!: string | null;
   readonly startDate!: string;
   readonly endDate!: string;
+  readonly promotionClass!: PromotionClass;
 
   private constructor(props: Omit<PromotionIntervalDto, never>) {
     Object.assign(this, props);
@@ -27,6 +29,7 @@ export class PromotionIntervalDto {
       name: row.nullableString('name'),
       startDate: row.isoDate('startDate'),
       endDate: row.isoDate('endDate'),
+      promotionClass: row.optionalLiteral('promotionClass', ['NO_PROMOTION', 'ALWAYS_ON', 'DEEP_PROMO', 'PROMOTION_UNRESOLVED'], 'DEEP_PROMO'),
     });
     if (interval.startDate > interval.endDate) {
       throw new DataContractError(`${path}.startDate`, `startDate=${interval.startDate} > endDate=${interval.endDate}.`);

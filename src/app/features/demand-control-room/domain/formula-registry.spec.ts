@@ -7,8 +7,8 @@ import { ForecastResult, SkuPipelineState, StageNumber } from './models';
 const MODELS: ForecastResult['model'][] = ['SES', 'Holt', 'Holt-Winters', 'SeasonalNaive', 'Croston', 'PulseRhythm', 'PurchasePlan'];
 
 describe('Formula registry', () => {
-  it('mọi công thức Chặng 1–19 render được bằng KaTeX và có nguồn tài liệu', () => {
-    for (let number = 1; number <= 19; number++) {
+  it('mọi công thức Chặng 1–20 render được bằng KaTeX và có nguồn tài liệu', () => {
+    for (let number = 1; number <= 20; number++) {
       const formulas = getStageFormulas(number as StageNumber, null, DEFAULT_POLICY);
       expect(formulas.length).toBeGreaterThan(0);
       for (const formula of formulas) {

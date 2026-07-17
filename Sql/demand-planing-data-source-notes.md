@@ -50,7 +50,7 @@ Cột quan trọng và cách hiểu hiện tại:
 |---|---|---|
 | `Code` | Định danh dòng chi tiết | Không phải SKU, không dùng để group demand |
 | `PoSMaster` | Khóa nối sang `tbl_SALPoSMaster.Code` | Bắt buộc để lấy ngày bán và trạng thái phiếu |
-| `RePosDetails` | Dấu hiệu dòng hoàn/trả/đảo chiều | Trong 1,000 dòng chỉ vài dòng có giá trị; mặc định loại khỏi `sales` nền bằng `RePosDetails IS NULL` cho tới khi xác minh cơ chế trả hàng |
+| `RePosDetails` | Dấu hiệu dòng hoàn/trả/đảo chiều | Chỉ dùng khi tính biến động tồn kho; tuyệt đối không dùng để lọc doanh số |
 | `Product` | SKU bán ra | FK tới `tbl_LSProduct.Code`; đây là `sku` chính |
 | `Qty` | Số lượng bán lẻ | Nguồn chính để tính `sales`; cần kiểm tra có dòng âm không |
 | `BaseUnit`, `TranUnit` | Đơn vị cơ sở/giao dịch | Hiện thường bằng nhau hoặc trống; không dùng để đổi đơn vị nếu chưa xác minh |
@@ -86,15 +86,13 @@ Logic hiện tại cần dùng với POS thật:
 ```sql
 sales = SUM(COALESCE(tbl_SALPoSDetails.Qty, 0))
 WHERE tbl_SALPoSDetails.Product = mã sản phẩm
-  AND tbl_SALPoSDetails.RePosDetails IS NULL
 ```
 
 Đơn giá chuẩn khi không có cột đơn giá tin cậy:
 
 ```sql
 Price = AVG(Amount * 1.0 / NULLIF(Qty, 0))
-WHERE RePosDetails IS NULL
-  AND Qty > 0
+WHERE Qty > 0
   AND Amount > 0
   AND Discount IS NULL
   AND DiscountCouponInv IS NULL
@@ -123,13 +121,10 @@ SELECT
     COUNT(*) AS LineCount
 FROM tbl_SALPoSDetails
 WHERE Product IN (28972, 28973, 47297)
-  AND RePosDetails IS NULL
 GROUP BY Product;
 
 SELECT
     COUNT(*) AS Lines,
-    SUM(CASE WHEN RePosDetails IS NULL THEN 1 ELSE 0 END) AS NormalLines,
-    SUM(CASE WHEN RePosDetails IS NOT NULL THEN 1 ELSE 0 END) AS RePosLines,
     SUM(CASE WHEN Qty < 0 THEN 1 ELSE 0 END) AS NegativeQtyLines,
     SUM(CASE WHEN Revenue IS NOT NULL AND Revenue <> 0 THEN 1 ELSE 0 END) AS NonZeroRevenueLines,
     MIN(ConvertUnit) AS MinConvertUnit,
@@ -718,7 +713,6 @@ Logic đúng cho POS thật hiện tại:
 
 ```sql
 sales = SUM(COALESCE(tbl_SALPoSDetails.Qty, 0))
-WHERE tbl_SALPoSDetails.RePosDetails IS NULL
 ```
 
 Không dùng:
@@ -825,8 +819,7 @@ Khi không có cột đơn giá sạch, tính từ dòng bán sạch:
 
 ```sql
 Price = AVG(Amount * 1.0 / NULLIF(Qty, 0))
-WHERE RePosDetails IS NULL
-  AND Qty > 0
+WHERE Qty > 0
   AND Amount > 0
   AND Discount IS NULL
   AND DiscountCouponInv IS NULL
@@ -920,7 +913,6 @@ WHERE TABLE_NAME = 'tbl_POLBundle';
    SELECT Product, SUM(Qty)
    FROM tbl_SALPoSDetails
    WHERE Product IN (28972, 28973, 47297)
-     AND RePosDetails IS NULL
    GROUP BY Product;
    ```
 ## 9. Hợp đồng đầu ra hiện hành

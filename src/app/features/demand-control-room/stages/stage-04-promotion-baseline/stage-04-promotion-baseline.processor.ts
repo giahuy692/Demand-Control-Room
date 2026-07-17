@@ -1,5 +1,5 @@
 import { classifyPromoRegionPolicy } from '../../domain/math';
-import { ExceptionTask, SimulationPolicy, StageSnapshot } from '../../domain/models';
+import { BaseDemandSource, ExceptionTask, SimulationPolicy, StageSnapshot } from '../../domain/models';
 
 import { applyReferenceAudit, buildPromoRegions, cloneStates, createSnapshot, qualifySelection, selectReferences } from '../stage-support';
 
@@ -13,21 +13,37 @@ export function runStage4(previous: StageSnapshot, policy: SimulationPolicy): St
   for (const state of Object.values(states)) {
     const source = state.daily;
     const processed = source.slice();
+    // QUYẾT ĐỊNH 2026-07-17 — Chặng 4 CHỈ chuẩn hóa DEEP_PROMO (mechanismType 2/7; buildPromoRegions
+    // đã lọc theo isBaselineExcludedPromo). Ngày PROMOTION_UNRESOLVED là ngày bán bình thường cho
+    // baseline nhưng RULE-04-001 vẫn tạo task nhắc phân loại — không tự quyết im lặng.
+    const unresolvedDays = source.filter(record => record.promotionClass === 'PROMOTION_UNRESOLVED');
+    if (unresolvedDays.length) {
+      pendingReview += unresolvedDays.length;
+      exceptions.push({
+        id: `${state.definition.id}:4:PROMO_TYPE_UNKNOWN:${unresolvedDays[0].date}`,
+        ruleId: 'RULE-04-001', code: 'PROMO_TYPE_UNKNOWN', stage: 4, skuId: state.definition.id, date: unresolvedDays[0].date,
+        evidence: `${unresolvedDays.length} ngày có CTKM chưa xác định loại (PROMOTION_UNRESOLVED) — đang được coi là ngày bán bình thường theo quyết định chỉ xử lý mechanismType 2/7; cần phân loại để xác nhận.`,
+        suggestedAction: 'Phân loại CTKM (tbl_POLPromotion.[Type]).', role: 'Marketing/MD', status: 'OPEN', decisionVersion: policy.version,
+      });
+    }
     for (const region of buildPromoRegions(source, policy)) {
       region.codes.forEach(code => promoCodes.add(code));
       const firstIndex = region.indexes[0];
       const lastIndex = region.indexes.at(-1)!;
-      // RULE-04-001 — CTKM chưa xác định loại KHÔNG được tự chuẩn hóa; chuyển hàng đợi phê duyệt.
-      const classification = classifyPromoRegionPolicy(region.codes, policy.unknownReviewPromotionCodes, policy.clearancePromotionCodes);
-      if (classification === 'UNKNOWN_REVIEW') {
+      // RULE-04-001 — mã CTKM nằm trong danh sách chờ phân loại do chính sách chỉ định
+      // (unknownReviewPromotionCodes) KHÔNG được tự chuẩn hóa; chuyển hàng đợi phê duyệt.
+      const isUnresolved = region.indexes.some(idx =>
+        processed[idx].promoCode !== null && policy.unknownReviewPromotionCodes?.includes(processed[idx].promoCode!)
+      );
+      if (isUnresolved) {
         pendingReview += region.indexes.length;
         exceptions.push({
           id: `${state.definition.id}:4:PROMO_TYPE_UNKNOWN:${processed[firstIndex].date}`,
           ruleId: 'RULE-04-001', code: 'PROMO_TYPE_UNKNOWN', stage: 4, skuId: state.definition.id, date: processed[firstIndex].date,
-          evidence: `Mã CTKM ${region.codes.join(', ')} nằm trong danh sách chờ phân loại (policy.unknownReviewPromotionCodes).`,
+          evidence: `Mã CTKM ${region.codes.join(', ')} nằm trong danh sách chờ phân loại (UNKNOWN_REVIEW).`,
           suggestedAction: 'Phân loại CTKM.', role: 'Marketing/MD', status: 'OPEN', decisionVersion: policy.version,
         });
-        continue; // Giữ nguyên baseSource='promo-defer' từ Chặng 3 — không tự quyết định nền.
+        continue;
       }
       const selection = qualifySelection(selectReferences(source, firstIndex, lastIndex, policy, true), source.length, firstIndex, lastIndex, region.clustered);
       // RULE-04-004 — CTKM gần như liên tục không tách được nền: gắn BASELINE_NOT_IDENTIFIABLE thay vì lặng lẽ dùng chung nhãn 'insufficient' với thiếu dữ liệu thường.
@@ -43,11 +59,11 @@ export function runStage4(previous: StageSnapshot, policy: SimulationPolicy): St
       for (const index of region.indexes) {
         const audited = applyReferenceAudit(processed[index], selection);
         if (selection.status === 'insufficient' || audited.referenceMedian === null) {
-          processed[index] = { ...audited, baseDemand: null, baseSource: 'insufficient' };
+          processed[index] = { ...audited, baseDemand: null, baseDemandSource: BaseDemandSource.PROMOTION_UNRESOLVED, isCleanObservedReference: false };
           continue;
         }
         normalized++;
-        processed[index] = { ...audited, baseDemand: audited.referenceMedian, baseSource: 'promo-normalized' };
+        processed[index] = { ...audited, baseDemand: audited.referenceMedian, baseDemandSource: BaseDemandSource.PROMOTION_BASELINE, isCleanObservedReference: false };
       }
     }
     state.daily = processed;
@@ -58,7 +74,8 @@ export function runStage4(previous: StageSnapshot, policy: SimulationPolicy): St
   }, [
     'Dùng Median ngày sạch quanh vùng; không dùng max(sales, median).',
     'Giữ nguyên sales và promoCode để Chặng 12 học hệ số.',
-    `[RULE-04-001] ${pendingReview} ngày CTKM chưa xác định loại (UNKNOWN_REVIEW) bị chặn chuẩn hóa, chuyển hàng đợi phê duyệt.`,
+    'Chỉ xử lý CTKM kích cầu mạnh (mechanismType 2/7 — DEEP_PROMO); các class khác được coi là ngày bán bình thường.',
+    `[RULE-04-001] ${pendingReview} ngày CTKM chưa xác định loại (UNKNOWN_REVIEW/PROMOTION_UNRESOLVED) được đưa vào hàng đợi phê duyệt.`,
     `[RULE-04-004] ${notIdentifiable} ngày thuộc cụm CTKM gần như liên tục không xác định được nền (BASELINE_NOT_IDENTIFIABLE).`,
   ], exceptions);
 }

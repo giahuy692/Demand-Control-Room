@@ -64,3 +64,17 @@ Các nội dung dưới đây được thiết kế thành tham số để có t
 | DEC-W03 | Trạng thái POS theo ngày để xác nhận “không có dòng = bán 0 thật”. | CHỜ DỮ LIỆU |
 | DEC-W04 | Nguồn kế hoạch CTKM tương lai. | KHÔNG ÁP DỤNG HIỆN TẠI |
 | DEC-W05 | Nguồn ngân sách, MOQ, nhà cung cấp, ETA để kiểm thử Chặng 14–18. | KHÔNG ÁP DỤNG HIỆN TẠI |
+
+## 5. Mâu thuẫn tài liệu ↔ triển khai chờ duyệt (rà soát 2026-07-17)
+
+Các mục dưới đây được phát hiện khi đối chiếu engine với `Tài liệu giải pháp - Demand Planning & Replenishment Governance.md`. Theo protocol của `00-README-Nguon-su-that.md`: chưa mục nào được coi là hành vi vận hành chính thức cho tới khi người có thẩm quyền duyệt; engine giữ nguyên hành vi hiện tại (đang bị acceptance gate khóa) trong lúc chờ.
+
+| Mã | Nội dung mâu thuẫn | Tài liệu giải pháp quy định | Engine hiện tại | Trạng thái |
+|---|---|---|---|---|
+| DEC-R01 | Chặng 3 §7 (và Chặng 5 §7): công thức nền ngày thiếu hàng | `Sức mua cơ bản = max(Số bán ghi nhận, Mức nền tham chiếu)` — "Chặng 3 không làm giảm số bán thật" | Dùng median thuần, KHÔNG max; trace ghi rõ "không dùng max(sales, median)" và bị test acceptance khóa. Ngày stockout có sales cao hơn median sẽ bị GIẢM so với số bán thật | CHỜ DUYỆT |
+| DEC-R02 | Chặng 13 §6: cách chốt hệ số K áp dụng | KHÔNG lấy trung bình/trung vị các hệ số; chọn mẫu KM tương tự GẦN NHẤT đủ căn cứ (`K_approved = K_{j*}`), mẫu cũ chỉ làm bối cảnh | `promoFactor = median(K các vùng đủ điều kiện)`; chưa có "biên chính sách" khi tự động | CHỜ DUYỆT |
+| DEC-R03 | Chặng 2 §3 điều kiện 2: đánh dấu thiếu hàng cả ngày | Tồn đầu = 0 VÀ tồn cuối = 0 VÀ **số bán = 0** | Chỉ kiểm tồn đầu = 0 và tồn cuối = 0, KHÔNG kiểm số bán → ngày nhập-bán hết trong ngày (sales > 0) vẫn bị đánh ALL_DAY_STOCKOUT_CANDIDATE và bị Chặng 3 thay sales thật bằng median | CHỜ DUYỆT |
+| DEC-R04 | Chặng 2: phạm vi trạng thái ngoài 2 trường hợp tài liệu cho phép | "Các trường hợp không thuộc hai điều kiện trên thì Chặng 2 không đánh dấu thiếu hàng" | Engine thêm DEPLETION_REVIEW (tồn đầu > 0, cuối = 0) và NEGATIVE_STOCK_REVIEW, và Chặng 3 nâng nền cả các ngày này (thay sales thật bằng median) thay vì chỉ ghi nhận cần xem xét | CHỜ DUYỆT |
+| DEC-R05 | Chặng 5 §6: cắt phía dư để cân bằng trước/sau khi lấp ngày thiếu dữ liệu | "nếu có 5 ngày trước và 3 ngày sau, chỉ lấy 3 ngày trước gần nhất và 3 ngày sau" | `technicalReferences` lấy tối đa 14 ngày sạch GẦN NHẤT bất kể phía, không cắt phía dư | CHỜ DUYỆT |
+| DEC-R06 | RULE-05-003 / GT-18, GT-19: lấp Tầng 2 theo mức đại diện chu kỳ | 04-Dac-ta §8 mô tả đầy đủ ngưỡng 12-14/8-11/1-7/0; 07-Golden-Test yêu cầu GT-18 "lấp 1 ngày, LOCKED_ADJUSTED", GT-19 "lấp theo cấu hình, ít nhất LOCKED_WITH_REVIEW" | Tầng 2 CHƯA được cài đặt: cờ `enableTier2CycleFallback` là tham số chết, `tier2Filled` luôn false. GT-18/GT-19 hiện CHƯA ĐẠT (spec test đã đổi tên phản ánh đúng). Hành vi hiện tại = tắt vĩnh viễn, trùng với trạng thái DEC-P03/P04/P05 chưa duyệt | CHỜ DUYỆT |
+| DEC-R07 | Chặng 3 §6.2: vùng đệm tham chiếu ngoài khung phiên | Được đọc ngày sạch ngoài khung phiên để cân bằng nền | Vùng đọc đã nạp (`isReferenceOnly`) nhưng CHƯA nối vào tìm kiếm tham chiếu Chặng 3–5 (giới hạn đã log ở Chặng 1, DEC-P01 ĐỀ XUẤT) | CHỜ DUYỆT |

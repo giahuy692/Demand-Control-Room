@@ -12,12 +12,12 @@ function runTo(stage: StageNumber, policy = DEFAULT_POLICY): StageSnapshot {
   return snapshot!;
 }
 
-describe('04 §14 / DEC-W05 — Chặng 14–19 mặc định SIMULATION_ONLY khi thiếu dữ liệu vận hành thật', () => {
+describe('04 §14 / DEC-W05 — Chặng 15–20 mặc định SIMULATION_ONLY khi thiếu dữ liệu vận hành thật', () => {
   it('operationalDataStatus mặc định NOT_APPLICABLE (đúng DEC-W05)', () => {
     expect(DEFAULT_POLICY.operationalDataStatus).toBe('NOT_APPLICABLE');
   });
 
-  for (const stage of [14, 15, 16, 17, 18, 19] as const) {
+  for (const stage of [15, 16, 17, 18, 19, 20] as const) {
     it(`Chặng ${stage}: mặc định gắn nhãn SIMULATION_ONLY và không thay đổi bất kỳ số liệu nào`, () => {
       const simulationSnapshot = runTo(stage);
       expect(simulationSnapshot.summary['Trạng thái vận hành']).toBe('SIMULATION_ONLY');
@@ -34,11 +34,11 @@ describe('04 §14 / DEC-W05 — Chặng 14–19 mặc định SIMULATION_ONLY kh
   }
 
   it('operationalDataStatus=CONFIRMED bỏ nhãn SIMULATION_ONLY khỏi audit', () => {
-    const snapshot = runTo(17, { ...DEFAULT_POLICY, operationalDataStatus: 'CONFIRMED' });
+    const snapshot = runTo(18, { ...DEFAULT_POLICY, operationalDataStatus: 'CONFIRMED' });
     expect(snapshot.audit.some(line => line.includes('SIMULATION_ONLY'))).toBe(false);
   });
 
-  for (const stage of [14, 15, 16, 17, 18, 19] as const) {
+  for (const stage of [15, 16, 17, 18, 19, 20] as const) {
     it(`Chặng ${stage}: báo cáo mô phỏng (buildSimulationReport) hiển thị nhãn SIMULATION_ONLY cho toàn bộ SKU khi chưa CONFIRMED`, () => {
       const snapshot = runTo(stage);
       const engine = testEngine();
@@ -63,11 +63,11 @@ describe('04 §14 / DEC-W05 — Chặng 14–19 mặc định SIMULATION_ONLY kh
     const engine = testEngine();
     const snapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
     let previous: StageSnapshot | null = null;
-    for (let current = 1; current <= 17; current++) {
+    for (let current = 1; current <= 18; current++) {
       previous = engine.run(current as StageNumber, previous, policy);
       snapshots[current as StageNumber] = previous;
     }
-    const report = buildSimulationReport(snapshots, 17, policy.runDate, policy.operationalDataStatus);
+    const report = buildSimulationReport(snapshots, 18, policy.runDate, policy.operationalDataStatus);
     for (const section of report.sections) {
       expect(section.issues.some(item => item.title.includes('SIMULATION_ONLY'))).toBe(false);
     }

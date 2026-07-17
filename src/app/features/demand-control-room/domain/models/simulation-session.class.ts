@@ -13,6 +13,7 @@ export interface SessionMetadata {
   readonly portfolioMode: PortfolioMode;
   readonly extractIsTruncated: boolean;
   readonly sourceWatermarks: { readonly sales: string | null; readonly stock: string | null };
+  readonly extractMetadata: { readonly salesDataThroughDate: string; readonly stockDataThroughDate: string; readonly extractionCompleted: boolean };
   readonly qualityGates: { readonly stockReconciliation: 'PASS' | 'FAIL'; readonly stockMismatchSkuCount: number };
   readonly rowCounts: { readonly dailyRecords: number; readonly products: number };
   readonly policyOverrides: Readonly<Record<string, unknown>>;

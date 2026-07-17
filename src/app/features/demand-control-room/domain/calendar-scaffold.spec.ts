@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { buildCalendarScaffold } from './calendar-scaffold';
-import { DailyRecord } from './models';
+import { BaseDemandSource, DailyRecord, PromotionStatus, SalesObservationStatus, StockoutStatus, TechnicalFillStatus } from './models';
 
 function sourceRow(date: string, sales: number, extra: Partial<DailyRecord> = {}): DailyRecord {
   return {
-    sku: 'P1', date, openStock: 10, closeStock: 10 - sales, sales, hasRecord: true,
-    receiptHour: null, promoCode: null, isStockout: false, stockoutReviewRequired: false, stockoutReason: null,
-    baseDemand: null, baseSource: null, referenceDates: [], beforeReferenceDates: [], afterReferenceDates: [],
-    referenceMedian: null, balanceStatus: null, selectionReason: '', salesStatus: 'OBSERVED', isReferenceOnly: false,
+    sku: 'P1', barcode: 'B1', date, openStock: 10, closeStock: 10 - sales, sales, hasSalesRecord: true,
+    receiptHour: null, promoCode: null, promotionStatus: PromotionStatus.NONE, stockoutStatus: StockoutStatus.NONE,
+    baseDemand: null, baseDemandSource: BaseDemandSource.SOURCE_DATA_GAP, isCleanObservedReference: false, technicalFillStatus: TechnicalFillStatus.NOT_APPLICABLE,
+    referenceDates: [], referenceEvidence: [], beforeReferenceDates: [], afterReferenceDates: [],
+    referenceMedian: null, balanceStatus: null, selectionReason: '', salesObservationStatus: SalesObservationStatus.RECORDED_SALE, isReferenceOnly: false,
     stockSource: 'OBSERVED', stockCalculationStatus: 'CALCULATED',
     ...extra,
   };
@@ -20,13 +21,13 @@ describe('buildCalendarScaffold — RULE-01-001 tạo lịch liên tục', () =>
 
     expect(result).toHaveLength(3);
     expect(result[0].date).toBe('2026-01-01');
-    expect(result[0].hasRecord).toBe(true);
+    expect(result[0].hasSalesRecord).toBe(true);
     expect(result[1].date).toBe('2026-01-02');
-    expect(result[1].hasRecord).toBe(false);
+    expect(result[1].hasSalesRecord).toBe(false);
     expect(result[1].sales).toBeNull();
-    expect(result[1].salesStatus).toBe('SOURCE_UNKNOWN');
+    expect(result[1].salesObservationStatus).toBe('SOURCE_DATA_GAP');
     expect(result[2].date).toBe('2026-01-03');
-    expect(result[2].hasRecord).toBe(true);
+    expect(result[2].hasSalesRecord).toBe(true);
   });
 
   it('GT-02: ngày scaffold không được xem là số 0 quan sát hoặc ngày sạch', () => {
@@ -36,8 +37,7 @@ describe('buildCalendarScaffold — RULE-01-001 tạo lịch liên tục', () =>
 
     expect(scaffoldDay.sales).toBeNull();
     expect(scaffoldDay.sales).not.toBe(0);
-    expect(scaffoldDay.salesStatus).not.toBe('OBSERVED_ZERO');
-    expect(scaffoldDay.salesStatus).not.toBe('CONFIRMED_ZERO');
+    expect(scaffoldDay.salesObservationStatus).toBe('SOURCE_DATA_GAP');
   });
 
   it('DEC-006/007: ngày nguồn có Qty=0 thật được gắn OBSERVED_ZERO, khác hẳn scaffold SOURCE_UNKNOWN', () => {
@@ -45,8 +45,8 @@ describe('buildCalendarScaffold — RULE-01-001 tạo lịch liên tục', () =>
     const result = buildCalendarScaffold('P1', rows, '2026-01-01', '2026-01-01', () => false);
 
     expect(result[0].sales).toBe(0);
-    expect(result[0].salesStatus).toBe('OBSERVED_ZERO');
-    expect(result[0].hasRecord).toBe(true);
+    expect(result[0].salesObservationStatus).toBe('RECORDED_SALE');
+    expect(result[0].hasSalesRecord).toBe(true);
   });
 
   it('không tạo dòng ngoài khoảng [startIso, endIso]', () => {
@@ -54,7 +54,7 @@ describe('buildCalendarScaffold — RULE-01-001 tạo lịch liên tục', () =>
     const result = buildCalendarScaffold('P1', rows, '2026-01-01', '2026-01-02', () => false);
 
     expect(result.map(row => row.date)).toEqual(['2026-01-01', '2026-01-02']);
-    expect(result.every(row => row.hasRecord === false)).toBe(true);
+    expect(result.every(row => row.hasSalesRecord === false)).toBe(true);
   });
 
   it('RULE-01-003: gắn đúng isReferenceOnly theo hàm phân loại truyền vào, không phụ thuộc hasRecord', () => {
@@ -72,6 +72,57 @@ describe('buildCalendarScaffold — RULE-01-001 tạo lịch liên tục', () =>
 
     expect(result).toHaveLength(1);
     expect(result[0].sales).toBe(9);
+  });
+});
+
+describe('buildCalendarScaffold — phân loại CTKM theo PromotionClass (02-Hop-dong-du-lieu-dau-vao.md)', () => {
+  const COMPLETE = { salesDataThroughDate: '2026-12-31', stockDataThroughDate: '2026-12-31', extractionCompleted: true };
+
+  it('ALWAYS_ON: dòng nguồn giữ nguyên class, promotionStatus=NONE — Sales vẫn là mức bán nền, KHÔNG bị ép DEEP_PROMO', () => {
+    const rows = [sourceRow('2026-01-01', 5, { promoCode: '888', promotionClass: 'ALWAYS_ON' })];
+    const result = buildCalendarScaffold('P1', rows, '2026-01-01', '2026-01-01', () => false, COMPLETE);
+
+    expect(result[0].promotionClass).toBe('ALWAYS_ON');
+    expect(result[0].promotionStatus).toBe(PromotionStatus.NONE);
+  });
+
+  it('DEEP_PROMO: dòng nguồn mang promotionStatus=PROMOTION để Chặng 3 loại khỏi baseline và chuyển Chặng 4', () => {
+    const rows = [sourceRow('2026-01-01', 50, { promoCode: '999', promotionClass: 'DEEP_PROMO' })];
+    const result = buildCalendarScaffold('P1', rows, '2026-01-01', '2026-01-01', () => false, COMPLETE);
+
+    expect(result[0].promotionClass).toBe('DEEP_PROMO');
+    expect(result[0].promotionStatus).toBe(PromotionStatus.PROMOTION);
+  });
+
+  it('ngày scaffold trong khoảng interval nhận đúng class của interval — ALWAYS_ON không còn mặc nhiên thành DEEP_PROMO', () => {
+    const rows = [sourceRow('2026-01-01', 5)];
+    const intervals = [{ sku: 'P1', code: 'KM-TT', name: null, startDate: '2026-01-02', endDate: '2026-01-02', promotionClass: 'ALWAYS_ON' as const }];
+    const result = buildCalendarScaffold('P1', rows, '2026-01-01', '2026-01-02', () => false, COMPLETE, intervals);
+
+    expect(result[1].promoCode).toBe('KM-TT');
+    expect(result[1].promotionClass).toBe('ALWAYS_ON');
+    expect(result[1].promotionStatus).toBe(PromotionStatus.NONE);
+  });
+
+  it('hai interval chồng ngày: chỉ cần một DEEP_PROMO là ngày mất tư cách mức bán tự nhiên', () => {
+    const rows = [sourceRow('2026-01-01', 5)];
+    const intervals = [
+      { sku: 'P1', code: 'KM-TT', name: null, startDate: '2026-01-02', endDate: '2026-01-02', promotionClass: 'ALWAYS_ON' as const },
+      { sku: 'P1', code: 'KM-SAU', name: null, startDate: '2026-01-02', endDate: '2026-01-02', promotionClass: 'DEEP_PROMO' as const },
+    ];
+    const result = buildCalendarScaffold('P1', rows, '2026-01-01', '2026-01-02', () => false, COMPLETE, intervals);
+
+    expect(result[1].promotionClass).toBe('DEEP_PROMO');
+    expect(result[1].promotionStatus).toBe(PromotionStatus.PROMOTION);
+  });
+
+  it('dòng nguồn NO_PROMOTION nằm trong interval ALWAYS_ON: nhận class của interval, vẫn là ngày bán bình thường', () => {
+    const rows = [sourceRow('2026-01-02', 5, { promotionClass: 'NO_PROMOTION' })];
+    const intervals = [{ sku: 'P1', code: 'KM-TT', name: null, startDate: '2026-01-01', endDate: '2026-01-03', promotionClass: 'ALWAYS_ON' as const }];
+    const result = buildCalendarScaffold('P1', rows, '2026-01-02', '2026-01-02', () => false, COMPLETE, intervals);
+
+    expect(result[0].promotionClass).toBe('ALWAYS_ON');
+    expect(result[0].promotionStatus).toBe(PromotionStatus.NONE);
   });
 });
 

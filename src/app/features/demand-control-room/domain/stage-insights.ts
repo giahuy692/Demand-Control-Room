@@ -184,7 +184,7 @@ export function buildForecastAudit(state: Readonly<SkuPipelineState>): ForecastF
 
 // ── Chặng 12 · bảng mẫu K từng ngày KM hợp lệ ──
 export interface PromoAudit {
-  rows: { date: string; dateRange: string; code: string; days: number; sales: number; base: number; k: number }[];
+  rows: { date: string; dateRange: string; code: string; name: string | null; days: number; sales: number; base: number; k: number }[];
   totalPromoDays: number;
   totalRegions: number;
   rejected: number;
@@ -200,7 +200,10 @@ export function buildPromoAudit(state: Readonly<SkuPipelineState>): PromoAudit {
   const rows = eligible.map(region => ({
     date: region.startDate,
     dateRange: region.startDate === region.endDate ? region.startDate : `${region.startDate} → ${region.endDate}`,
-    code: region.codes.join('+'), days: region.rows.length, sales: region.actualSales, base: region.naturalBase,
+    code: region.codes.join('+'),
+    // UI chỉ binding TÊN CTKM — lấy tên chương trình chính đầu tiên có trong vùng.
+    name: region.rows.map(row => row.promotionName?.trim()).find(Boolean) ?? null,
+    days: region.rows.length, sales: region.actualSales, base: region.naturalBase,
     k: region.factor!,
   }));
   const sorted = rows.map(row => row.k).sort((a, b) => a - b);

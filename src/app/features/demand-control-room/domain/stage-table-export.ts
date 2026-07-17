@@ -36,11 +36,9 @@ export interface StageTableExport {
 }
 
 const DAILY_COLUMNS = [
-  'sku', 'date', 'hasRecord', 'sales', 'salesStatus', 'openStock', 'closeStock',
-  'stockSource', 'stockCalculationStatus', 'receiptHour', 'isStockout',
-  'stockoutReviewRequired', 'stockoutReason', 'promoCode', 'baseDemand',
-  'baseSource', 'balanceStatus', 'referenceMedian', 'referenceDates',
-  'beforeReferenceDates', 'afterReferenceDates', 'selectionReason', 'isReferenceOnly',
+  'sku', 'barcode', 'date', 'hasSalesRecord', 'salesObservationStatus', 'sales', 'openStock', 'closeStock',
+  'receiptHour', 'promotionStatus', 'stockoutStatus', 'baseDemand', 'baseDemandSource',
+  'isCleanObservedReference', 'technicalFillStatus', 'referenceDatesUsed', 'referenceEvidence', 'reason',
 ] as const;
 
 const CYCLE_COLUMNS = [
@@ -66,7 +64,16 @@ export function buildStageTableExport(
     fileName: buildStageTableFileName(stage, selectedSkuId, policy.runDate),
   };
 
-  switch (stage) {
+  if (stage === 5) {
+    return {
+      ...base,
+      scope: selectedScope,
+      columns: DAILY_COLUMNS,
+      rows: state ? state.daily.map(dailyRow) : [],
+    };
+  }
+
+  switch ((stage > 5 ? stage - 1 : stage) as Exclude<StageNumber, 20>) {
     case 1:
     case 2:
     case 3:
@@ -161,16 +168,13 @@ function sanitizeFilePart(value: string): string {
 
 function dailyRow(row: DailyRecord): StageExportRow {
   return {
-    sku: row.sku, date: row.date, hasRecord: row.hasRecord, sales: row.sales,
-    salesStatus: row.salesStatus, openStock: row.openStock, closeStock: row.closeStock,
-    stockSource: row.stockSource, stockCalculationStatus: row.stockCalculationStatus,
-    receiptHour: row.receiptHour, isStockout: row.isStockout,
-    stockoutReviewRequired: row.stockoutReviewRequired, stockoutReason: row.stockoutReason,
-    promoCode: row.promoCode, baseDemand: row.baseDemand, baseSource: row.baseSource,
-    balanceStatus: row.balanceStatus, referenceMedian: row.referenceMedian,
-    referenceDates: joinList(row.referenceDates), beforeReferenceDates: joinList(row.beforeReferenceDates),
-    afterReferenceDates: joinList(row.afterReferenceDates), selectionReason: row.selectionReason,
-    isReferenceOnly: row.isReferenceOnly,
+    sku: row.sku, barcode: row.barcode, date: row.date,
+    hasSalesRecord: row.hasSalesRecord, salesObservationStatus: row.salesObservationStatus, sales: row.sales,
+    openStock: row.openStock, closeStock: row.closeStock, receiptHour: row.receiptHour,
+    promotionStatus: row.promotionStatus, stockoutStatus: row.stockoutStatus,
+    baseDemand: row.baseDemand, baseDemandSource: row.baseDemandSource,
+    isCleanObservedReference: row.isCleanObservedReference, technicalFillStatus: row.technicalFillStatus,
+    referenceDatesUsed: joinList(row.referenceDates), referenceEvidence: JSON.stringify(row.referenceEvidence), reason: row.selectionReason,
   };
 }
 

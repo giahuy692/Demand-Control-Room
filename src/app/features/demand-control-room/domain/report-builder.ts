@@ -134,7 +134,7 @@ const STAGE_CHECKERS: Partial<Record<StageNumber, StageChecker>> = {
     const heavy: ReportIssueDetail[] = [];
     for (const [id, state] of Object.entries(states)) {
       const total = state.daily.length;
-      const stockoutDays = state.daily.filter(row => row.isStockout).length;
+      const stockoutDays = state.daily.filter(row => row.stockoutStatus !== 'NONE').length;
       if (total > 0 && stockoutDays / total > 0.3) heavy.push(detail(
         state,
         'Tỷ lệ ngày stockout vượt 30%',
@@ -158,7 +158,7 @@ const STAGE_CHECKERS: Partial<Record<StageNumber, StageChecker>> = {
   3: states => {
     const insufficient: ReportIssueDetail[] = [];
     for (const [id, state] of Object.entries(states)) {
-      for (const row of state.daily.filter(item => !item.promoCode && item.baseSource === 'insufficient')) {
+      for (const row of state.daily.filter(item => !item.promoCode && item.baseDemandSource === 'STOCKOUT_UNRESOLVED')) {
         insufficient.push(detail(
           state,
           `Ngày stockout ${row.date} thiếu căn cứ tính nền`,
@@ -183,7 +183,7 @@ const STAGE_CHECKERS: Partial<Record<StageNumber, StageChecker>> = {
   4: states => {
     const insufficient: ReportIssueDetail[] = [];
     for (const [id, state] of Object.entries(states)) {
-      for (const row of state.daily.filter(item => !!item.promoCode && item.baseSource === 'insufficient')) {
+      for (const row of state.daily.filter(item => !!item.promoCode && item.baseDemandSource === 'PROMOTION_UNRESOLVED')) {
         insufficient.push(detail(
           state,
           `Vùng CTKM tại ngày ${row.date} thiếu căn cứ chuẩn hóa`,
@@ -915,7 +915,8 @@ export function buildSimulationReport(
     const states = snapshot.states;
     const skuIds = Object.keys(states);
     totalSkus = Math.max(totalSkus, skuIds.length);
-    const checker = STAGE_CHECKERS[stage];
+    const checkerStage = (stage > 5 ? stage - 1 : stage) as Exclude<StageNumber, 20>;
+    const checker = stage === 5 ? null : STAGE_CHECKERS[checkerStage];
     const issues = checker ? checker(states, operationalDataStatus) : [];
     const flaggedSkuIds = new Set(issues.flatMap(item => item.skuIds));
     totalIssues += issues.length;
@@ -929,17 +930,17 @@ export function buildSimulationReport(
   }
 
   const recommendations: string[] = [];
-  const stage11 = sections.find(section => section.stage === 11);
-  if (stage11?.issues.some(item => item.title.includes('chưa được khóa'))) {
+  const stage12 = sections.find(section => section.stage === 12);
+  if (stage12?.issues.some(item => item.title.includes('chưa được khóa'))) {
     recommendations.push('Ưu tiên ban hành ngưỡng P25 chính thức theo từng ô ABC×XYZ để giảm số mô hình dự báo còn ở trạng thái REVIEW.');
   }
-  const stage17 = sections.find(section => section.stage === 17);
-  if (stage17?.issues.some(item => item.skuIds.length > 0)) {
-    recommendations.push('Rà soát ngân sách kỳ hoặc thứ tự ưu tiên vốn nếu số SKU bị cắt/hoãn ở Chặng 17 tăng liên tục qua nhiều phiên.');
+  const stage18 = sections.find(section => section.stage === 18);
+  if (stage18?.issues.some(item => item.skuIds.length > 0)) {
+    recommendations.push('Rà soát ngân sách kỳ hoặc thứ tự ưu tiên vốn nếu số mã hàng bị cắt/hoãn ở Chặng 18 tăng liên tục qua nhiều phiên.');
   }
-  const stage14 = sections.find(section => section.stage === 14);
-  if (stage14?.issues.some(item => item.skuIds.length > 0)) {
-    recommendations.push('Xử lý sớm các SKU có hàng tự do âm ở Chặng 14 — đây là tín hiệu thiếu hàng sớm nhất trong toàn chuỗi 19 chặng.');
+  const stage15 = sections.find(section => section.stage === 15);
+  if (stage15?.issues.some(item => item.skuIds.length > 0)) {
+    recommendations.push('Xử lý sớm các mã hàng có lượng sử dụng được âm ở Chặng 15 — đây là tín hiệu thiếu hàng sớm nhất trong toàn chuỗi 20 chặng.');
   }
 
   return {

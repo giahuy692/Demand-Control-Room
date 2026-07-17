@@ -1,7 +1,7 @@
 import { buildCalendarScaffold } from '../../domain/calendar-scaffold';
 import { SimulationDataset } from '../../domain/catalog';
 import { stripStandingPromoCodes } from '../../domain/math';
-import { DailyRecord, SimulationPolicy, SkuPipelineState, StageSnapshot } from '../../domain/models';
+import { DailyRecord, SalesObservationStatus, SimulationPolicy, SkuPipelineState, StageSnapshot } from '../../domain/models';
 
 import { createInitialState, createSnapshot, dateAfter, futureActualDemand, resetDailyRecord } from '../stage-support';
 
@@ -24,7 +24,15 @@ export function runStage1(policy: SimulationPolicy, dataset: SimulationDataset |
   // RULE-01-003/DEC-P01 (chưa duyệt chính thức) — vùng đọc tham chiếu trước ProcessingStartDate,
   // khởi điểm dùng chung bán kính tối đa hiện có (policy.maxReferenceRadius).
   const referenceReadStart = dateAfter(fullCycleStart, -policy.maxReferenceRadius);
+  // CTKM thường trực phải bị loại ở CẢ HAI nguồn token: row.promoCode (strip bên dưới) VÀ
+  // promotionIntervals (scaffold bơm interval.code — thường là mã số — vào từng ngày trong khoảng
+  // KM; nếu không lọc ở đây, mã số đó vẫn giữ ngày là ngày CTKM dù tên đã bị strip).
+  const standingCodes = new Set(policy.standingPromotionCodes);
   for (const baseDefinition of dataset.catalog) {
+    const promotionIntervals = dataset.promotionIntervals.filter(interval =>
+      (interval.sku === null || interval.sku === baseDefinition.id)
+      && !standingCodes.has(interval.code)
+      && (interval.name === null || !standingCodes.has(interval.name)));
     const allRows = [...(dataset.dailyBySku[baseDefinition.id] ?? [])]
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(row => ({ ...row, promoCode: stripStandingPromoCodes(row.promoCode, policy.standingPromotionCodes) }));
@@ -33,7 +41,7 @@ export function runStage1(policy: SimulationPolicy, dataset: SimulationDataset |
     if (dataset.calendarScaffold === 'GLOBAL_WINDOW') {
       // RULE-01-001 — nguồn thưa: tạo lịch liên tục cho cả khung xử lý lẫn vùng đọc tham chiếu;
       // ngày không có nguồn thật giữ hasRecord=false/sales=null, KHÔNG suy diễn bán=0 [DEC-006/007].
-      const scaffolded = buildCalendarScaffold(baseDefinition.id, allRows, referenceReadStart, historyEndIso, iso => iso < fullCycleStart)
+      const scaffolded = buildCalendarScaffold(baseDefinition.id, allRows, referenceReadStart, historyEndIso, iso => iso < fullCycleStart, dataset.extractMetadata, promotionIntervals)
         .map(resetDailyRecord);
       // RULE-01-003 — vùng tham chiếu KHÔNG được đưa vào ABC/XYZ/chuỗi học: tách khỏi `daily`
       // ngay tại đây, không chỉ lọc muộn ở Chặng 6/7. Hiện CHƯA nối vào tìm kiếm tham chiếu
@@ -45,7 +53,10 @@ export function runStage1(policy: SimulationPolicy, dataset: SimulationDataset |
       // động của nó (pattern kiểm thử); KHÔNG scaffold lùi về đầu cửa sổ, nếu không SKU lịch
       // sử ngắn (BY-short, ONE-CYCLE…) bị bơm ngày SOURCE_UNKNOWN và đổi ngữ nghĩa kiểm thử.
       referenceOnlyDaily = [];
-      daily = allRows.filter(row => row.date >= fullCycleStart && row.date <= historyEndIso);
+      const rows = allRows.filter(row => row.date >= fullCycleStart && row.date <= historyEndIso);
+      daily = rows.length
+        ? buildCalendarScaffold(baseDefinition.id, rows, rows[0].date, rows.at(-1)!.date, () => false, dataset.extractMetadata, promotionIntervals).map(resetDailyRecord)
+        : [];
     }
     const definition = dataset.runMode === 'HISTORICAL_VALIDATION'
       ? {
@@ -67,6 +78,8 @@ export function runStage1(policy: SimulationPolicy, dataset: SimulationDataset |
       : baseDefinition;
     states[definition.id] = createInitialState(definition, daily, referenceOnlyDaily);
   }
+  const processingDays = Object.values(states).flatMap(state => state.daily);
+  const statusCount = (status: DailyRecord['salesObservationStatus']) => processingDays.filter(row => row.salesObservationStatus === status).length;
   return createSnapshot(1, policy, states, {
     'Nguồn dữ liệu': dataset.label,
     'SKU': Object.keys(states).length,
@@ -75,11 +88,14 @@ export function runStage1(policy: SimulationPolicy, dataset: SimulationDataset |
     'Tổng ngày D': totalDays,
     'Chu kỳ đầy đủ N': cycleCount,
     'Ngày dư r': totalDays - cycleCount * policy.cycleLength,
+    'RECORDED_SALE': statusCount(SalesObservationStatus.RECORDED_SALE),
+    'CONFIRMED_ZERO': statusCount(SalesObservationStatus.CONFIRMED_ZERO),
+    'SOURCE_DATA_GAP': statusCount(SalesObservationStatus.SOURCE_DATA_GAP),
   }, [
     `[RULE-01-002] Khóa ${totalDays} ngày lịch theo chính sách ${policy.version}.`,
     `[RULE-01-002] Tạo ${cycleCount} chu kỳ cố định, không phụ thuộc số bản ghi của từng SKU.`,
     ...(dataset.calendarScaffold === 'GLOBAL_WINDOW' ? [
-      `[RULE-01-001] Đã tạo lịch liên tục cho dữ liệu thật — ngày không có nguồn giữ hasRecord=false/sales=null, không suy diễn bán=0.`,
+      `[RULE-01-001] Đã tạo lịch liên tục — ngày không có sales row được phân loại RECORDED_SALE/CONFIRMED_ZERO/SOURCE_DATA_GAP bằng sales watermark; stock row không phải bằng chứng duy nhất.`,
       `[RULE-01-003][DEC-P01·ĐỀ XUẤT] Đã nạp vùng đọc tham chiếu ${policy.maxReferenceRadius} ngày trước khung xử lý (isReferenceOnly=true) — CHƯA nối vào tìm kiếm tham chiếu Chặng 3–5 trong bản này; loại hoàn toàn khỏi ABC/XYZ/chuỗi học.`,
       `[RULE-01-004][DEC-010] portfolioMode=${dataset.portfolioMode}, extractIsTruncated=${dataset.extractIsTruncated} — ABC ở Chặng 6 KHÔNG được khóa là chính thức khi tập dữ liệu là SELECTED_SKU_SIMULATION.`,
     ] : ['Dataset khai báo PRESCAFFOLDED (dữ liệu giả sinh sẵn theo pattern) — không áp dụng RULE-01-001 (không mô phỏng khoảng trống nguồn).']),

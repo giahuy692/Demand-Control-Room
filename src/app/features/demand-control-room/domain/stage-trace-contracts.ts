@@ -11,10 +11,12 @@ export interface StageTraceContract {
 
 /**
  * Hợp đồng nội dung của panel MÔ PHỎNG TÍNH TOÁN.
- * Mỗi mục được đối chiếu trực tiếp với các tiểu mục của Chặng 1–19 trong tài liệu giải pháp.
+ * Mỗi mục được đối chiếu trực tiếp với các tiểu mục của Chặng 1–20 trong tài liệu giải pháp.
  * Phần này mô tả chuẩn nghiệp vụ; stage-trace.ts chịu trách nhiệm thế số bằng snapshot thực tế.
  */
-export const STAGE_TRACE_CONTRACTS: Readonly<Record<StageNumber, StageTraceContract>> = {
+type LegacyStageNumber = Exclude<StageNumber, 20>;
+
+const LEGACY_STAGE_TRACE_CONTRACTS: Readonly<Record<LegacyStageNumber, StageTraceContract>> = {
   1: {
     purpose: 'Khóa đúng khoảng lịch sử và lịch chu kỳ cố định của phiên trước khi bất kỳ SKU nào được làm sạch hoặc học mô hình.',
     inputs: ['Ngày chạy kế hoạch và số năm lịch sử chuẩn', 'Độ dài chu kỳ M (mặc định 15 ngày)', 'Dữ liệu bán, tồn và CTKM đã được POS/ERP chốt'],
@@ -36,14 +38,14 @@ export const STAGE_TRACE_CONTRACTS: Readonly<Record<StageNumber, StageTraceContr
     inputs: ['Cờ stockout Chặng 2', 'Số bán ghi nhận Q', 'Ngày sạch không CTKM/stockout/lấp kỹ thuật quanh ngày cần xử lý'],
     rules: ['Ngày CTKM phải chuyển sang Chặng 4', 'Tìm tham chiếu ±7 ngày, mở rộng tối đa ±24; ưu tiên 2+2 cân bằng', 'Nền R dùng trung vị; B=max(Q,R), không làm giảm số bán thật', 'Thiếu tối thiểu số ngày tham chiếu thì giữ trạng thái thiếu căn cứ'],
     outputs: ['Sức mua cơ bản ngày không CTKM', 'Mức nền và danh sách ngày tham chiếu', 'Trạng thái cân bằng/tạm/thiếu căn cứ'],
-    controls: ['Ngày lấp kỹ thuật không được làm nguồn sạch', 'Giữ Q gốc và toàn bộ lý do chọn tham chiếu', 'Nền chưa cân bằng phải được Chặng 5/19 nhận biết'],
+    controls: ['Ngày lấp kỹ thuật không được làm nguồn sạch', 'Giữ Q gốc và toàn bộ lý do chọn tham chiếu', 'Nền chưa cân bằng phải được Chặng 5/20 nhận biết'],
     documentCoverage: ['§1–4 Vấn đề, mục tiêu, điều kiện, loại CTKM', '§5–8 Tham chiếu, tìm nền, công thức, kiểm tra lại', '§9–11 Ví dụ, bảng quyết định, flowchart', '§12 Đầu ra'],
   },
   4: {
     purpose: 'Loại tác động CTKM khỏi chuỗi nền bằng cách đưa ngày CTKM về mức bán tự nhiên.',
     inputs: ['Mã/vùng CTKM và số bán quan sát', 'Ngày sạch trước/sau vùng CTKM', 'Cờ stockout và trạng thái nền từ Chặng 2–3'],
     rules: ['Xử lý theo cả vùng CTKM; chỉ gộp cụm khi dùng chung tập nền hợp lệ', 'Nền tự nhiên dùng trung vị tham chiếu sạch', 'Không dùng max(Q,R): số bán CTKM không được kéo nền lên', 'Vùng thiếu căn cứ phải giữ trạng thái và log kiểm toán'],
-    outputs: ['Sức mua tự nhiên của ngày CTKM', 'Ranh giới vùng/cụm và tập tham chiếu', 'Q quan sát riêng để Chặng 12 học hệ số'],
+    outputs: ['Sức mua tự nhiên của ngày CTKM', 'Ranh giới vùng/cụm và tập tham chiếu', 'Q quan sát riêng để Chặng 13 học hệ số'],
     controls: ['Ngày CTKM đã chuẩn hóa không trở thành nguồn sạch', 'Lưu log vùng, mã CTKM, Q gốc và lý do gộp', 'Không cố phục hồi toàn bộ doanh số có thể xảy ra'],
     documentCoverage: ['§1–4 Vấn đề, mục tiêu, điều kiện, nguyên tắc nền', '§5–8 Ngày sạch, vùng CTKM, mức tự nhiên, nền chưa cân bằng', '§9–11 Bảng quyết định, ví dụ, flowchart', '§12–13 Log và đầu ra'],
   },
@@ -168,3 +170,41 @@ export const STAGE_TRACE_CONTRACTS: Readonly<Record<StageNumber, StageTraceContr
     documentCoverage: ['§1 Vai trò', '§2 Các lớp nguyên nhân', '§3 Chỉ tiêu bắt buộc', '§4 Quy tắc đọc nguyên nhân', '§5 Không hồi tố', '§6–7 Đầu ra và tham khảo'],
   },
 };
+
+const STAGE_5_CONTRACT: StageTraceContract = {
+  purpose: 'Bổ sung riêng các ngày thật sự thiếu mức bán nền mà không thay đổi số bán gốc hoặc cộng chu kỳ.',
+  inputs: ['Lịch ngày liên tục', 'Kết quả thiếu hàng Chặng 2–3', 'Kết quả khuyến mãi Chặng 4', 'Cờ đầy đủ dữ liệu nguồn'],
+  rules: ['Chỉ dùng ngày sạch quan sát', 'Tìm ±7 rồi mở tối đa ±24', 'tối thiểu 3 nguồn và tối đa 14 ngày gần nhất', 'Không dùng ngày đã ước lượng làm nguồn', 'Giữ nguyên số 0 thật'],
+  outputs: ['Mức bán nền theo ngày', 'Nguồn và ngày tham chiếu', 'Ngày được bổ sung', 'Ngày vẫn chưa đủ căn cứ'],
+  controls: ['Không lấp chu kỳ trống', 'Không cộng chu kỳ ở chặng này', 'Không ghi đè số bán ghi nhận'],
+  documentCoverage: ['Chặng 5 §1–3 mục tiêu và đầu vào', 'Chặng 5 §4–8 chọn nguồn và công thức', 'Chặng 5 §9–11 kiểm soát và bàn giao'],
+};
+
+function shiftLegacyStageReferences(contract: StageTraceContract): StageTraceContract {
+  const shift = (text: string): string => text.replace(/Chặng (\d+)(?:–(\d+))?/g, (_, startText: string, endText?: string) => {
+    const start = Number(startText);
+    const shiftedStart = start >= 5 ? start + 1 : start;
+    if (!endText) return `Chặng ${shiftedStart}`;
+    const end = Number(endText);
+    return `Chặng ${shiftedStart}–${end >= 5 ? end + 1 : end}`;
+  });
+  const map = (items: readonly string[]): readonly string[] => items.map(shift);
+  return {
+    purpose: shift(contract.purpose),
+    inputs: map(contract.inputs),
+    rules: map(contract.rules),
+    outputs: map(contract.outputs),
+    controls: map(contract.controls),
+    documentCoverage: map(contract.documentCoverage),
+  };
+}
+
+export const STAGE_TRACE_CONTRACTS: Readonly<Record<StageNumber, StageTraceContract>> = Object.freeze(
+  Object.fromEntries(Array.from({ length: 20 }, (_, index) => {
+    const stage = (index + 1) as StageNumber;
+    if (stage === 5) return [stage, STAGE_5_CONTRACT];
+    const legacyStage = (stage > 5 ? stage - 1 : stage) as LegacyStageNumber;
+    const contract = LEGACY_STAGE_TRACE_CONTRACTS[legacyStage];
+    return [stage, legacyStage >= 5 ? shiftLegacyStageReferences(contract) : contract];
+  })) as unknown as Record<StageNumber, StageTraceContract>,
+);

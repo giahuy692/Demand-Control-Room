@@ -70,16 +70,22 @@ function formatPercent(value: number | null | undefined): string {
   return value === null || value === undefined ? 'Chưa có' : `${formatNumber(value * 100, 1)}%`;
 }
 
+type LegacyStageNumber = Exclude<StageNumber, 20>;
+function legacyStage(stage: StageNumber): LegacyStageNumber {
+  return (stage > 5 ? stage - 1 : stage) as LegacyStageNumber;
+}
+
 function createInputs(stage: StageNumber, state: Readonly<SkuPipelineState> | null, policy: SimulationPolicy): StageViewModel['inputs'] {
   if (!state) return stage === 1 ? [
     { label: 'Ngày chạy', value: policy.runDate },
     { label: 'Lịch sử chuẩn', value: `${policy.historyYears} năm` },
     { label: 'Chu kỳ M', value: `${policy.cycleLength} ngày` },
   ] : [];
+  if (stage === 5) return [{ label: 'Ngày còn thiếu nền', value: formatNumber(state.daily.filter(row => row.baseDemand === null).length) }, { label: 'Nguồn tham chiếu tối thiểu', value: formatNumber(policy.minimumReferences) }];
   const locked = state.cycles.filter(cycle => cycle.locked);
-  switch (stage) {
+  switch (legacyStage(stage)) {
     case 2: return [{ label: 'Bản ghi ngày', value: formatNumber(state.daily.length) }, { label: 'Giờ quy định', value: policy.cutoffHour }];
-    case 3: return [{ label: 'Ngày stockout', value: formatNumber(state.daily.filter(row => row.isStockout).length) }, { label: 'Bán kính tối đa', value: `±${policy.maxReferenceRadius} ngày` }];
+    case 3: return [{ label: 'Ngày stockout', value: formatNumber(state.daily.filter(row => row.stockoutStatus !== 'NONE').length) }, { label: 'Bán kính tối đa', value: `±${policy.maxReferenceRadius} ngày` }];
     case 4: return [{ label: 'Ngày CTKM', value: formatNumber(state.daily.filter(row => row.promoCode).length) }, { label: 'Nguồn nền', value: 'Ngày sạch quan sát' }];
     case 5: return [{ label: 'Ngày có nền', value: formatNumber(state.daily.filter(row => row.baseDemand !== null).length) }, { label: 'Độ dài M', value: `${policy.cycleLength} ngày` }];
     case 6: return [{ label: 'Chu kỳ khóa', value: formatNumber(locked.length) }, { label: 'Đơn giá chuẩn', value: `${formatNumber(state.definition.price)} ₫` }];
@@ -102,12 +108,16 @@ function createInputs(stage: StageNumber, state: Readonly<SkuPipelineState> | nu
 
 function createCalculations(stage: StageNumber, state: Readonly<SkuPipelineState> | null): StageViewModel['calculations'] {
   if (!state) return [];
+  if (stage === 5) return [
+    { label: 'Ngày được bổ sung', value: formatNumber(state.daily.filter(row => row.baseDemandSource === 'TECHNICAL_FILL').length) },
+    { label: 'Ngày chưa đủ căn cứ', value: formatNumber(state.daily.filter(row => row.baseDemand === null).length) },
+  ];
   const locked = state.cycles.filter(cycle => cycle.locked);
   const lastCycle = locked.at(-1);
-  switch (stage) {
-    case 2: return [{ label: 'Stockout đã đánh dấu', value: formatNumber(state.daily.filter(row => row.isStockout).length) }];
-    case 3: return [{ label: 'Nâng nền stockout', value: formatNumber(state.daily.filter(row => row.baseSource === 'stockout-lifted').length) }, { label: 'Thiếu căn cứ', value: formatNumber(state.daily.filter(row => row.baseSource === 'insufficient').length) }];
-    case 4: return [{ label: 'Ngày KM chuẩn hóa', value: formatNumber(state.daily.filter(row => row.baseSource === 'promo-normalized').length) }];
+  switch (legacyStage(stage)) {
+    case 2: return [{ label: 'Stockout đã đánh dấu', value: formatNumber(state.daily.filter(row => row.stockoutStatus !== 'NONE').length) }];
+    case 3: return [{ label: 'Nâng nền stockout', value: formatNumber(state.daily.filter(row => row.baseDemandSource === 'STOCKOUT_BASELINE').length) }, { label: 'Thiếu căn cứ', value: formatNumber(state.daily.filter(row => row.baseDemandSource === 'STOCKOUT_UNRESOLVED').length) }];
+    case 4: return [{ label: 'Ngày KM chuẩn hóa', value: formatNumber(state.daily.filter(row => row.baseDemandSource === 'PROMOTION_BASELINE').length) }];
     case 5: return [{ label: 'Chu kỳ gần nhất', value: lastCycle ? `ΣBₜ = ${formatNumber(lastCycle.baseDemand, 1)}` : 'Chưa có' }, { label: 'Ngày chưa giải quyết', value: formatNumber(state.cycles.reduce((sum, cycle) => sum + cycle.unresolvedDays, 0)) }];
     case 6: return [
       { label: 'Tổng SL trong kỳ', value: formatNumber(state.classification.periodQuantity, 1) },
@@ -148,8 +158,12 @@ function createCalculations(stage: StageNumber, state: Readonly<SkuPipelineState
 
 function createOutputs(stage: StageNumber, state: Readonly<SkuPipelineState> | null): StageViewModel['outputs'] {
   if (!state) return [];
-  switch (stage) {
-    case 1: return [{ label: 'Ngày có ghi nhận bán', value: formatNumber(state.daily.filter(day => day.hasRecord).length), tone: 'good' }];
+  if (stage === 5) return [
+    { label: 'Ngày đã có nền', value: formatNumber(state.daily.filter(day => day.baseDemand !== null).length), tone: 'good' },
+    { label: 'Ngày chưa giải quyết', value: formatNumber(state.daily.filter(day => day.baseDemand === null).length), tone: 'warn' },
+  ];
+  switch (legacyStage(stage)) {
+    case 1: return [{ label: 'Ngày có sales row', value: formatNumber(state.daily.filter(day => day.hasSalesRecord).length), tone: 'good' }];
     case 2: return [{ label: 'Trạng thái', value: 'Đã khóa cờ stockout', tone: 'good' }];
     case 3: return [{ label: 'Cột bàn giao', value: 'baseDemand ngày không KM', tone: 'good' }];
     case 4: return [{ label: 'Cột bàn giao', value: 'baseDemand ngày CTKM', tone: 'good' }];
@@ -193,10 +207,7 @@ export class SimulationStore {
   readonly snapshots = signal<Partial<Record<StageNumber, StageSnapshot>>>({});
   readonly error = signal<string | null>(null);
   readonly isRunning = signal(false);
-
-  readonly realFinalState = signal<Record<string, SkuPipelineState> | null>(null);
-  readonly mockFinalState = signal<Record<string, SkuPipelineState> | null>(null);
-  readonly isGeneratingReportData = signal(false);
+  readonly playbackStep = signal<number | null>(null);
 
   readonly currentSnapshot = computed(() => this.snapshots()[this.activeStage()] ?? null);
   readonly inputSnapshot = computed(() => {
@@ -296,8 +307,6 @@ export class SimulationStore {
     this.snapshots.set({});
     this.completedStage.set(0);
     this.error.set(null);
-    this.realFinalState.set(null);
-    this.mockFinalState.set(null);
 
     return this.runThrough(recomputeTarget).then(() => this.activeStage.set(viewedStage));
   }
@@ -322,7 +331,7 @@ export class SimulationStore {
 
   runAll(): void {
     if (this.isLoadingDataSource()) return;
-    void this.runThrough(19);
+    void this.runThrough(20);
   }
 
   async selectDataSource(source: DataSourceId, targetStage: StageNumber = Math.max(1, this.activeStage(), this.completedStage()) as StageNumber): Promise<void> {
@@ -376,13 +385,6 @@ export class SimulationStore {
         this.completedStage.set(stage);
         this.snapshots.set({ ...nextSnapshots });
       }
-      if (targetStage >= 13) {
-        if (this.dataSource() === 'real') {
-          this.realFinalState.set(nextSnapshots[13]?.states ?? null);
-        } else {
-          this.mockFinalState.set(nextSnapshots[13]?.states ?? null);
-        }
-      }
     } catch (error) {
       this.error.set(error instanceof Error ? error.message : 'Pipeline đã dừng vì lỗi hợp đồng dữ liệu.');
     } finally {
@@ -390,53 +392,8 @@ export class SimulationStore {
     }
   }
 
-  async generateReportData(): Promise<void> {
-    if (this.realFinalState() && this.mockFinalState()) return;
-    if (this.isGeneratingReportData()) return;
-    this.isGeneratingReportData.set(true);
-    try {
-      const originalSource = this.dataSource();
-      
-      // 1. Run for 'real' if missing
-      if (!this.realFinalState()) {
-        const realSession = await this.loadSession('real');
-        this.engine.setDataset(realSession.dataset);
-        this.engineSource = 'real';
-        const nextSnapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
-        for (let number = 1; number <= 13; number++) {
-          const stage = number as StageNumber;
-          const previous = stage === 1 ? null : nextSnapshots[(stage - 1) as StageNumber] ?? null;
-          nextSnapshots[stage] = this.engine.run(stage, previous, realSession.policy);
-        }
-        this.realFinalState.set(nextSnapshots[13]?.states ?? null);
-      }
-
-      // 2. Run for 'mock' if missing
-      if (!this.mockFinalState()) {
-        const mockSession = await this.loadSession('mock');
-        this.engine.setDataset(mockSession.dataset);
-        this.engineSource = 'mock';
-        const nextSnapshots: Partial<Record<StageNumber, StageSnapshot>> = {};
-        for (let number = 1; number <= 13; number++) {
-          const stage = number as StageNumber;
-          const previous = stage === 1 ? null : nextSnapshots[(stage - 1) as StageNumber] ?? null;
-          nextSnapshots[stage] = this.engine.run(stage, previous, mockSession.policy);
-        }
-        this.mockFinalState.set(nextSnapshots[13]?.states ?? null);
-      }
-
-      // 3. Restore dataset in engine
-      this.engine.setDataset((await this.loadSession(originalSource)).dataset);
-      this.engineSource = originalSource;
-    } catch (error) {
-      console.error('Error generating report data:', error);
-    } finally {
-      this.isGeneratingReportData.set(false);
-    }
-  }
-
   goNext(): void {
-    if (this.activeStage() < 19) void this.selectStage((this.activeStage() + 1) as StageNumber);
+    if (this.activeStage() < 20) void this.selectStage((this.activeStage() + 1) as StageNumber);
   }
 
   goPrevious(): void {
@@ -497,9 +454,9 @@ export class SimulationStore {
    * chính sách (POLICY_PENDING, không phải D) → nhãn lớp bình thường.
    */
   stageLabel(state: Readonly<SkuPipelineState> | null, stage = this.activeStage()): string {
-    if (!state || stage < 6) return '—';
-    if (stage === 6) return state.classification.abc;
-    if (stage === 7) return state.classification.xyz === 'D' ? 'D' : state.classification.xyz === null ? 'BLOCKED' : `${state.classification.abc}${state.classification.xyz}`;
+    if (!state || stage < 7) return '—';
+    if (stage === 7) return state.classification.abc;
+    if (stage === 8) return state.classification.xyz === 'D' ? 'D' : state.classification.xyz === null ? 'BLOCKED' : `${state.classification.abc}${state.classification.xyz}`;
     const { classification } = state;
     if (classification.classificationStatus === 'CLASSIFICATION_BLOCKED') return 'BLOCKED';
     if (classification.abc === 'N/A') return 'N/A';

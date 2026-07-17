@@ -16,6 +16,16 @@ export type DatasetCalendarScaffold = 'GLOBAL_WINDOW' | 'PRESCAFFOLDED';
 export type DatasetStoreScopeStatus = 'FILTERED_SINGLE_STORE' | 'GLOBAL_POS_AGGREGATE' | 'SYNTHETIC_FIXTURE';
 export type DatasetPortfolioMode = 'FULL_PORTFOLIO' | 'SELECTED_SKU_SIMULATION' | 'USE_APPROVED_SNAPSHOT';
 
+export class ExtractMetadataDto {
+  constructor(
+    readonly salesDataThroughDate: string,
+    readonly stockDataThroughDate: string,
+    readonly extractionCompleted: boolean,
+  ) {
+    Object.freeze(this);
+  }
+}
+
 export class SimulationMetadataDto {
   readonly runMode!: DatasetRunMode;
   readonly runDate!: string;
@@ -27,6 +37,7 @@ export class SimulationMetadataDto {
   readonly portfolioMode!: DatasetPortfolioMode;
   readonly extractIsTruncated!: boolean;
   readonly sourceWatermarks!: { readonly sales: string | null; readonly stock: string | null };
+  readonly extractMetadata!: ExtractMetadataDto;
   readonly qualityGates!: { readonly stockReconciliation: 'PASS' | 'FAIL'; readonly stockMismatchSkuCount: number };
   readonly rowCounts!: { readonly dailyRecords: number; readonly products: number };
   readonly policyOverrides!: Readonly<Record<string, unknown>>;
@@ -41,6 +52,9 @@ export class SimulationMetadataDto {
     const watermarks = row.child('sourceWatermarks');
     const gates = row.child('qualityGates');
     const counts = row.child('rowCounts');
+    const salesDataThroughDate = watermarks.isoDate('sales');
+    const stockDataThroughDate = watermarks.isoDate('stock');
+    const extractionCompleted = row.requiredBoolean('extractionCompleted');
     const metadata = new SimulationMetadataDto({
       runMode: row.literal('runMode', ['HISTORICAL_VALIDATION', 'PLANNING_SIMULATION']),
       runDate: row.isoDate('runDate'),
@@ -51,7 +65,8 @@ export class SimulationMetadataDto {
       storeScopeStatus: row.literal('storeScopeStatus', ['FILTERED_SINGLE_STORE', 'GLOBAL_POS_AGGREGATE', 'SYNTHETIC_FIXTURE']),
       portfolioMode: row.literal('portfolioMode', ['FULL_PORTFOLIO', 'SELECTED_SKU_SIMULATION', 'USE_APPROVED_SNAPSHOT']),
       extractIsTruncated: row.requiredBoolean('extractIsTruncated'),
-      sourceWatermarks: { sales: watermarks.nullableIsoDate('sales'), stock: watermarks.nullableIsoDate('stock') },
+      sourceWatermarks: { sales: salesDataThroughDate, stock: stockDataThroughDate },
+      extractMetadata: new ExtractMetadataDto(salesDataThroughDate, stockDataThroughDate, extractionCompleted),
       qualityGates: {
         stockReconciliation: gates.literal('stockReconciliation', ['PASS', 'FAIL']),
         stockMismatchSkuCount: gates.nonNegativeInteger('stockMismatchSkuCount'),
@@ -79,13 +94,10 @@ export class SimulationMetadataDto {
       if (metadata.runMode !== 'HISTORICAL_VALIDATION') {
         throw new DataQualityError('RUN_MODE', `datasetKind=REAL yêu cầu runMode=HISTORICAL_VALIDATION (DEC-008/009), nhận được ${metadata.runMode}.`);
       }
-      if (metadata.sourceWatermarks.sales === null || metadata.sourceWatermarks.stock === null) {
-        throw new DataQualityError('SOURCE_WATERMARK', 'datasetKind=REAL phải khai báo watermark sales và stock.');
-      }
       // Lịch sử phải phủ trọn tới runDate−1. Stock của phiên backtest CỐ Ý dừng đúng
       // ProcessingEndDate = runDate−1, nên điều kiện đúng là runDate ≤ watermark+1,
       // không phải runDate ≤ watermark.
-      const watermark = metadata.sourceWatermarks.sales < metadata.sourceWatermarks.stock ? metadata.sourceWatermarks.sales : metadata.sourceWatermarks.stock;
+      const watermark = metadata.extractMetadata.salesDataThroughDate < metadata.extractMetadata.stockDataThroughDate ? metadata.extractMetadata.salesDataThroughDate : metadata.extractMetadata.stockDataThroughDate;
       if (metadata.runDate > addDaysIso(watermark, 1)) {
         throw new DataQualityError('RUN_DATE_WATERMARK', `runDate=${metadata.runDate} vượt watermark nguồn ${watermark} (lịch sử phải phủ tới runDate−1) — không được tự lùi RunDate, export lại nguồn hoặc chọn RunDate hợp lệ.`);
       }

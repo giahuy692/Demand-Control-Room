@@ -4,6 +4,7 @@ import { AppComponent } from './app.component';
 import { SimulationEngine } from './features/demand-control-room/domain/simulation-engine';
 import { SimulationStore } from './features/demand-control-room/application/state/simulation.store';
 import { fileDatasetService } from './features/demand-control-room/data-access/testing/file-dataset.testing';
+import { SalesObservationStatus, StockoutStatus } from './features/demand-control-room/domain/models';
 
 function createApp(): { app: AppComponent; store: SimulationStore } {
   const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
@@ -19,7 +20,6 @@ describe('Demand Planning simulation shell', () => {
     expect(store.activeStage()).toBe(1);
     expect(store.completedStage()).toBe(0);
   });
-
   it('giới hạn DOM bảng audit nhưng vẫn cho phép mở toàn bộ dữ liệu', async () => {
     const { app, store } = createApp();
 
@@ -67,8 +67,8 @@ describe('Demand Planning simulation shell', () => {
     for (let i = 0; i < catalogStage2.length - 1; i++) {
       const aState = app.stateFor(catalogStage2[i].id);
       const bState = app.stateFor(catalogStage2[i+1].id);
-      const aSO = aState?.daily?.filter(d => d.isStockout).length ?? 0;
-      const bSO = bState?.daily?.filter(d => d.isStockout).length ?? 0;
+      const aSO = aState?.daily?.filter(d => d.stockoutStatus !== StockoutStatus.NONE).length ?? 0;
+      const bSO = bState?.daily?.filter(d => d.stockoutStatus !== StockoutStatus.NONE).length ?? 0;
 
       if (aSO !== bSO) {
         expect(aSO).toBeGreaterThan(bSO);
@@ -85,10 +85,10 @@ describe('Demand Planning simulation shell', () => {
     const catalog = app.visibleCatalog();
 
     for (let i = 0; i < catalog.length; i++) {
-      const recordedDays = app.stateFor(catalog[i].id)!.daily.filter(day => day.hasRecord).length;
+      const recordedDays = app.stateFor(catalog[i].id)!.daily.filter(day => day.hasSalesRecord).length;
       expect(app.getSkuSortValueLabel(catalog[i])).toBe(`${recordedDays} ngày ghi nhận bán`);
       if (i > 0) {
-        const previousRecordedDays = app.stateFor(catalog[i - 1].id)!.daily.filter(day => day.hasRecord).length;
+        const previousRecordedDays = app.stateFor(catalog[i - 1].id)!.daily.filter(day => day.hasSalesRecord).length;
         expect(previousRecordedDays).toBeGreaterThanOrEqual(recordedDays);
       }
     }
@@ -116,7 +116,7 @@ describe('Demand Planning simulation shell', () => {
     const recentDays = app.auditDailyRows().slice(-60);
     expect(dailyChart?.bars).toHaveLength(recentDays.length);
     recentDays.forEach((row, index) => {
-      if (!row.hasRecord || row.sales === null) {
+      if (row.salesObservationStatus === SalesObservationStatus.SOURCE_DATA_GAP) {
         expect(dailyChart?.bars[index].kind).toBe('missing');
         expect(dailyChart?.bars[index].value).toBeNull();
       }
@@ -129,13 +129,19 @@ describe('Demand Planning simulation shell', () => {
     expect(stage2Chart).not.toBeNull();
     expect(stage2Chart!.unit).toBe('đơn vị/ngày');
     app.auditDailyRows().slice(-60).forEach((row, index) => {
-      if (row.baseDemand === null && (!row.hasRecord || row.sales === null)) {
+      if (row.baseDemand === null && row.salesObservationStatus === SalesObservationStatus.SOURCE_DATA_GAP) {
         expect(stage2Chart!.bars[index].kind).toBe('missing');
         expect(stage2Chart!.bars[index].value).toBeNull();
       }
     });
 
-    await store.selectStage(5);
+    await store.selectStage(3);
+    const stage3Chart = app.demandStructureChart()!;
+    app.auditDailyRows().slice(-60).forEach((row, index) => {
+      expect(stage3Chart.bars[index].value).toBe(row.baseDemand);
+    });
+
+    await store.selectStage(6);
     const cycleChart = app.demandStructureChart();
     expect(cycleChart).not.toBeNull();
     for (const bar of cycleChart!.bars) {
@@ -143,8 +149,8 @@ describe('Demand Planning simulation shell', () => {
       if (cycle && !cycle.locked) expect(bar.value).toBeNull();
     }
 
-    // Chặng 14–19 mang finalForecast đi tiếp nên panel cũng phải hiển thị.
-    for (const stage of [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] as const) {
+    // Chặng 7–20 mang dữ liệu chu kỳ và finalForecast đi tiếp nên panel cũng phải hiển thị.
+    for (const stage of [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const) {
       await store.selectStage(stage);
       expect(app.demandStructureChart(), `Chặng ${stage} phải có biểu đồ`).not.toBeNull();
     }
@@ -152,18 +158,46 @@ describe('Demand Planning simulation shell', () => {
     expect(app.demandStructureChart()!.bars.filter(bar => bar.kind === 'forecast')).toHaveLength(Math.min(6, finalState.finalForecast.length));
   });
 
-  it('phân biệt thiếu nguồn với có nguồn nhưng chưa đủ nền ở Chặng 5', async () => {
+  it('nút chặng trước/sau đổi đúng snapshot dữ liệu và biểu đồ', async () => {
     const { app, store } = createApp();
-    await store.selectStage(5);
+    await store.selectStage(6);
+
+    const stage6State = app.auditState();
+    const stage6Chart = app.demandStructureChart();
+    app.auditDate.set(stage6State!.daily[0]!.date);
+    app.highlightedCycleIndex.set(1);
+    app.currentAnomalyIndex.set({ type: 'stockout', index: 0 });
+    app.goPrevious();
+    const stage5State = app.auditState();
+    const stage5Chart = app.demandStructureChart();
+
+    expect(store.activeStage()).toBe(5);
+    expect(stage5State).toBe(store.snapshots()[5]!.states[store.selectedSkuId()]);
+    expect(stage5State).not.toBe(stage6State);
+    expect(stage5Chart?.unit).toBe('đơn vị/ngày');
+    expect(stage6Chart?.unit).toBe('đơn vị/chu kỳ');
+    expect(app.auditDate()).toBeNull();
+    expect(app.highlightedCycleIndex()).toBeNull();
+    expect(app.currentAnomalyIndex()).toEqual({ type: '', index: -1 });
+
+    app.goNext();
+    expect(store.activeStage()).toBe(6);
+    expect(app.auditState()).toBe(stage6State);
+    expect(app.demandStructureChart()).toEqual(stage6Chart);
+  });
+
+  it('phân biệt thiếu nguồn với có nguồn nhưng chưa đủ nền ở Chặng 6', async () => {
+    const { app, store } = createApp();
+    await store.selectStage(6);
     const source = app.auditCycles()[0];
     const row = app.auditDailyRows()[0];
     const noSource = { ...source, locked: false, emptyCycle: true, status: 'NO_SOURCE_RECORD' as const, sourceRecordDays: 0, unresolvedDays: source.days };
-    const noBaseline = { ...source, locked: false, emptyCycle: true, status: 'BASELINE_UNRESOLVED' as const, sourceRecordDays: source.days, unresolvedDays: source.days };
+    const noBaseline = { ...source, locked: false, emptyCycle: true, status: 'BLOCKED_NO_VALID_BASELINE' as const, sourceRecordDays: source.days, unresolvedDays: source.days };
 
     expect(app.cycleStatusLabel(noSource)).toBe('KHÔNG CÓ NGUỒN');
     expect(app.cycleStatusExplanation(noSource)).toContain('thiếu nguồn');
-    expect(app.cycleStatusLabel(noBaseline)).toBe('CHƯA CÓ NỀN');
-    expect(app.cycleStatusExplanation(noBaseline)).toContain('có bản ghi nguồn');
-    expect(app.cycleDayIssue({ ...row, hasRecord: false, sales: null, baseDemand: null })).toContain('không phải 0');
+    expect(app.cycleStatusLabel(noBaseline)).toContain('CHẶN');
+    expect(app.cycleDayIssue({ ...row, hasSalesRecord: false, salesObservationStatus: SalesObservationStatus.SOURCE_DATA_GAP, sales: null, baseDemand: null })).toContain('không phải 0');
   });
 });
+

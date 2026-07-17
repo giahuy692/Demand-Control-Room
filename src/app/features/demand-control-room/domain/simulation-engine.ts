@@ -9,6 +9,7 @@ import { runStage1 } from '../stages/stage-01-history-window/stage-01-history-wi
 import { runStage2 } from '../stages/stage-02-stockout/stage-02-stockout.processor';
 import { runStage3 } from '../stages/stage-03-stockout-baseline/stage-03-stockout-baseline.processor';
 import { runStage4 } from '../stages/stage-04-promotion-baseline/stage-04-promotion-baseline.processor';
+import { runStage5MissingBaseline } from '../stages/stage-05-missing-baseline/stage-05-missing-baseline.processor';
 import { runStage5 } from '../stages/stage-05-cycle-aggregation/stage-05-cycle-aggregation.processor';
 import { runStage6 } from '../stages/stage-06-abc/stage-06-abc.processor';
 import { runStage7 } from '../stages/stage-07-xyz/stage-07-xyz.processor';
@@ -32,22 +33,48 @@ const STAGE_EXECUTORS: readonly ((context: StageExecutionContext) => StageSnapsh
   context => runStage2(context.requirePrevious(), context.policy),
   context => runStage3(context.requirePrevious(), context.policy),
   context => runStage4(context.requirePrevious(), context.policy),
-  context => runStage5(context.requirePrevious(), context.policy),
-  context => runStage6(context.requirePrevious(), context.policy),
-  context => runStage7(context.requirePrevious(), context.policy),
-  context => runStage8(context.requirePrevious(), context.policy),
-  context => runStage9(context.requirePrevious(), context.policy),
-  context => runStage10(context.requirePrevious(), context.policy),
-  context => runStage11(context.requirePrevious(), context.policy),
-  context => runStage12(context.requirePrevious(), context.policy),
-  context => runStage13(context.requirePrevious(), context.policy),
-  context => runStage14(context.requirePrevious(), context.policy),
-  context => runStage15(context.requirePrevious(), context.policy),
-  context => runStage16(context.requirePrevious(), context.policy),
-  context => runStage17(context.requirePrevious(), context.policy),
-  context => runStage18(context.requirePrevious(), context.policy),
-  context => runStage19(context.requirePrevious(), context.policy),
+  context => runStage5MissingBaseline(context.requirePrevious(), context.policy),
+  context => remapLegacySnapshot(runStage5(context.requirePrevious(), context.policy), 6),
+  context => remapLegacySnapshot(runStage6(context.requirePrevious(), context.policy), 7),
+  context => remapLegacySnapshot(runStage7(context.requirePrevious(), context.policy), 8),
+  context => remapLegacySnapshot(runStage8(context.requirePrevious(), context.policy), 9),
+  context => remapLegacySnapshot(runStage9(context.requirePrevious(), context.policy), 10),
+  context => remapLegacySnapshot(runStage10(context.requirePrevious(), context.policy), 11),
+  context => remapLegacySnapshot(runStage11(context.requirePrevious(), context.policy), 12),
+  context => remapLegacySnapshot(runStage12(context.requirePrevious(), context.policy), 13),
+  context => remapLegacySnapshot(runStage13(context.requirePrevious(), context.policy), 14),
+  context => remapLegacySnapshot(runStage14(context.requirePrevious(), context.policy), 15),
+  context => remapLegacySnapshot(runStage15(context.requirePrevious(), context.policy), 16),
+  context => remapLegacySnapshot(runStage16(context.requirePrevious(), context.policy), 17),
+  context => remapLegacySnapshot(runStage17(context.requirePrevious(), context.policy), 18),
+  context => remapLegacySnapshot(runStage18(context.requirePrevious(), context.policy), 19),
+  context => remapLegacySnapshot(runStage19(context.requirePrevious(), context.policy), 20),
 ];
+
+function remapLegacySnapshot(snapshot: StageSnapshot, stage: StageNumber): StageSnapshot {
+  const shift = (value: StageNumber): StageNumber => (value >= 5 ? value + 1 : value) as StageNumber;
+  const shiftText = (value: string): string => value.replace(/Chặng (\d+)/g, (match, raw: string) => {
+    const number = Number(raw);
+    return number >= 5 ? `Chặng ${number + 1}` : match;
+  }).replace(/RULE-(\d{2})/g, (match, raw: string) => {
+    const number = Number(raw);
+    return number >= 5 ? `RULE-${String(number + 1).padStart(2, '0')}` : match;
+  });
+  return Object.freeze({
+    ...snapshot,
+    stage,
+    audit: Object.freeze(snapshot.audit.map(shiftText)),
+    exceptions: Object.freeze(snapshot.exceptions.map(exception => Object.freeze({
+      ...exception,
+      id: exception.id.replace(`:${snapshot.stage}:`, `:${stage}:`),
+      ruleId: shiftText(exception.ruleId),
+      stage,
+      evidence: shiftText(exception.evidence),
+      suggestedAction: shiftText(exception.suggestedAction),
+      blockingStages: exception.blockingStages?.map(shift),
+    }))),
+  });
+}
 
 export const DEFAULT_DEMAND_STAGE_PROCESSORS: readonly DemandStageProcessor[] = Object.freeze(
   STAGE_EXECUTORS.map((execute, index) => {

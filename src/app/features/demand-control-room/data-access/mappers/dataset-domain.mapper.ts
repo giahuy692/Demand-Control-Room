@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { SimulationDataset } from '../../domain/catalog';
-import { DailyRecord, SkuDefinition } from '../../domain/models';
+import { BaseDemandSource, DailyRecord, isBaselineExcludedPromo, PromotionStatus, SalesObservationStatus, SkuDefinition, StockCalculationStatus, StockoutStatus, TechnicalFillStatus } from '../../domain/models';
 import { SessionMetadata, SimulationSession } from '../../domain/models/simulation-session.class';
 import { DailyHistoryRecordDto } from '../dto/daily-history-record.dto';
 import { DemandSimulationDatasetDto } from '../dto/demand-simulation-dataset.dto';
@@ -21,9 +21,10 @@ export class DatasetDomainMapper {
     let minDate = '';
     let maxDate = '';
     for (const record of dto.dailyRecords) {
-      // Opening anchor chỉ thiết lập tồn trước khung đọc, không phải ngày lịch sử — loại tại cửa nạp.
-      if (record.isOpeningAnchor) continue;
-      (dailyBySku[record.sku] ??= []).push(toDailyRecord(record));
+      const skuStr = kind === 'mock'
+        ? `SKU-${record.productCode.toString().padStart(3, '0')}`
+        : record.productCode.toString();
+      (dailyBySku[skuStr] ??= []).push(toDailyRecord(record, kind));
       if (!minDate || record.date < minDate) minDate = record.date;
       if (!maxDate || record.date > maxDate) maxDate = record.date;
     }
@@ -37,6 +38,12 @@ export class DatasetDomainMapper {
       label: kind === 'real' ? 'Dữ liệu thật' : 'Dữ liệu giả',
       catalog,
       dailyBySku,
+      promotionIntervals: dto.promotionIntervals.map(interval => ({
+        sku: interval.sku, code: interval.code, name: interval.name,
+        startDate: interval.startDate, endDate: interval.endDate,
+        promotionClass: interval.promotionClass,
+      })),
+      extractMetadata: { ...metadata.extractMetadata },
       dateRange: minDate ? { min: minDate, max: maxDate, recommendedRunDate: metadata.runDate } : undefined,
       runMode: metadata.runMode,
       calendarScaffold: metadata.calendarScaffold,
@@ -65,6 +72,7 @@ function toSessionMetadata(dto: DemandSimulationDatasetDto): SessionMetadata {
     portfolioMode: metadata.portfolioMode,
     extractIsTruncated: metadata.extractIsTruncated,
     sourceWatermarks: { ...metadata.sourceWatermarks },
+    extractMetadata: { ...metadata.extractMetadata },
     qualityGates: { ...metadata.qualityGates },
     rowCounts: { ...metadata.rowCounts },
     policyOverrides: { ...metadata.policyOverrides },
@@ -72,36 +80,63 @@ function toSessionMetadata(dto: DemandSimulationDatasetDto): SessionMetadata {
 }
 
 /** Parity từng field với dailyRecord() của catalog.ts — golden regression là lưới kiểm chứng. */
-function toDailyRecord(record: DailyHistoryRecordDto): DailyRecord {
-  const openStock = record.openStock ?? 0;
-  const closeStock = record.closeStock ?? 0;
+function toDailyRecord(record: DailyHistoryRecordDto, kind: 'mock' | 'real'): DailyRecord {
+  const openStock = record.openStock;
+  const closeStock = record.closeStock;
+  
+  let stockCalculationStatus: StockCalculationStatus = 'CALCULATED';
+  if (record.stockStatus === 'NEGATIVE_STOCK') {
+    stockCalculationStatus = 'NEGATIVE_REVIEW';
+  } else if (record.stockStatus === 'ANCHOR_MISSING') {
+    stockCalculationStatus = 'ANCHOR_MISSING';
+  }
+
+  // Chỉ DEEP_PROMO (mechanismType 2/7) bị loại khỏi baseline và chuyển Chặng 4 tìm mức
+  // bán tự nhiên; ALWAYS_ON/PROMOTION_UNRESOLVED giữ nguyên Sales (PromotionStatus.NONE).
+  const isPromo = isBaselineExcludedPromo(record.promotionClass);
+
+  const skuStr = kind === 'mock'
+    ? `SKU-${record.productCode.toString().padStart(3, '0')}`
+    : record.productCode.toString();
+
   return {
-    sku: record.sku,
+    sku: skuStr,
+    barcode: record.barcode ?? skuStr,
     date: record.date,
     openStock,
     closeStock,
     sales: record.sales,
-    hasRecord: record.hasSalesRecord,
-    isZeroSaleInferred: record.isZeroSaleInferred,
+    hasSalesRecord: record.hasSalesRecord,
     receiptHour: record.receiptHour,
-    promoCode: record.promoCode,
-    salesStatus: record.sales === null ? 'SOURCE_UNKNOWN' : record.sales > 0 ? 'OBSERVED' : 'OBSERVED_ZERO',
+    promoCode: record.promotionCode !== null ? record.promotionCode.toString() : null,
+    salesObservationStatus: record.hasSalesRecord
+      ? SalesObservationStatus.RECORDED_SALE
+      : SalesObservationStatus.SOURCE_DATA_GAP,
     isReferenceOnly: false, // engine tự tính theo ngày ở Chặng 1 (RULE-01-003) — cờ nguồn chỉ để đối chiếu
     stockSource: 'OBSERVED',
-    // Dòng validation không có bằng chứng tồn (openStock=null trong hợp đồng) → UNRESOLVED,
-    // không được trình bày 0 như số đo thật.
-    stockCalculationStatus: record.openStock === null ? 'UNRESOLVED' : openStock < 0 || closeStock < 0 ? 'NEGATIVE_REVIEW' : 'CALCULATED',
-    isStockout: false,
-    stockoutReason: null,
-    stockoutReviewRequired: false,
+    stockCalculationStatus,
+    promotionStatus: isPromo ? PromotionStatus.PROMOTION : PromotionStatus.NONE,
+    stockoutStatus: StockoutStatus.NONE,
     baseDemand: null,
-    baseSource: null,
+    baseDemandSource: BaseDemandSource.SOURCE_DATA_GAP,
+    isCleanObservedReference: false,
+    technicalFillStatus: TechnicalFillStatus.NOT_APPLICABLE,
     referenceDates: [],
+    referenceEvidence: [],
     beforeReferenceDates: [],
     afterReferenceDates: [],
     referenceMedian: null,
     balanceStatus: null,
     selectionReason: '',
+    storeCode: record.storeCode,
+    productCode: record.productCode,
+    promotionName: record.promotionName,
+    promotionStartDate: record.promotionStartDate,
+    promotionEndDate: record.promotionEndDate,
+    promotionType: record.promotionType,
+    promotionMechanismType: record.promotionMechanismType,
+    promotionClass: record.promotionClass,
+    stockStatus: record.stockStatus,
   };
 }
 

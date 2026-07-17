@@ -83,13 +83,13 @@ describe('DatasetDomainMapper — §12.12 không mutate DTO', () => {
     const raw = fixtureDataset({
       dailyRecords: [
         { ...((await import('../dto/dataset-fixture')).fixtureDailyRecord)({ date: '2026-05-01' }) },
-        { ...((await import('../dto/dataset-fixture')).fixtureDailyRecord)({ date: '2026-06-02', openStock: null, closeStock: null, isHistoryRecord: false, isValidationActual: true }) },
+        { ...((await import('../dto/dataset-fixture')).fixtureDailyRecord)({ date: '2026-06-02', openStock: null, closeStock: null, stockStatus: 'ANCHOR_MISSING' }) },
       ],
     });
     const { service: loader } = service({ MOCK: raw });
     const session = await loader.load('mock');
-    const records = session.dataset.dailyBySku['SKU-T01'];
-    expect(records[1].stockCalculationStatus).toBe('UNRESOLVED');
+    const records = session.dataset.dailyBySku['SKU-001'];
+    expect(records[1].stockCalculationStatus).toBe('ANCHOR_MISSING');
     expect(records[0].stockCalculationStatus).toBe('CALCULATED');
   });
 });

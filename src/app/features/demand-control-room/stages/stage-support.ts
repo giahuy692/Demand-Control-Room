@@ -1,6 +1,5 @@
-import { median, requireObservedSales, trailingLockedRun } from '../domain/math';
-import { BalanceStatus, Classification, CycleRecord, CycleStatus, DailyRecord, DSubtype, ExceptionResolutionOption, ExceptionResolutionType, ExceptionTask, LotReliability, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot } from '../domain/models';
-import { DEFAULT_POLICY } from '../domain/policy';
+import { median, trailingLockedRun } from '../domain/math';
+import { BalanceStatus, BaseDemandSource, Classification, CycleRecord, CycleStatus, DailyRecord, DSubtype, ExceptionResolutionOption, ExceptionResolutionType, ExceptionTask, isBaselineExcludedPromo, LotReliability, PromotionStatus, SalesObservationStatus, SimulationPolicy, SkuPipelineState, StageNumber, StageSnapshot, StockoutStatus, TechnicalFillStatus } from '../domain/models';
 
 export function emptyClassification(): Classification {
   return {
@@ -51,9 +50,13 @@ interface ReferenceSelection {
 }
 
 export function isObservedClean(record: DailyRecord): boolean {
-  // Ngày không có bản ghi (hasRecord=false) không được dùng làm nền tham chiếu
-  // cho ngày khác — chưa xác nhận nó thật sự "sạch" [nguyên tắc bất biến #2, C1 §3].
-  return record.hasRecord && !record.promoCode && !record.isStockout && (record.baseSource === null || record.baseSource === 'clean');
+  return record.salesObservationStatus !== SalesObservationStatus.SOURCE_DATA_GAP
+    && record.promotionStatus === PromotionStatus.NONE
+    && record.stockoutStatus === StockoutStatus.NONE
+    && record.technicalFillStatus !== TechnicalFillStatus.FILLED
+    && (record.baseDemandSource === BaseDemandSource.SOURCE_DATA_GAP
+      || record.baseDemandSource === BaseDemandSource.CLEAN_OBSERVED_SALE
+      || record.baseDemandSource === BaseDemandSource.CLEAN_OBSERVED_ZERO);
 }
 
 export function collectCleanSide(records: DailyRecord[], fromIndex: number, direction: -1 | 1, radius: number, stopAtPromoBoundary: boolean): ReferenceItem[] {
@@ -108,11 +111,17 @@ export function qualifySelection(selection: ReferenceSelection, recordCount: num
 }
 
 export function applyReferenceAudit(record: DailyRecord, selection: ReferenceSelection): DailyRecord {
-  // isObservedClean() (collectCleanSide) đã lọc chỉ giữ hasRecord=true nên sales không thể null ở đây.
-  const referenceValues = selection.references.map(item => item.record.baseDemand ?? requireObservedSales(item.record));
+  const referenceValues = selection.references.map(item => item.record.baseDemand ?? item.record.sales).filter((value): value is number => value !== null);
   return {
     ...record,
     referenceDates: selection.references.map(item => item.record.date),
+    referenceEvidence: selection.references.map(item => ({
+      date: item.record.date,
+      value: item.record.baseDemand ?? item.record.sales,
+      source: item.record.baseDemandSource,
+      selected: true,
+      reason: `Ngày sạch quan sát cách ${item.distance} ngày (${item.side === 'before' ? 'trước' : 'sau'}).`,
+    })),
     beforeReferenceDates: selection.before.map(item => item.record.date),
     afterReferenceDates: selection.after.map(item => item.record.date),
     referenceMedian: referenceValues.length >= 3 ? median(referenceValues) : null,
@@ -124,10 +133,15 @@ export function applyReferenceAudit(record: DailyRecord, selection: ReferenceSel
 export function buildPromoRegions(records: DailyRecord[], policy: SimulationPolicy): { indexes: number[]; codes: string[]; clustered: boolean }[] {
   const runs: { indexes: number[]; codes: string[]; clustered: boolean }[] = [];
   for (let index = 0; index < records.length; index++) {
-    if (!records[index].promoCode) continue;
-    const code = records[index].promoCode!;
+    // Chỉ DEEP_PROMO/PROMOTION_UNRESOLVED tạo vùng chuẩn hóa Chặng 4 — ALWAYS_ON giữ Sales làm nền.
+    if (!isBaselineExcludedPromo(records[index].promotionClass)) continue;
+    const code = records[index].promoCode ?? 'UNRESOLVED';
     const indexes = [index];
-    while (index + 1 < records.length && records[index + 1].promoCode === code) indexes.push(++index);
+    while (index + 1 < records.length &&
+           isBaselineExcludedPromo(records[index + 1].promotionClass) &&
+           (records[index + 1].promoCode ?? 'UNRESOLVED') === code) {
+      indexes.push(++index);
+    }
     const previous = runs.at(-1);
     if (!previous) {
       runs.push({ indexes, codes: [code], clustered: false });
@@ -148,8 +162,9 @@ export function buildPromoRegions(records: DailyRecord[], policy: SimulationPoli
 export function resetDailyRecord(record: DailyRecord): DailyRecord {
   return {
     ...record,
-    isStockout: false, stockoutReason: null, stockoutReviewRequired: false, baseDemand: null, baseSource: null,
-    referenceDates: [], beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null,
+    stockoutStatus: StockoutStatus.NONE, baseDemand: null, baseDemandSource: BaseDemandSource.SOURCE_DATA_GAP,
+    isCleanObservedReference: false, technicalFillStatus: TechnicalFillStatus.NOT_APPLICABLE,
+    referenceDates: [], referenceEvidence: [], beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null,
     balanceStatus: null, selectionReason: '',
   };
 }
@@ -227,74 +242,110 @@ export function seasonalFallbackSelection(source: DailyRecord[], index: number, 
   return { ...selection, reason: `[Cấp 3 · mùa vụ năm trước, lùi ${yearOffset} ngày] ${selection.reason}` };
 }
 
-/** RULE-05-003 Tầng 2 — mức đại diện chu kỳ = median các ngày nền hợp lệ SẴN CÓ trong chính chu kỳ trước khi lấp (không lấy từ ngày vừa lấp). */
-export function tier2RepresentativeFill(cycleRows: DailyRecord[]): { filled: DailyRecord[]; used: boolean } {
-  const validValues = cycleRows.filter(row => row.baseDemand !== null).map(row => row.baseDemand!);
-  const validCount = validValues.length;
-  // RULE-05-003 ngưỡng 12-14/8-11/1-7/0 (DEC-P03/P04/P05, ĐỀ XUẤT — cổng bật/tắt ở cấp gọi hàm).
-  if (validCount < 8) return { filled: cycleRows, used: false }; // 1-7: không dùng chính chu kỳ làm nguồn đại diện duy nhất; 0: không lấp toàn bộ chu kỳ.
-  if (validCount <= 11) {
-    // 8-11: chỉ lấp khi dữ liệu trải ít nhất 2/3 đoạn đầu-giữa-cuối.
-    const segmentSize = Math.ceil(cycleRows.length / 3);
-    const segments = [cycleRows.slice(0, segmentSize), cycleRows.slice(segmentSize, segmentSize * 2), cycleRows.slice(segmentSize * 2)];
-    const segmentsWithData = segments.filter(segment => segment.some(row => row.baseDemand !== null)).length;
-    if (segmentsWithData < 2) return { filled: cycleRows, used: false };
+const TECHNICAL_FILL_TARGETS = new Set<BaseDemandSource>([
+  BaseDemandSource.SOURCE_DATA_GAP,
+  BaseDemandSource.STOCKOUT_UNRESOLVED,
+  BaseDemandSource.PROMOTION_UNRESOLVED,
+]);
+const CLEAN_REFERENCE_SOURCES = new Set<BaseDemandSource>([
+  BaseDemandSource.CLEAN_OBSERVED_SALE,
+  BaseDemandSource.CLEAN_OBSERVED_ZERO,
+]);
+
+// Chỉ quét cửa sổ [index−radius, index+radius] thay vì map toàn bộ mảng ngày cho MỖI ngày cần lấp —
+// kết quả giống hệt (điều kiện distance ≤ radius đã giới hạn sẵn), nhưng Chặng 5 từ O(ngày²) về O(ngày×radius).
+function technicalReferences(records: readonly DailyRecord[], targetIndex: number, radius: number, limit: number) {
+  const found: { record: DailyRecord; distance: number }[] = [];
+  const lo = Math.max(0, targetIndex - radius);
+  const hi = Math.min(records.length - 1, targetIndex + radius);
+  for (let index = lo; index <= hi; index++) {
+    if (index === targetIndex) continue;
+    const record = records[index];
+    if (CLEAN_REFERENCE_SOURCES.has(record.baseDemandSource) && record.baseDemand !== null) found.push({ record, distance: Math.abs(index - targetIndex) });
   }
-  // 12-14 hoặc 8-11 đạt độ trải: lấp các ngày còn thiếu bằng median (RULE-05-004 — không nhân 1 ngày cho cả chu kỳ).
-  const representative = median(validValues);
-  const filled = cycleRows.map(row => row.baseDemand !== null ? row : {
-    ...row, baseDemand: representative, baseSource: 'technical-fill' as const,
-    selectionReason: `[Tầng 2 · mức đại diện chu kỳ, ${validCount}/${cycleRows.length} ngày nền] Median(${validValues.map(v => v.toLocaleString('vi-VN')).join('; ')}) = ${representative.toLocaleString('vi-VN')}.`,
-  });
-  return { filled, used: true };
+  return found
+    .sort((a, b) => a.distance - b.distance || a.record.date.localeCompare(b.record.date))
+    .slice(0, limit);
 }
 
-export function fillAndBuildCycles(records: DailyRecord[], cycleLength: number, minimumReferences: number, maxRadius: number, enableTier2CycleFallback = false): { daily: DailyRecord[]; cycles: CycleRecord[] } {
+export function fillMissingBaselines(records: DailyRecord[], cycleLength: number, minimumReferences: number, maxRadius: number): DailyRecord[] {
+  // `original` là snapshot TRƯỚC khi lấp (ngày đã lấp không được làm nguồn cho ngày khác).
+  // Không cần clone từng record: mọi phép lấp đều tạo object mới trong `filled`, không mutate record gốc.
+  const original: readonly DailyRecord[] = records;
   const filled = records.slice();
-  const fillPolicy: SimulationPolicy = { ...DEFAULT_POLICY, minimumReferences, maxReferenceRadius: maxRadius };
-  for (let index = 0; index < filled.length; index++) {
-    if (filled[index].baseDemand !== null) continue;
+  for (let index = 0; index < original.length; index++) {
+    const target = original[index];
+    if (target.baseDemand !== null || !TECHNICAL_FILL_TARGETS.has(target.baseDemandSource)) continue;
     const cycleStart = Math.floor(index / cycleLength) * cycleLength;
-    const originalCycle = records.slice(cycleStart, cycleStart + cycleLength);
-    if (originalCycle.length === cycleLength && originalCycle.every(row => row.baseDemand === null)) continue;
-    const selection = selectReferences(filled, index, index, fillPolicy);
-    const audited = applyReferenceAudit(filled[index], selection);
-    if (selection.status !== 'insufficient' && audited.referenceMedian !== null) {
-      filled[index] = { ...audited, baseDemand: audited.referenceMedian, baseSource: 'technical-fill', balanceStatus: selection.status };
+    const originalCycle = original.slice(cycleStart, cycleStart + cycleLength);
+    const validCount = originalCycle.filter(row => row.baseDemand !== null).length;
+    if (validCount === 0) {
+      filled[index] = { ...target, technicalFillStatus: TechnicalFillStatus.UNRESOLVED, selectionReason: 'Chu kỳ có 0 ngày baseDemand hợp lệ — BLOCKED_NO_VALID_BASELINE.' };
+      continue;
     }
-  }
-  const tier2UsedByCycleStart = new Set<number>();
-  if (enableTier2CycleFallback) {
-    for (let start = 0; start + cycleLength <= filled.length; start += cycleLength) {
-      const cycleRows = filled.slice(start, start + cycleLength);
-      if (!cycleRows.some(row => row.baseDemand === null)) continue; // Đã đủ 15/15 từ Tầng 1, không cần Tầng 2.
-      const { filled: cycleFilled, used } = tier2RepresentativeFill(cycleRows);
-      if (used) {
-        for (let index = start; index < start + cycleLength; index++) filled[index] = cycleFilled[index - start];
-        tier2UsedByCycleStart.add(start);
-      }
+    let references = technicalReferences(original, index, Math.min(7, maxRadius), 14);
+    if (references.length < minimumReferences) references = technicalReferences(original, index, maxRadius, 14);
+    const selectedDates = new Set(references.map(item => item.record.date));
+    // Cùng nguyên tắc cửa sổ ±maxRadius như technicalReferences — giữ nguyên thứ tự theo lịch.
+    const evidenceStart = Math.max(0, index - maxRadius);
+    const referenceEvidence = original
+      .slice(evidenceStart, index + maxRadius + 1)
+      .map((record, offset) => ({ record, distance: Math.abs(evidenceStart + offset - index) }))
+      .filter(item => item.distance > 0)
+      .map(item => ({
+        date: item.record.date,
+        value: item.record.baseDemand,
+        source: item.record.baseDemandSource,
+        selected: selectedDates.has(item.record.date),
+        reason: selectedDates.has(item.record.date)
+          ? `Được chọn: ngày sạch quan sát, cách ${item.distance} ngày.`
+          : CLEAN_REFERENCE_SOURCES.has(item.record.baseDemandSource) ? 'Bị loại: vượt giới hạn tối đa 14 nguồn gần nhất.' : `Bị loại: nguồn ${item.record.baseDemandSource} không phải CLEAN_OBSERVED_*.`
+      }));
+    if (references.length < minimumReferences) {
+      filled[index] = { ...target, technicalFillStatus: TechnicalFillStatus.UNRESOLVED, referenceEvidence, selectionReason: `Chỉ có ${references.length}/${minimumReferences} ngày sạch quan sát trong ±${maxRadius}.` };
+      continue;
     }
+    const values = references.map(item => item.record.baseDemand!);
+    const referenceMedian = median(values);
+    filled[index] = {
+      ...target,
+      baseDemand: referenceMedian,
+      baseDemandSource: BaseDemandSource.TECHNICAL_FILL,
+      technicalFillStatus: TechnicalFillStatus.FILLED,
+      isCleanObservedReference: false,
+      referenceDates: references.map(item => item.record.date),
+      // Tách trước/sau để Audit Explorer highlight đúng các ngày nguồn khi bấm vào ngày lấp.
+      beforeReferenceDates: references.filter(item => item.record.date < target.date).map(item => item.record.date),
+      afterReferenceDates: references.filter(item => item.record.date > target.date).map(item => item.record.date),
+      referenceEvidence,
+      referenceMedian,
+      selectionReason: `Median(${references.map(item => `${item.record.date}=${item.record.baseDemand}[${item.record.baseDemandSource}]`).join('; ')}) = ${referenceMedian}.`,
+    };
   }
+  return filled;
+}
+
+export function aggregateCycles(records: DailyRecord[], cycleLength: number): CycleRecord[] {
   const cycles: CycleRecord[] = [];
-  for (let start = 0; start + cycleLength <= filled.length; start += cycleLength) {
+  for (let start = 0; start + cycleLength <= records.length; start += cycleLength) {
     let baseDemand = 0, unresolvedDays = 0, cleanDays = 0, stockoutLiftedDays = 0, promoNormalizedDays = 0, technicalFillDays = 0, sourceRecordDays = 0, fallbackDays = 0;
     for (let index = start; index < start + cycleLength; index++) {
-      const row = filled[index];
+      const row = records[index];
       if (row.baseDemand === null) unresolvedDays++;
       else baseDemand += row.baseDemand;
-      if (row.hasRecord) sourceRecordDays++;
+      if (row.salesObservationStatus !== SalesObservationStatus.SOURCE_DATA_GAP) sourceRecordDays++;
       if (row.selectionReason.includes('Cấp 3 · mùa vụ năm trước')) fallbackDays++;
-      if (row.baseSource === 'clean') cleanDays++;
-      else if (row.baseSource === 'stockout-lifted') stockoutLiftedDays++;
-      else if (row.baseSource === 'promo-normalized') promoNormalizedDays++;
-      else if (row.baseSource === 'technical-fill') technicalFillDays++;
+      if (CLEAN_REFERENCE_SOURCES.has(row.baseDemandSource)) cleanDays++;
+      else if (row.baseDemandSource === BaseDemandSource.STOCKOUT_BASELINE) stockoutLiftedDays++;
+      else if (row.baseDemandSource === BaseDemandSource.PROMOTION_BASELINE) promoNormalizedDays++;
+      else if (row.baseDemandSource === BaseDemandSource.TECHNICAL_FILL) technicalFillDays++;
     }
     const emptyCycle = unresolvedDays === cycleLength;
     const locked = !emptyCycle && unresolvedDays === 0;
-    const tier2Filled = tier2UsedByCycleStart.has(start);
+    const tier2Filled = false;
     const cycleIndex = cycles.length + 1;
     cycles.push({
-      cycleIndex, dateStart: filled[start].date, dateEnd: filled[start + cycleLength - 1].date, days: cycleLength,
+      cycleIndex, dateStart: records[start].date, dateEnd: records[start + cycleLength - 1].date, days: cycleLength,
       baseDemand: unresolvedDays ? 0 : baseDemand,
       locked, emptyCycle,
       cleanDays, stockoutLiftedDays, promoNormalizedDays, technicalFillDays,
@@ -303,7 +354,12 @@ export function fillAndBuildCycles(records: DailyRecord[], cycleLength: number, 
       seasonRound: Math.floor((cycleIndex - 1) / 24) + 1, seasonPosition: ((cycleIndex - 1) % 24) + 1,
     });
   }
-  return { daily: filled, cycles };
+  return cycles;
+}
+
+export function fillAndBuildCycles(records: DailyRecord[], cycleLength: number, minimumReferences: number, maxRadius: number, _enableTier2CycleFallback = false): { daily: DailyRecord[]; cycles: CycleRecord[] } {
+  const daily = fillMissingBaselines(records, cycleLength, minimumReferences, maxRadius);
+  return { daily, cycles: aggregateCycles(daily, cycleLength) };
 }
 
 /**
@@ -312,13 +368,12 @@ export function fillAndBuildCycles(records: DailyRecord[], cycleLength: number, 
  * riêng) nên KHÔNG BAO GIỜ được trả về ở đây — ghi nhận tường minh thay vì giả vờ có khả năng này.
  */
 export function cycleStatus(sourceRecordDays: number, locked: boolean, emptyCycle: boolean, cleanDays: number, fallbackDays: number, cycleLength: number): CycleStatus {
-  if (sourceRecordDays === 0) return 'NO_SOURCE_RECORD';
+  if (emptyCycle) return 'BLOCKED_NO_VALID_BASELINE';
   if (locked) {
     if (fallbackDays > 0) return 'LOCKED_FALLBACK';
     if (cleanDays === cycleLength) return 'LOCKED_OBSERVED';
     return 'LOCKED_ADJUSTED';
   }
-  if (emptyCycle) return 'BASELINE_UNRESOLVED';
   return 'PARTIAL_BASELINE';
 }
 
@@ -371,6 +426,7 @@ const RESOLUTION_CATALOG: Record<ExceptionResolutionType, ExceptionResolutionOpt
 
 /** §5 LỆNH CODEX — mapping CycleStatus (chưa khóa) → phương án xử lý áp dụng được, theo đúng thứ tự đề nghị. */
 const CYCLE_RESOLUTION_MAP: Partial<Record<CycleStatus, ExceptionResolutionType[]>> = {
+  BLOCKED_NO_VALID_BASELINE: ['REFERENCE_STORE', 'SIMILAR_SKU', 'MANUAL_HISTORICAL_BASELINE', 'KEEP_UNRESOLVED'],
   PARTIAL_BASELINE: ['RESTORE_DAILY_BASELINE', 'REFERENCE_STORE', 'SIMILAR_SKU', 'MANUAL_HISTORICAL_BASELINE', 'KEEP_UNRESOLVED'],
   BASELINE_UNRESOLVED: ['RESTORE_DAILY_BASELINE', 'REFERENCE_STORE', 'SIMILAR_SKU', 'MANUAL_HISTORICAL_BASELINE', 'KEEP_UNRESOLVED'],
   // NO_SOURCE_RECORD — trước khi đề nghị phương án, phải kiểm tra trạng thái hoạt động cửa hàng/SKU (chưa có

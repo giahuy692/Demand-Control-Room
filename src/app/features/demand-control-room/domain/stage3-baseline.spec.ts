@@ -10,7 +10,7 @@ function dateAfter(iso: string, offset: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-describe('RULE-03-003 — cấp 3 mùa vụ năm trước + task ngoại lệ khi hết cấp', () => {
+describe('RULE-03-003 — stockout không đủ ngày sạch quan sát', () => {
   const start = '2024-01-01';
   const totalDays = 750;
   const stockoutIndex = 400; // ngày cần nâng nền
@@ -29,7 +29,7 @@ describe('RULE-03-003 — cấp 3 mùa vụ năm trước + task ngoại lệ kh
     });
   }
 
-  it('cấp 1 thất bại nhưng cấp 3 (mùa vụ năm trước) đủ căn cứ → nâng nền bằng cấp 3, không rơi về BASELINE_UNRESOLVED', () => {
+  it('không dùng ngày mùa vụ năm trước ngoài cửa sổ ±24 làm nguồn thay thế', () => {
     const dataset = realDatasetFromRows(buildRows(true));
     const engine = new SimulationEngine();
     engine.setDataset(dataset);
@@ -39,15 +39,13 @@ describe('RULE-03-003 — cấp 3 mùa vụ năm trước + task ngoại lệ kh
     const s1 = engine.run(1, null, policy);
     const s2 = engine.run(2, s1, policy);
     const s3 = engine.run(3, s2, policy);
-    const state = s3.states['P1'];
+    const state = s3.states['1'];
     const stockoutDate = dateAfter(start, stockoutIndex);
     const record = state.daily.find(row => row.date === stockoutDate)!;
 
-    expect(record.baseSource).toBe('stockout-lifted');
-    expect(record.baseDemand).not.toBeNull();
-    expect(record.selectionReason).toContain('Cấp 3');
-    expect(Number(s3.summary['Dùng cấp mùa vụ năm trước'])).toBeGreaterThan(0);
-    expect(s3.audit.some(line => line.includes('[RULE-03-003]'))).toBe(true);
+    expect(record.baseDemandSource).toBe('STOCKOUT_UNRESOLVED');
+    expect(record.baseDemand).toBeNull();
+    expect(s3.exceptions.some(item => item.date === stockoutDate && item.code === 'BASELINE_NOT_IDENTIFIABLE')).toBe(true);
   });
 
   it('cấp 1 và cấp 3 đều thất bại → BASELINE_UNRESOLVED (insufficient) và tạo task ngoại lệ BASELINE_NOT_IDENTIFIABLE gắn RULE-03-003', () => {
@@ -60,11 +58,11 @@ describe('RULE-03-003 — cấp 3 mùa vụ năm trước + task ngoại lệ kh
     const s1 = engine.run(1, null, policy);
     const s2 = engine.run(2, s1, policy);
     const s3 = engine.run(3, s2, policy);
-    const state = s3.states['P1'];
+    const state = s3.states['1'];
     const stockoutDate = dateAfter(start, stockoutIndex);
     const record = state.daily.find(row => row.date === stockoutDate)!;
 
-    expect(record.baseSource).toBe('insufficient');
+    expect(record.baseDemandSource).toBe('STOCKOUT_UNRESOLVED');
     expect(record.baseDemand).toBeNull();
     const task = s3.exceptions.find(item => item.date === stockoutDate);
     expect(task).toBeDefined();

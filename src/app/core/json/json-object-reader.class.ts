@@ -100,6 +100,15 @@ export class JsonObjectReader {
     return raw as T;
   }
 
+  /**
+   * Trường literal MỚI thêm vào hợp đồng theo triết lý default tương thích ngược:
+   * vắng mặt (dataset build trước khi có trường) → nhận fallback; có mặt thì phải hợp lệ.
+   */
+  optionalLiteral<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+    if (!(key in this.value)) return fallback;
+    return this.literal(key, allowed);
+  }
+
   nullableLiteral<T extends string>(key: string, allowed: readonly T[]): T | null {
     const raw = this.nullableString(key);
     if (raw === null) return null;

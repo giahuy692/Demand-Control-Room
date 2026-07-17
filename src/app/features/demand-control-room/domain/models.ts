@@ -1,4 +1,4 @@
-export type StageNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
+export type StageNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20;
 export type AbcClass = 'A' | 'B' | 'C' | 'N/A';
 export type XyzClass = 'X' | 'Y' | 'Z' | 'D';
 /**
@@ -8,10 +8,39 @@ export type XyzClass = 'X' | 'Y' | 'Z' | 'D';
  */
 export type DSubtype = 'D_NEW' | 'D_SHORT_HISTORY' | 'D_EXTRACT_TRUNCATED' | 'D_BASELINE_UNRESOLVED' | 'D_MANUAL_PLAN' | 'D_SIMILAR_SKU';
 export type LockStatus = 'locked' | 'review' | 'temporary' | 'exception';
-export type BaseSource = 'clean' | 'stockout-lifted' | 'promo-normalized' | 'technical-fill' | 'insufficient' | 'promo-defer';
 export type BalanceStatus = 'balanced' | 'temporary' | 'fixed' | 'insufficient' | null;
-/** 02-Hop-dong-du-lieu-dau-vao.md §5 — 4 trạng thái Sales, KHÔNG được rút gọn về 0/khác-0. */
-export type SalesStatus = 'OBSERVED' | 'OBSERVED_ZERO' | 'CONFIRMED_ZERO' | 'SOURCE_UNKNOWN' | 'OUTSIDE_ACTIVE_PERIOD';
+export enum SalesObservationStatus {
+  RECORDED_SALE = 'RECORDED_SALE',
+  CONFIRMED_ZERO = 'CONFIRMED_ZERO',
+  SOURCE_DATA_GAP = 'SOURCE_DATA_GAP',
+}
+export enum BaseDemandSource {
+  CLEAN_OBSERVED_SALE = 'CLEAN_OBSERVED_SALE',
+  CLEAN_OBSERVED_ZERO = 'CLEAN_OBSERVED_ZERO',
+  STOCKOUT_BASELINE = 'STOCKOUT_BASELINE',
+  PROMOTION_BASELINE = 'PROMOTION_BASELINE',
+  TECHNICAL_FILL = 'TECHNICAL_FILL',
+  STOCKOUT_UNRESOLVED = 'STOCKOUT_UNRESOLVED',
+  PROMOTION_UNRESOLVED = 'PROMOTION_UNRESOLVED',
+  SOURCE_DATA_GAP = 'SOURCE_DATA_GAP',
+}
+export enum PromotionStatus {
+  NONE = 'NONE',
+  PROMOTION = 'PROMOTION',
+}
+export enum StockoutStatus {
+  NONE = 'NONE',
+  ALL_DAY_STOCKOUT_CANDIDATE = 'ALL_DAY_STOCKOUT_CANDIDATE',
+  LATE_RECEIPT_STOCKOUT = 'LATE_RECEIPT_STOCKOUT',
+  DEPLETION_REVIEW = 'DEPLETION_REVIEW',
+  NEGATIVE_STOCK_REVIEW = 'NEGATIVE_STOCK_REVIEW',
+}
+export enum TechnicalFillStatus {
+  NOT_APPLICABLE = 'NOT_APPLICABLE',
+  PENDING = 'PENDING',
+  FILLED = 'FILLED',
+  UNRESOLVED = 'UNRESOLVED',
+}
 /** 02-Hop-dong-du-lieu-dau-vao.md §3.1 — trạng thái tính tồn; RULE-02-001 chỉ cho auto-stockout khi CALCULATED/NEGATIVE_REVIEW. */
 export type StockCalculationStatus = 'CALCULATED' | 'ANCHOR_MISSING' | 'NEGATIVE_REVIEW' | 'UNRESOLVED';
 /** 02-Hop-dong-du-lieu-dau-vao.md §6 — nguồn của openStock/closeStock: quan sát trực tiếp hay mang tiếp từ ngày trước (DEC-003). */
@@ -178,54 +207,92 @@ export interface SkuDefinition {
   extractIsTruncated: boolean;
 }
 
-export interface DailyRecord {
-  sku: string;
+export interface ReferenceEvidence {
   date: string;
-  openStock: number;
-  closeStock: number;
+  value: number | null;
+  source: BaseDemandSource | null;
+  selected: boolean;
+  reason: string;
+}
+
+/**
+ * 02-Hop-dong-du-lieu-dau-vao.md — phân loại ngày theo CTKM chính của mã hàng:
+ * - NO_PROMOTION/ALWAYS_ON: giữ nguyên Sales làm mức bán nền quan sát được (ALWAYS_ON
+ *   là ưu đãi thường trực đã thành một phần ổn định của tiêu thụ tự nhiên).
+ * - DEEP_PROMO: kích cầu mạnh (tbl_POLPromotion.[Type] IN (2, 7)) — KHÔNG dùng Sales
+ *   làm baseline, chuyển ngày sang Chặng 4 tìm mức bán tự nhiên.
+ * - PROMOTION_UNRESOLVED: có ưu đãi nhưng chưa xác định loại. QUYẾT ĐỊNH 2026-07-17:
+ *   Chặng 4 CHỈ xử lý mechanismType 2/7 — ngày UNRESOLVED được coi là ngày bán bình
+ *   thường cho baseline; Chặng 4 vẫn tạo task nhắc phân loại (RULE-04-001) để không
+ *   tự quyết im lặng.
+ */
+export type PromotionClass = 'NO_PROMOTION' | 'ALWAYS_ON' | 'DEEP_PROMO' | 'PROMOTION_UNRESOLVED';
+
+/** 02-Hop-dong-du-lieu-dau-vao.md §6 — tình trạng độ tin cậy của dữ liệu tồn ngày. */
+export type StockStatus = 'CALCULATED' | 'NEGATIVE_STOCK' | 'ANCHOR_MISSING';
+
+/** tbl_POLPromotion.[Type] được nghiệp vụ khóa là khuyến mãi kích cầu mạnh (DEEP_PROMO). */
+export const DEEP_PROMO_MECHANISM_TYPES: readonly number[] = [2, 7];
+
+/**
+ * true khi ngày này KHÔNG được dùng trực tiếp Sales làm baseline mà phải qua Chặng 4
+ * tìm mức bán tự nhiên (median ngày sạch quanh vùng CTKM). Theo quyết định 2026-07-17,
+ * CHỈ DEEP_PROMO (mechanismType 2/7) bị loại — mọi class khác là ngày bán bình thường.
+ */
+export function isBaselineExcludedPromo(promotionClass: PromotionClass): boolean {
+  return promotionClass === 'DEEP_PROMO';
+}
+
+export interface DailyDemandRecord {
+  sku: string;
+  barcode: string;
+  date: string;
+  openStock: number | null;
+  closeStock: number | null;
   /**
    * RULE-01-001/02-Hop-dong-du-lieu-dau-vao.md §5 — `null` khi ngày không có nguồn
    * thật (scaffold) hoặc chưa xác nhận đủ độ đầy đủ POS; SỐ (kể cả 0) chỉ khi có
    * bằng chứng nguồn thật. KHÔNG được coi 0 và null là cùng một giá trị [DEC-007].
    */
   sales: number | null;
-  /** 02-Hop-dong-du-lieu-dau-vao.md §5 — trạng thái đầy đủ của `sales`, xem `SalesStatus`. */
-  salesStatus: SalesStatus;
-  /**
-   * false ⇔ ngày này KHÔNG có bản ghi giao dịch nguồn (POS event-driven: không
-   * phát sinh giao dịch thì không sinh dòng) — `sales` ở trên là `null`,
-   * KHÔNG được coi là bán=0 đã xác nhận [nguyên tắc bất biến #2, C1 §3].
-   * openStock/closeStock vẫn tin được (tính từ sổ tồn kho, nguồn khác, độc lập
-   * với có giao dịch bán hay không). true ở mọi nơi khác (dữ liệu giả, hoặc
-   * dòng đã được nguồn xác nhận là bán=0 thật).
-   */
-  hasRecord: boolean;
-  /** Cờ đánh dấu các ngày bán = 0 do lấp nền (suy diễn từ việc có tồn nhưng không có giao dịch bán) */
-  isZeroSaleInferred: boolean;
+  hasSalesRecord: boolean;
+  salesObservationStatus: SalesObservationStatus;
   /** RULE-01-003 — true khi ngày này nằm trong vùng đọc tham chiếu trước ProcessingStartDate; không được đưa vào ABC/XYZ hay chuỗi học. */
   isReferenceOnly: boolean;
   /** RULE-02-003/02-Hop-dong-du-lieu-dau-vao.md §6 — trạng thái tính tồn của openStock/closeStock ngày này. */
   stockCalculationStatus: StockCalculationStatus;
   /** 02-Hop-dong-du-lieu-dau-vao.md §6 — openStock/closeStock quan sát trực tiếp hay mang tiếp từ ngày trước. */
   stockSource: StockSource;
-  receiptHour: string | null;
+  receiptHour: number | null;
   promoCode: string | null;
-  isStockout: boolean;
-  /** RULE-02-003 — true khi quyết định stockout của ngày này dựa trên tồn đang NEGATIVE_REVIEW; chặng ở trạng thái REVIEW_REQUIRED thay vì LOCKED thẳng. */
-  stockoutReviewRequired: boolean;
-  stockoutReason: 'late-receipt' | 'empty-all-day' | null;
+  promotionStatus: PromotionStatus;
+  stockoutStatus: StockoutStatus;
   baseDemand: number | null;
-  baseSource: BaseSource | null;
+  baseDemandSource: BaseDemandSource;
+  isCleanObservedReference: boolean;
+  technicalFillStatus: TechnicalFillStatus;
   referenceDates: string[];
+  referenceEvidence: ReferenceEvidence[];
   beforeReferenceDates: string[];
   afterReferenceDates: string[];
   referenceMedian: number | null;
   balanceStatus: BalanceStatus;
   selectionReason: string;
+  storeCode: number;
+  productCode: number;
+  promotionName: string | null;
+  promotionStartDate: string | null;
+  promotionEndDate: string | null;
+  promotionType: number | null;
+  promotionMechanismType: number | null;
+  promotionClass: PromotionClass;
+  stockStatus: StockStatus;
 }
 
+export type DailyRecord = DailyDemandRecord;
+
 /** RULE-05-005 — 8 trạng thái chu kỳ. OUTSIDE_ACTIVE_PERIOD/DATA_ERROR chưa có nguồn dữ liệu để phát hiện (không có ngày mở/ngưng bán SKU, không có cờ lỗi dữ liệu) nên hiện không bao giờ được gán — ghi nhận tường minh, không giả vờ có khả năng phát hiện. */
-export type CycleStatus = 'LOCKED_OBSERVED' | 'LOCKED_ADJUSTED' | 'LOCKED_FALLBACK' | 'PARTIAL_BASELINE' | 'NO_SOURCE_RECORD' | 'BASELINE_UNRESOLVED' | 'OUTSIDE_ACTIVE_PERIOD' | 'DATA_ERROR';
+export type CycleStatus = 'LOCKED_OBSERVED' | 'LOCKED_ADJUSTED' | 'LOCKED_FALLBACK' | 'PARTIAL_BASELINE' | 'NO_SOURCE_RECORD' | 'BASELINE_UNRESOLVED' | 'BLOCKED_NO_VALID_BASELINE' | 'OUTSIDE_ACTIVE_PERIOD' | 'DATA_ERROR';
 
 export interface CycleRecord {
   cycleIndex: number;
@@ -652,7 +719,7 @@ export interface DailySourceRecordV2 {
   readonly hasInventoryMovement: boolean;
   readonly totalStockDelta: number;
 
-  readonly receiptHour: string | null;
+  readonly receiptHour: number | null;
   readonly hasReceiptRecord: boolean;
   readonly receiptTimeSource: 'RECEIPT_DATE' | 'CREATE_TIME_FALLBACK' | 'UNRESOLVED' | null;
 

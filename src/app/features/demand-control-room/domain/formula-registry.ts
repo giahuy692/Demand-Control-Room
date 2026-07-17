@@ -50,7 +50,18 @@ function stage11ModelFormulas(state: Readonly<SkuPipelineState> | null): Formula
   }
 }
 
+type LegacyStageNumber = Exclude<StageNumber, 20>;
+
 export function getStageFormulas(stage: StageNumber, state: Readonly<SkuPipelineState> | null, policy: SimulationPolicy): FormulaBlock[] {
+  if (stage === 5) return [
+    f('Bổ sung ngày thiếu nền', String.raw`B_t^{\mathrm{fill}}=\operatorname{Median}\!\left(B_d\mid d\in\mathcal{R}_t^{\mathrm{observed\ clean}}\right)`, 'C5 §7'),
+    f('Giữ số bán đã ghi nhận', String.raw`B_t=\max\!\left(Q_t,B_t^{\mathrm{fill}}\right)`, 'C5 §7'),
+  ];
+  return getLegacyStageFormulas((stage > 5 ? stage - 1 : stage) as LegacyStageNumber, state, policy)
+    .map(block => ({ ...block, source: block.source.replace(/C(\d+)/g, (match, raw: string) => Number(raw) >= 5 ? `C${Number(raw) + 1}` : match) }));
+}
+
+function getLegacyStageFormulas(stage: LegacyStageNumber, state: Readonly<SkuPipelineState> | null, policy: SimulationPolicy): FormulaBlock[] {
   switch (stage) {
     case 1: return [
       f('Năm lập kế hoạch', String.raw`Y_{\mathrm{plan}}=\operatorname{YEAR}(D_{\mathrm{run}})`, 'C1 §4.1'),

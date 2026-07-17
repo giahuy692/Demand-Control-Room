@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Golden regression — baseline 19 chặng trước refactor (mock, deterministic) > fingerprint 19 chặng của SKU-001 khớp baseline 1`] = `
+exports[`Golden regression — baseline 20 chặng (mock, deterministic) > fingerprint 20 chặng của SKU-001 khớp baseline 1`] = `
 {
   "Chặng 01": {
     "cycles": 0,
@@ -12,28 +12,37 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
   "Chặng 02": {
     "reviewRequired": 0,
     "stockoutReasons": {
-      "empty-all-day": 5,
-      "late-receipt": 9,
+      "ALL_DAY_STOCKOUT_CANDIDATE": 5,
+      "LATE_RECEIPT_STOCKOUT": 9,
     },
     "stockouts": 14,
   },
   "Chặng 03": {
     "baseDemandSum": 7593.5,
     "baseSources": {
-      "clean": 1192,
-      "promo-defer": 39,
-      "stockout-lifted": 14,
+      "CLEAN_OBSERVED_SALE": 1192,
+      "PROMOTION_UNRESOLVED": 39,
+      "STOCKOUT_BASELINE": 14,
     },
   },
   "Chặng 04": {
     "baseDemandSum": 7830.5,
     "baseSources": {
-      "clean": 1192,
-      "promo-normalized": 39,
-      "stockout-lifted": 14,
+      "CLEAN_OBSERVED_SALE": 1192,
+      "PROMOTION_BASELINE": 39,
+      "STOCKOUT_BASELINE": 14,
     },
   },
   "Chặng 05": {
+    "baseSources": {
+      "CLEAN_OBSERVED_SALE": 1192,
+      "PROMOTION_BASELINE": 39,
+      "STOCKOUT_BASELINE": 14,
+    },
+    "technicalFillDays": 0,
+    "unresolvedDays": 0,
+  },
+  "Chặng 06": {
     "cycles": [
       "#1 LOCKED_OBSERVED L B=94 clean=15 lift=0 promo=0 fill=0 fb=0 unres=0 src=15 season=1/1",
       "#2 LOCKED_OBSERVED L B=93 clean=15 lift=0 promo=0 fill=0 fb=0 unres=0 src=15 season=1/2",
@@ -120,7 +129,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "#83 LOCKED_ADJUSTED L B=95 clean=14 lift=1 promo=0 fill=0 fb=0 unres=0 src=15 season=4/11",
     ],
   },
-  "Chặng 06": {
+  "Chặng 07": {
     "abc": "B",
     "abcOfficial": false,
     "abcRank": 4,
@@ -128,12 +137,12 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "annualQuantity": 2270,
     "annualValue": 429030000,
     "annualizationFactor": 1,
-    "cumulativeShare": 0.8411890555858238,
+    "cumulativeShare": 0.8339079874371995,
     "lockedCycles": 24,
     "periodQuantity": 2270,
-    "valueShare": 0.14252920149362816,
+    "valueShare": 0.14129551351070332,
   },
-  "Chặng 07": {
+  "Chặng 08": {
     "adi": 1,
     "classificationBlockReason": null,
     "classificationStatus": "CLASSIFIED",
@@ -143,21 +152,21 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "n": 24,
     "xyz": "X",
   },
-  "Chặng 08": {
+  "Chặng 09": {
     "capitalPriority": "Cao",
     "serviceLevel": 95,
   },
-  "Chặng 09": {
+  "Chặng 10": {
     "seasonality": "not-applicable",
   },
-  "Chặng 10": {
+  "Chặng 11": {
     "trend": "insufficient",
     "trendRates": [
       null,
       null,
     ],
   },
-  "Chặng 11": {
+  "Chặng 12": {
     "baseForecast": [
       94.66393546017497,
       94.66393546017497,
@@ -243,11 +252,11 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "wape": 0.02105866538152372,
     "wapePositive": 0.02105866538152372,
   },
-  "Chặng 12": {
+  "Chặng 13": {
     "promoConfidence": "auto",
     "promoFactor": 1.5,
   },
-  "Chặng 13": {
+  "Chặng 14": {
     "finalForecast": [
       94.66393546017497,
       110.4412580368708,
@@ -258,7 +267,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     ],
     "finalForecastStatus": "FUTURE_PROMO_APPLIED",
   },
-  "Chặng 14": {
+  "Chặng 15": {
     "availableStockAudit": {
       "actualStock": 326,
       "availableStock": 326,
@@ -332,7 +341,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "reasons": [],
     },
   },
-  "Chặng 15": {
+  "Chặng 16": {
     "safetyStock": 21,
     "safetyStockAudit": {
       "dBar": 99.92304298574025,
@@ -398,7 +407,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "z": 1.65,
     },
   },
-  "Chặng 16": {
+  "Chặng 17": {
     "capacityRisk": false,
     "cartonsOrdered": 142,
     "consolidationStatus": "not-applicable",
@@ -417,7 +426,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "Dự kiến thiếu 196 sản phẩm trước khi lô mới về.",
     ],
   },
-  "Chặng 17": {
+  "Chặng 18": {
     "additionalForProtection": 20.538257914441488,
     "atRiskQuantity": 0.46174208555851237,
     "basket": 2,
@@ -432,7 +441,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "reason": "Được cấp đủ theo 3 rổ phân bổ.",
     "status": "funded-full",
   },
-  "Chặng 18": {
+  "Chặng 19": {
     "duplicateReleaseBlocked": false,
     "purchaseOrderGroupKey": null,
     "quantityAfterApproval": 0,
@@ -444,7 +453,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "releasedQuantity": 0,
     "status": "awaiting-approval",
   },
-  "Chặng 19": {
+  "Chặng 20": {
     "actualDemand": 599,
     "averageReceiptDelayDays": 1.3333333333333333,
     "baseForecastBias": 0.015162846757908513,
@@ -481,7 +490,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
 }
 `;
 
-exports[`Golden regression — baseline 19 chặng trước refactor (mock, deterministic) > fingerprint 19 chặng của SKU-002 khớp baseline 1`] = `
+exports[`Golden regression — baseline 20 chặng (mock, deterministic) > fingerprint 20 chặng của SKU-002 khớp baseline 1`] = `
 {
   "Chặng 01": {
     "cycles": 0,
@@ -493,28 +502,37 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
   "Chặng 02": {
     "reviewRequired": 0,
     "stockoutReasons": {
-      "empty-all-day": 4,
-      "late-receipt": 7,
+      "ALL_DAY_STOCKOUT_CANDIDATE": 4,
+      "LATE_RECEIPT_STOCKOUT": 7,
     },
     "stockouts": 11,
   },
   "Chặng 03": {
     "baseDemandSum": 4380.5,
     "baseSources": {
-      "clean": 1037,
-      "promo-defer": 33,
-      "stockout-lifted": 10,
+      "CLEAN_OBSERVED_SALE": 1037,
+      "PROMOTION_UNRESOLVED": 33,
+      "STOCKOUT_BASELINE": 10,
     },
   },
   "Chặng 04": {
     "baseDemandSum": 4499,
     "baseSources": {
-      "clean": 1037,
-      "promo-normalized": 33,
-      "stockout-lifted": 10,
+      "CLEAN_OBSERVED_SALE": 1037,
+      "PROMOTION_BASELINE": 33,
+      "STOCKOUT_BASELINE": 10,
     },
   },
   "Chặng 05": {
+    "baseSources": {
+      "CLEAN_OBSERVED_SALE": 1037,
+      "PROMOTION_BASELINE": 33,
+      "STOCKOUT_BASELINE": 10,
+    },
+    "technicalFillDays": 0,
+    "unresolvedDays": 0,
+  },
+  "Chặng 06": {
     "cycles": [
       "#1 LOCKED_OBSERVED L B=21 clean=15 lift=0 promo=0 fill=0 fb=0 unres=0 src=15 season=1/1",
       "#2 LOCKED_OBSERVED L B=25 clean=15 lift=0 promo=0 fill=0 fb=0 unres=0 src=15 season=1/2",
@@ -590,7 +608,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "#72 LOCKED_OBSERVED L B=34 clean=15 lift=0 promo=0 fill=0 fb=0 unres=0 src=15 season=3/24",
     ],
   },
-  "Chặng 06": {
+  "Chặng 07": {
     "abc": "A",
     "abcOfficial": false,
     "abcRank": 2,
@@ -598,12 +616,12 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "annualQuantity": 1499.5,
     "annualValue": 674775000,
     "annualizationFactor": 1,
-    "cumulativeShare": 0.5462871912083239,
+    "cumulativeShare": 0.541558700934353,
     "lockedCycles": 24,
     "periodQuantity": 1499.5,
-    "valueShare": 0.2241688039015056,
+    "valueShare": 0.2222284691727498,
   },
-  "Chặng 07": {
+  "Chặng 08": {
     "adi": 1,
     "classificationBlockReason": null,
     "classificationStatus": "CLASSIFIED",
@@ -613,21 +631,21 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "n": 24,
     "xyz": "Y",
   },
-  "Chặng 08": {
+  "Chặng 09": {
     "capitalPriority": "Rất cao",
     "serviceLevel": 95,
   },
-  "Chặng 09": {
+  "Chặng 10": {
     "seasonality": "confirmed",
   },
-  "Chặng 10": {
+  "Chặng 11": {
     "trend": "insufficient",
     "trendRates": [
       null,
       null,
     ],
   },
-  "Chặng 11": {
+  "Chặng 12": {
     "baseForecast": [
       20.079109744207756,
       26.37658536936212,
@@ -715,11 +733,11 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "wape": 0.04730992187306655,
     "wapePositive": 0.04730992187306655,
   },
-  "Chặng 12": {
+  "Chặng 13": {
     "promoConfidence": "auto",
     "promoFactor": 1.5,
   },
-  "Chặng 13": {
+  "Chặng 14": {
     "finalForecast": [
       20.079109744207756,
       30.772682930922475,
@@ -730,7 +748,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     ],
     "finalForecastStatus": "FUTURE_PROMO_APPLIED",
   },
-  "Chặng 14": {
+  "Chặng 15": {
     "availableStockAudit": {
       "actualStock": 313,
       "availableStock": 313,
@@ -804,7 +822,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "reasons": [],
     },
   },
-  "Chặng 15": {
+  "Chặng 16": {
     "safetyStock": 21,
     "safetyStockAudit": {
       "dBar": 50.77297246556802,
@@ -867,7 +885,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "z": 1.65,
     },
   },
-  "Chặng 16": {
+  "Chặng 17": {
     "capacityRisk": false,
     "cartonsOrdered": 0,
     "consolidationStatus": "not-applicable",
@@ -884,7 +902,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "shortageBeforeNewLot": 0,
     "warnings": [],
   },
-  "Chặng 17": {
+  "Chặng 18": {
     "additionalForProtection": 0,
     "atRiskQuantity": 0,
     "basket": 1,
@@ -899,7 +917,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "reason": "Không có số đặt cần cấp vốn.",
     "status": "out-of-scope",
   },
-  "Chặng 18": {
+  "Chặng 19": {
     "duplicateReleaseBlocked": false,
     "purchaseOrderGroupKey": null,
     "quantityAfterApproval": 0,
@@ -910,7 +928,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "releasedQuantity": 0,
     "status": "not-issued",
   },
-  "Chặng 19": {
+  "Chặng 20": {
     "actualDemand": 295,
     "averageReceiptDelayDays": 2.3333333333333335,
     "baseForecastBias": 0.01563660939880037,
@@ -943,7 +961,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
 }
 `;
 
-exports[`Golden regression — baseline 19 chặng trước refactor (mock, deterministic) > fingerprint 19 chặng của SKU-003 khớp baseline 1`] = `
+exports[`Golden regression — baseline 20 chặng (mock, deterministic) > fingerprint 20 chặng của SKU-003 khớp baseline 1`] = `
 {
   "Chặng 01": {
     "cycles": 0,
@@ -955,28 +973,37 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
   "Chặng 02": {
     "reviewRequired": 0,
     "stockoutReasons": {
-      "empty-all-day": 1,
-      "late-receipt": 2,
+      "ALL_DAY_STOCKOUT_CANDIDATE": 1,
+      "LATE_RECEIPT_STOCKOUT": 2,
     },
     "stockouts": 3,
   },
   "Chặng 03": {
     "baseDemandSum": 711,
     "baseSources": {
-      "clean": 347,
-      "promo-defer": 11,
-      "stockout-lifted": 2,
+      "CLEAN_OBSERVED_SALE": 347,
+      "PROMOTION_UNRESOLVED": 11,
+      "STOCKOUT_BASELINE": 2,
     },
   },
   "Chặng 04": {
     "baseDemandSum": 711,
     "baseSources": {
-      "clean": 347,
-      "promo-normalized": 11,
-      "stockout-lifted": 2,
+      "CLEAN_OBSERVED_SALE": 347,
+      "PROMOTION_BASELINE": 11,
+      "STOCKOUT_BASELINE": 2,
     },
   },
   "Chặng 05": {
+    "baseSources": {
+      "CLEAN_OBSERVED_SALE": 347,
+      "PROMOTION_BASELINE": 11,
+      "STOCKOUT_BASELINE": 2,
+    },
+    "technicalFillDays": 0,
+    "unresolvedDays": 0,
+  },
+  "Chặng 06": {
     "cycles": [
       "#1 LOCKED_ADJUSTED L B=0 clean=13 lift=0 promo=2 fill=0 fb=0 unres=0 src=15 season=1/1",
       "#2 LOCKED_OBSERVED L B=0 clean=15 lift=0 promo=0 fill=0 fb=0 unres=0 src=15 season=1/2",
@@ -1004,7 +1031,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "#24 LOCKED_OBSERVED L B=90 clean=15 lift=0 promo=0 fill=0 fb=0 unres=0 src=15 season=1/24",
     ],
   },
-  "Chặng 06": {
+  "Chặng 07": {
     "abc": "C",
     "abcOfficial": false,
     "abcRank": 5,
@@ -1012,12 +1039,12 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "annualQuantity": 711,
     "annualValue": 227520000,
     "annualizationFactor": 1,
-    "cumulativeShare": 0.9167740820963949,
+    "cumulativeShare": 0.9088387737084515,
     "lockedCycles": 24,
     "periodQuantity": 711,
-    "valueShare": 0.075585026510571,
+    "valueShare": 0.07493078627125195,
   },
-  "Chặng 07": {
+  "Chặng 08": {
     "adi": 3,
     "classificationBlockReason": null,
     "classificationStatus": "CLASSIFIED",
@@ -1027,21 +1054,21 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "n": 24,
     "xyz": "Z",
   },
-  "Chặng 08": {
+  "Chặng 09": {
     "capitalPriority": "Rất thấp",
     "serviceLevel": 80,
   },
-  "Chặng 09": {
+  "Chặng 10": {
     "seasonality": "not-applicable",
   },
-  "Chặng 10": {
+  "Chặng 11": {
     "trend": "insufficient",
     "trendRates": [
       null,
       null,
     ],
   },
-  "Chặng 11": {
+  "Chặng 12": {
     "baseForecast": [
       0,
       0,
@@ -1072,11 +1099,11 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "wape": 0.0055248618784530384,
     "wapePositive": 0.0055248618784530384,
   },
-  "Chặng 12": {
+  "Chặng 13": {
     "promoConfidence": "blocked",
     "promoFactor": null,
   },
-  "Chặng 13": {
+  "Chặng 14": {
     "finalForecast": [
       0,
       0,
@@ -1087,7 +1114,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     ],
     "finalForecastStatus": "PASSTHROUGH_NO_FUTURE_PROMO",
   },
-  "Chặng 14": {
+  "Chặng 15": {
     "availableStockAudit": {
       "actualStock": 209,
       "availableStock": 209,
@@ -1161,7 +1188,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "reasons": [],
     },
   },
-  "Chặng 15": {
+  "Chặng 16": {
     "safetyStock": 47,
     "safetyStockAudit": {
       "dBar": 30.166666666666668,
@@ -1217,7 +1244,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
       "z": 1.28,
     },
   },
-  "Chặng 16": {
+  "Chặng 17": {
     "capacityRisk": false,
     "cartonsOrdered": 0,
     "consolidationStatus": "not-applicable",
@@ -1234,7 +1261,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "shortageBeforeNewLot": 0,
     "warnings": [],
   },
-  "Chặng 17": {
+  "Chặng 18": {
     "additionalForProtection": 0,
     "atRiskQuantity": 0,
     "basket": 1,
@@ -1249,7 +1276,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "reason": "Không có số đặt cần cấp vốn.",
     "status": "out-of-scope",
   },
-  "Chặng 18": {
+  "Chặng 19": {
     "duplicateReleaseBlocked": false,
     "purchaseOrderGroupKey": null,
     "quantityAfterApproval": 0,
@@ -1260,7 +1287,7 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "releasedQuantity": 0,
     "status": "not-issued",
   },
-  "Chặng 19": {
+  "Chặng 20": {
     "actualDemand": 184,
     "averageReceiptDelayDays": 2.3333333333333335,
     "baseForecastBias": -0.016304347826086956,
@@ -1293,47 +1320,48 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
 }
 `;
 
-exports[`Golden regression — baseline 19 chặng trước refactor (mock, deterministic) > phân loại + phát hành của TOÀN danh mục mock khớp baseline 1`] = `
+exports[`Golden regression — baseline 20 chặng (mock, deterministic) > phân loại + phát hành của TOÀN danh mục mock khớp baseline 1`] = `
 [
-  "SKU-001 B/X SL=95 release=awaiting-approval",
-  "SKU-002 A/Y SL=95 release=not-issued",
-  "SKU-003 C/Z SL=80 release=not-issued",
-  "SKU-004 A/X SL=97 release=awaiting-approval",
-  "SKU-005 A/X SL=97 release=awaiting-approval",
-  "SKU-006 C/Z SL=80 release=not-issued",
-  "SKU-007 C/Y SL=85 release=not-issued",
-  "SKU-008 C/X SL=90 release=not-issued",
-  "SKU-009 C/Y SL=85 release=not-issued",
-  "SKU-010 C/CLASSIFICATION_BLOCKED SL=— release=not-issued",
-  "SKU-011 N/A/D(D_NEW) SL=— release=not-issued",
-  "SKU-012 N/A/D(D_EXTRACT_TRUNCATED) SL=— release=not-issued",
-  "SKU-013 N/A/D(D_EXTRACT_TRUNCATED) SL=— release=not-issued",
-  "SKU-014 C/NO_POSITIVE_DEMAND_REVIEW SL=— release=not-issued",
+  "SKU-001 B/X SL=— release=—",
+  "SKU-002 A/Y SL=— release=—",
+  "SKU-003 C/Z SL=— release=—",
+  "SKU-004 A/X SL=— release=—",
+  "SKU-005 A/X SL=— release=—",
+  "SKU-006 C/CLASSIFICATION_BLOCKED SL=— release=—",
+  "SKU-007 C/Y SL=— release=—",
+  "SKU-008 C/X SL=— release=—",
+  "SKU-009 C/Y SL=— release=—",
+  "SKU-010 C/CLASSIFICATION_BLOCKED SL=— release=—",
+  "SKU-011 N/A/D(D_NEW) SL=— release=—",
+  "SKU-012 N/A/D(D_EXTRACT_TRUNCATED) SL=— release=—",
+  "SKU-013 N/A/D(D_EXTRACT_TRUNCATED) SL=— release=—",
+  "SKU-014 C/NO_POSITIVE_DEMAND_REVIEW SL=— release=—",
 ]
 `;
 
-exports[`Golden regression — baseline 19 chặng trước refactor (mock, deterministic) > summary toàn danh mục của từng chặng khớp baseline 1`] = `
+exports[`Golden regression — baseline 20 chặng (mock, deterministic) > summary toàn danh mục của từng chặng khớp baseline 1`] = `
 {
   "Chặng 01": {
     "Bắt đầu lịch sử": "2023-01-01",
+    "CONFIRMED_ZERO": 0,
     "Chu kỳ đầy đủ N": 83,
     "Kết thúc lịch sử": "2026-05-31",
     "Nguồn dữ liệu": "Dữ liệu giả",
     "Ngày dư r": 2,
+    "RECORDED_SALE": 5865,
     "SKU": 14,
+    "SOURCE_DATA_GAP": 0,
     "Tổng ngày D": 1247,
   },
   "Chặng 02": {
-    "Ngày chặn do thiếu căn cứ tồn": 0,
-    "Ngày stockout": 151,
-    "Ngày tồn âm cần xem xét": 0,
-    "Điều kiện nghiệp vụ": 2,
+    "ALL_DAY_STOCKOUT_CANDIDATE": 116,
+    "DEPLETION_REVIEW": 0,
+    "LATE_RECEIPT_STOCKOUT": 35,
+    "NEGATIVE_STOCK_REVIEW": 0,
   },
   "Chặng 03": {
-    "Dùng cấp mùa vụ năm trước": 0,
-    "Ngày thiếu căn cứ": 14,
-    "Ngày đã nâng nền": 129,
-    "k tối đa mỗi phía": 7,
+    "Ngày stockout chưa giải quyết": 14,
+    "Ngày stockout có nền": 129,
   },
   "Chặng 04": {
     "Mã CTKM": 1,
@@ -1342,22 +1370,29 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "Ngày không xác định được nền": 0,
   },
   "Chặng 05": {
+    "Ngày chưa đủ căn cứ": 14,
+    "Ngày được bổ sung": 0,
+    "Số 0 thật được giữ nguyên": 0,
+  },
+  "Chặng 06": {
     "BASELINE_UNRESOLVED": 0,
+    "BLOCKED_NO_VALID_BASELINE": 0,
     "Chu kỳ 0 ngày có nền": 0,
-    "Chu kỳ lấp Tầng 2": 1,
-    "Chu kỳ thiếu một phần nền": 1,
-    "Chu kỳ đã khóa": 390,
-    "LOCKED_ADJUSTED": 112,
+    "Chu kỳ lấp Tầng 2": 0,
+    "Chu kỳ thiếu một phần nền": 2,
+    "Chu kỳ đã khóa": 389,
+    "LOCKED_ADJUSTED": 111,
     "LOCKED_FALLBACK": 0,
     "LOCKED_OBSERVED": 278,
     "NO_SOURCE_RECORD": 0,
-    "Ngoại lệ cấp chu kỳ (RULE-05-006)": 1,
-    "PARTIAL_BASELINE": 1,
+    "Ngoại lệ cấp chu kỳ (RULE-05-006)": 2,
+    "Ngày được lấp kỹ thuật": 0,
+    "PARTIAL_BASELINE": 2,
   },
-  "Chặng 06": {
-    "ANNUALIZED_WITH_GAPS": 3,
+  "Chặng 07": {
+    "ANNUALIZED_WITH_GAPS": 4,
     "Chưa xếp hạng": 3,
-    "FULL_COVERAGE (24/24)": 8,
+    "FULL_COVERAGE (24/24)": 7,
     "NOT_RATED (<6 CK khóa)": 3,
     "Nhóm A": 3,
     "Nhóm B": 1,
@@ -1365,79 +1400,79 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "SKU ABC chính thức": 0,
     "SKU chỉ xếp hạng mô phỏng": 14,
   },
-  "Chặng 07": {
-    "Chặn phân loại (đứt quãng)": 1,
+  "Chặng 08": {
+    "Chặn phân loại (đứt quãng)": 2,
     "Không có nhu cầu dương": 1,
     "Nhóm D": 3,
     "Nhóm X": 4,
     "Nhóm Y": 3,
-    "Nhóm Z": 2,
-  },
-  "Chặng 08": {
-    "Chính sách D/ngoại lệ": 5,
-    "Phiên chính sách": "DP-2026.06-v1",
-    "Ô ma trận đã khóa": 9,
+    "Nhóm Z": 1,
   },
   "Chặng 09": {
-    "CK khóa - fallback mùa vụ (LOCKED_FALLBACK)": 0,
-    "CK khóa - quan sát thuần (LOCKED_OBSERVED)": 278,
-    "CK khóa - đã điều chỉnh (LOCKED_ADJUSTED)": 112,
-    "Không mùa vụ rõ": 0,
-    "Mùa vụ xác nhận": 1,
-    "Thiếu cấu trúc": 2,
+    "Chính sách D/ngoại lệ": 6,
+    "Phiên chính sách": "DP-2026.06-v1",
+    "Ô ma trận đã khóa": 8,
   },
   "Chặng 10": {
     "CK khóa - fallback mùa vụ (LOCKED_FALLBACK)": 0,
     "CK khóa - quan sát thuần (LOCKED_OBSERVED)": 278,
-    "CK khóa - đã điều chỉnh (LOCKED_ADJUSTED)": 112,
-    "Không xu hướng": 1,
-    "Xu hướng giảm": 0,
-    "Xu hướng tăng": 0,
+    "CK khóa - đã điều chỉnh (LOCKED_ADJUSTED)": 111,
+    "Không mùa vụ rõ": 0,
+    "Mùa vụ xác nhận": 1,
+    "Thiếu cấu trúc": 2,
   },
   "Chặng 11": {
     "CK khóa - fallback mùa vụ (LOCKED_FALLBACK)": 0,
     "CK khóa - quan sát thuần (LOCKED_OBSERVED)": 278,
-    "CK khóa - đã điều chỉnh (LOCKED_ADJUSTED)": 112,
-    "Chuỗi học bị đứt quãng": 1,
+    "CK khóa - đã điều chỉnh (LOCKED_ADJUSTED)": 111,
+    "Không xu hướng": 1,
+    "Xu hướng giảm": 0,
+    "Xu hướng tăng": 0,
+  },
+  "Chặng 12": {
+    "CK khóa - fallback mùa vụ (LOCKED_FALLBACK)": 0,
+    "CK khóa - quan sát thuần (LOCKED_OBSERVED)": 278,
+    "CK khóa - đã điều chỉnh (LOCKED_ADJUSTED)": 111,
+    "Chuỗi học bị đứt quãng": 2,
     "Cần kiểm tra": 14,
     "Mô hình đã khóa": 0,
     "Tầm dự báo": "6 chu kỳ",
   },
-  "Chặng 12": {
+  "Chặng 13": {
     "Bị chặn": 5,
     "Cần duyệt": 1,
     "Hệ số tự khóa": 5,
     "Không có mẫu": 3,
   },
-  "Chặng 13": {
+  "Chặng 14": {
     "Chu kỳ tương lai": 6,
     "Kế hoạch KM đã xác nhận": 26,
     "Nhánh áp K NOT_EVALUATED": 8,
     "PASSTHROUGH_NO_FUTURE_PROMO": 9,
     "SKU cần duyệt K": 1,
   },
-  "Chặng 14": {
+  "Chặng 15": {
     "Lô bị loại": 13,
     "Mốc nguồn hàng": 79,
     "SKU chờ kiểm tra nguồn hàng": 0,
     "SKU có vị thế tồn": 14,
     "Trạng thái vận hành": "SIMULATION_ONLY",
   },
-  "Chặng 15": {
+  "Chặng 16": {
     "Dò theo percentile": 4,
-    "Dùng công thức Z×√(...)": 5,
-    "SKU đã tính SS": 9,
+    "Dùng công thức Z×√(...)": 4,
+    "SKU đã tính SS": 8,
     "Trạng thái vận hành": "SIMULATION_ONLY",
     "Đơn vị LT": "chu kỳ 15 ngày",
   },
-  "Chặng 16": {
-    "Dòng thiếu điều kiện": 8,
+  "Chặng 17": {
+    "Dòng thiếu điều kiện": 9,
     "SKU có nguy cơ thiếu trước lô mới": 3,
     "Trạng thái vận hành": "SIMULATION_ONLY",
     "Tổng số cần trước làm tròn": 293,
     "Tổng số đặt sau MOQ": 294,
   },
-  "Chặng 17": {
+  "Chặng 18": {
     "Dòng bị cắt/hoãn": 0,
     "Ngân sách kỳ": 4000000000,
     "Ngân sách đã cấp": 18360000,
@@ -1445,17 +1480,17 @@ exports[`Golden regression — baseline 19 chặng trước refactor (mock, dete
     "Tổng giá trị đề xuất": 18360000,
     "Đề xuất vượt ngân sách": 0,
   },
-  "Chặng 18": {
+  "Chặng 19": {
     "Dòng chờ bổ sung": 0,
     "Dòng chờ duyệt": 3,
     "Dòng không phát hành": 11,
     "Dòng phát hành": 0,
     "Trạng thái vận hành": "SIMULATION_ONLY",
   },
-  "Chặng 19": {
+  "Chặng 20": {
     "SKU phát sinh thiếu hàng": 5,
     "Trạng thái vận hành": "SIMULATION_ONLY",
-    "WAPE danh mục": 0.3093588897195239,
+    "WAPE danh mục": 0.3031599834201951,
     "Đề xuất cho phiên tương lai": 6,
   },
 }
