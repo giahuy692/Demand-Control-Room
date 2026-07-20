@@ -124,6 +124,31 @@ describe('buildCalendarScaffold — phân loại CTKM theo PromotionClass (02-Ho
     expect(result[0].promotionClass).toBe('ALWAYS_ON');
     expect(result[0].promotionStatus).toBe(PromotionStatus.NONE);
   });
+
+  it('ngày scaffold (không có dòng nguồn) trong khoảng interval mang đúng tên CTKM của interval, không rơi về null', () => {
+    const rows = [sourceRow('2026-01-01', 5)];
+    const intervals = [{ sku: 'P1', code: 'KM-TT', name: 'ƯU ĐÃI BEST PRICE', startDate: '2026-01-02', endDate: '2026-01-02', promotionClass: 'DEEP_PROMO' as const }];
+    const result = buildCalendarScaffold('P1', rows, '2026-01-01', '2026-01-02', () => false, COMPLETE, intervals);
+
+    expect(result[1].promoCode).toBe('KM-TT');
+    expect(result[1].promotionName).toBe('ƯU ĐÃI BEST PRICE');
+  });
+
+  it('dòng nguồn có promoCode nhưng không tự mang tên: lấy tên từ interval trùng ngày thay vì để null', () => {
+    const rows = [sourceRow('2026-01-02', 50, { promoCode: 'KM-TT', promotionClass: 'DEEP_PROMO', promotionName: null })];
+    const intervals = [{ sku: 'P1', code: 'KM-TT', name: 'ƯU ĐÃI BEST PRICE', startDate: '2026-01-01', endDate: '2026-01-03', promotionClass: 'DEEP_PROMO' as const }];
+    const result = buildCalendarScaffold('P1', rows, '2026-01-02', '2026-01-02', () => false, COMPLETE, intervals);
+
+    expect(result[0].promotionName).toBe('ƯU ĐÃI BEST PRICE');
+  });
+
+  it('dòng nguồn đã tự mang tên riêng thì giữ nguyên, không bị interval ghi đè', () => {
+    const rows = [sourceRow('2026-01-02', 50, { promoCode: 'KM-TT', promotionClass: 'DEEP_PROMO', promotionName: 'TÊN GỐC TỪ SQL' })];
+    const intervals = [{ sku: 'P1', code: 'KM-TT', name: 'TÊN INTERVAL KHÁC', startDate: '2026-01-01', endDate: '2026-01-03', promotionClass: 'DEEP_PROMO' as const }];
+    const result = buildCalendarScaffold('P1', rows, '2026-01-02', '2026-01-02', () => false, COMPLETE, intervals);
+
+    expect(result[0].promotionName).toBe('TÊN GỐC TỪ SQL');
+  });
 });
 
 describe('buildCalendarScaffold — RULE-02: tính tồn ngày scaffold (02-Hop-dong-du-lieu-dau-vao.md §6)', () => {

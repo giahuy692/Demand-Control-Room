@@ -9,6 +9,11 @@
     </div>
 
     <div class="run-actions">
+      <div class="stage-nav-actions header-stage-nav" aria-label="Chuyển chặng">
+        <button type="button" aria-label="Chặng trước" title="Chặng trước" (click)="store.goPrevious()" [disabled]="store.activeStage() === 1">←</button>
+        <span class="header-stage-indicator">C{{ store.activeStage().toString().padStart(2, '0') }}</span>
+        <button type="button" aria-label="Chặng tiếp theo" title="Chặng tiếp theo" (click)="store.goNext()" [disabled]="store.activeStage() >= 20 || store.isRunning()">→</button>
+      </div>
       <div class="source-switch" aria-label="Nguồn dữ liệu mô phỏng">
         <button type="button" [class.active]="store.dataSource() === 'real'" [attr.aria-pressed]="store.dataSource() === 'real'" (click)="selectDataSource('real')" [disabled]="store.isRunning() || store.isLoadingDataSource()">Dữ liệu thật</button>
         <button type="button" [class.active]="store.dataSource() === 'mock'" [attr.aria-pressed]="store.dataSource() === 'mock'" (click)="selectDataSource('mock')" [disabled]="store.isRunning() || store.isLoadingDataSource()">Dữ liệu giả</button>
@@ -69,19 +74,36 @@
               <header><div><h3>Cấu trúc nhu cầu</h3><p>{{ chart.subtitle }}</p></div><span>{{ chart.unit }}</span></header>
               <div class="demand-chart-plot" role="img" [attr.aria-label]="chart.ariaLabel">
                 @for (bar of chart.bars; track bar.key) {
-                  <i [class.observed]="bar.kind === 'observed'" [class.adjusted]="bar.kind === 'adjusted'" [class.missing]="bar.kind === 'missing'" [class.forecast]="bar.kind === 'forecast'" [class.promo]="bar.kind === 'promo'" [class.stockout]="bar.kind === 'stockout'" [class.inferred]="bar.kind === 'inferred'" [style.height.%]="bar.height" [title]="bar.tooltip"></i>
+                  <span class="demand-chart-slot">
+                    <i [class.observed]="bar.kind === 'observed'" [class.adjusted]="bar.kind === 'adjusted'" [class.missing]="bar.kind === 'missing'" [class.forecast]="bar.kind === 'forecast'" [class.promo]="bar.kind === 'promo'" [class.inferred]="bar.kind === 'inferred'" [class.stockout]="bar.kind === 'stockout'" [style.height.%]="bar.height" [title]="bar.tooltip"></i>
+                    @if (bar.rawHeight !== null) {
+                      <b class="demand-chart-raw-mark" [style.bottom.%]="bar.rawHeight" [title]="bar.rawTooltip"></b>
+                    }
+                  </span>
                 }
               </div>
               <div class="demand-chart-axis"><span>{{ chart.firstLabel }}</span><span>{{ chart.lastLabel }}</span></div>
               <div class="demand-chart-legend">
-                <span><i class="observed"></i>Quan sát</span><span><i class="adjusted"></i>Đã chỉnh nền</span>@if (hasBarKind(chart, 'promo')) { <span><i class="promo"></i>CTKM</span> }@if (hasBarKind(chart, 'stockout')) { <span><i class="stockout"></i>Stockout</span> }@if (hasBarKind(chart, 'inferred')) { <span><i class="inferred"></i>0 xác nhận</span> }@if (hasBarKind(chart, 'forecast')) { <span><i class="forecast"></i>Dự báo</span> }<span><i class="missing"></i>Thiếu/chưa khóa{{ chart.missingCount ? ' (' + chart.missingCount + ')' : '' }}</span>
+                @if (hasBarKind(chart, 'observed') || hasBarKind(chart, 'inferred') || hasRawMarks(chart)) { <span><i class="actual"></i>Thực tế</span> }
+                @if (hasBarKind(chart, 'adjusted')) { <span><i class="adjusted"></i>Đã chỉnh</span> }
+                @if (hasBarKind(chart, 'promo')) { <span><i class="promo"></i>CTKM</span> }
+                @if (hasBarKind(chart, 'stockout')) { <span><i class="stockout"></i>Stockout</span> }
+                @if (hasBarKind(chart, 'forecast')) { <span><i class="forecast"></i>Dự báo</span> }
+                <span><i class="missing"></i>Thiếu dữ liệu{{ chart.missingCount ? ' (' + chart.missingCount + ')' : '' }}</span>
               </div>
             </section>
           }
         @if (store.activeStage() <= 5) {
           <div class="audit-toolbar">
-            <button type="button" (click)="jumpToAnomaly('stockout')"><i class="dot stockout"></i>Stockout</button>
-            <button type="button" (click)="jumpToAnomaly('promo')"><i class="dot promo"></i>CTKM</button>
+            @if (stageAnomalyFocus() === 'stockout') {
+              <button type="button" (click)="jumpToAnomaly('stockout')"><i class="dot stockout"></i>Stockout</button>
+            }
+            @if (stageAnomalyFocus() === 'promo') {
+              <button type="button" (click)="jumpToAnomaly('promo')"><i class="dot promo"></i>CTKM</button>
+            }
+            @if (stageAnomalyFocus() === 'gap') {
+              <button type="button" (click)="jumpToAnomaly('gap')"><i class="dot gap"></i>Thiếu nền</button>
+            }
             <button type="button" class="clear" (click)="clearAuditSelection()">Bỏ ghim</button>
             @if (auditDailyRows().length > renderedAuditDailyRows().length || auditRowsExpanded()) {
               <button type="button" (click)="auditRowsExpanded.set(!auditRowsExpanded())">{{ auditRowsExpanded() ? 'Chỉ 300 ngày gần nhất' : 'Hiện thêm ' + hiddenAuditRowCount() + ' ngày' }}</button>
@@ -95,7 +117,7 @@
           @if (selectedAuditRow()) {
             <div class="audit-context">
               <div><span>{{ selectedAuditRow()!.date }}</span><b>{{ statusLabel(selectedAuditRow()!) }}</b></div>
-              <p>{{ selectedAuditRow()!.selectionReason || 'Bản ghi đang được kiểm tra.' }}</p>
+              <p>{{ auditContextNote(selectedAuditRow()!) }}</p>
               <code>Median = {{ format(selectedAuditRow()!.referenceMedian, 1) }} · {{ selectedAuditRow()!.beforeReferenceDates.length }} trước + {{ selectedAuditRow()!.afterReferenceDates.length }} sau</code>
             </div>
           }
@@ -104,12 +126,12 @@
               <thead><tr><th>Ngày</th><th>Nền</th><th>Độ tin cậy</th><th>Bán</th><th>SO</th><th>CTKM</th><th>Tồn cuối</th><th>Nhập</th><th>Tồn đầu</th></tr></thead>
               <tbody>
                 @for (row of renderedAuditDailyRows(); track row.date) {
-                  <tr [id]="'audit-' + row.date" [class.row-stockout]="row.stockoutStatus !== 'NONE'" [class.row-promo]="row.promoCode" [class.row-focus]="auditDate() === row.date" [class.row-reference-before]="isReferenceBefore(row)" [class.row-reference-after]="isReferenceAfter(row)" (click)="selectAuditRow(row)" tabindex="0" (keydown.enter)="selectAuditRow(row)">
+                  <tr [id]="'audit-' + row.date" [class.row-stockout]="stageAnomalyFocus() === 'stockout' && row.stockoutStatus !== 'NONE' && row.promotionClass !== 'DEEP_PROMO'" [class.row-promo]="stageAnomalyFocus() === 'promo' && row.promotionClass === 'DEEP_PROMO'" [class.row-focus]="auditDate() === row.date" [class.row-reference-before]="isReferenceBefore(row)" [class.row-reference-after]="isReferenceAfter(row)" (click)="selectAuditRow(row)" tabindex="0" (keydown.enter)="selectAuditRow(row)">
                     <td>{{ row.date }}</td>
                     <td class="base-value">{{ format(row.baseDemand, 1) }}</td>
                     <td><span class="balance-chip" [class]="'balance-chip ' + statusClass(row)">{{ statusLabel(row) }}</span></td>
-                    <td class="value">@if (row.salesObservationStatus === 'CONFIRMED_ZERO') { <span title="Bán = 0 do không có lịch sử giao dịch gốc" style="color:var(--faint)">0*</span> } @else { {{ row.sales }} }</td>
-                    <td>@if (row.stockoutStatus !== 'NONE') { <span class="data-chip so">SO</span> } @else { — }</td>
+                    <td class="value" [class.sales-gap]="row.salesObservationStatus === 'SOURCE_DATA_GAP'" [attr.title]="row.salesObservationStatus === 'SOURCE_DATA_GAP' ? 'Bán = null do không có lịch sử giao dịch gốc — Chặng 5 sẽ lấp kỹ thuật hoặc để lại chưa đủ căn cứ' : null">@if (row.salesObservationStatus !== 'SOURCE_DATA_GAP') { {{ row.sales }} }</td>
+                    <td>@if (row.stockoutStatus !== 'NONE' && row.promotionClass !== 'DEEP_PROMO') { <span class="data-chip so">SO</span> } @else { — }</td>
                     <td>@if (row.promoCode) { <span class="data-chip km" [attr.title]="row.promotionName || 'CTKM chưa có tên'">{{ promoLabel(row) }}</span> } @else { — }</td>
                     <td>{{ row.closeStock }}</td>
                     <td>{{ row.receiptHour || '—' }}</td>
@@ -143,10 +165,10 @@
                         <thead><tr><th>Ngày lỗi</th><th>Nguồn</th><th>Sales</th><th>Sự kiện</th><th>Nguồn nền</th><th>Tham chiếu</th><th>Vì sao chưa có Bₜ</th></tr></thead>
                         <tbody>
                           @for (row of selectedCycleProblemDays(); track row.date) {
-                            <tr [class.row-stockout]="row.stockoutStatus !== 'NONE'" [class.row-promo]="row.promoCode">
+                            <tr [class.row-stockout]="row.stockoutStatus !== 'NONE' && row.promotionClass !== 'DEEP_PROMO'" [class.row-promo]="row.promotionClass === 'DEEP_PROMO'">
                               <td class="value">{{ row.date }}</td>
                               <td><span class="data-chip" [class.pending]="!row.hasSalesRecord">{{ row.hasSalesRecord ? row.salesObservationStatus : 'KHÔNG CÓ POS' }}</span></td>
-                              <td>@if(row.salesObservationStatus === 'CONFIRMED_ZERO'){ <span title="Bán = 0 do không có lịch sử giao dịch gốc" style="color:var(--faint)">0*</span> } @else { {{ format(row.sales, 1) }} }</td>
+                              <td [class.sales-gap]="row.salesObservationStatus === 'SOURCE_DATA_GAP'" [attr.title]="row.salesObservationStatus === 'SOURCE_DATA_GAP' ? 'Bán = null do không có lịch sử giao dịch gốc — Chặng 5 sẽ lấp kỹ thuật hoặc để lại chưa đủ căn cứ' : null">@if (row.salesObservationStatus !== 'SOURCE_DATA_GAP') { {{ format(row.sales, 1) }} }</td>
                               <td>{{ row.promoCode ? 'CTKM' : row.stockoutStatus !== 'NONE' ? 'STOCKOUT' : '—' }}</td>
                               <td><code>{{ row.baseDemandSource }}</code></td>
                               <td>{{ row.referenceDates.length }} ngày · Med {{ format(row.referenceMedian, 1) }}</td>
@@ -254,7 +276,15 @@
             @case (10) {
               @if (seasonalityAudit(); as audit) {
                 @if (audit.rows.length) {
-                  <div class="insight-note"><b>Rᵣ,ₚ = Yᵣ,ₚ / Ȳᵣ</b> theo {{ audit.roundCount }} vòng × 24 vị trí · Sₚ = trung bình Rᵣ,ₚ · kết luận cần Sₚ ≥ 1,15 (≤ 0,85) VÀ lặp ≥ 67%. {{ audit.reason }}</div>
+                  <div class="insight-note">
+                    <b>Rᵣ,ₚ = Yᵣ,ₚ / Ȳᵣ</b> theo {{ audit.roundCount }} vòng × 24 vị trí · Sₚ = Rᵣ,ₚ của vòng GẦN NHẤT đủ căn cứ (không lấy trung bình/trung vị) · kết luận cần Sₚ ≥ 1,15 (≤ 0,85) VÀ lặp ≥ 67% qua các vòng còn lại. {{ audit.reason }}
+                    <br>Chặng 1 chỉ khóa TỔNG số ngày lịch sử một lần cho cả pipeline; Chặng 10 không mở khung mới — chỉ cắt lại đúng {{ audit.roundCount }} năm đã khóa đó thành từng vòng 24 vị trí (~1 năm/vòng) để so CÙNG một vị trí giữa nhiều năm, tránh kết luận mùa vụ chỉ từ một lần đột biến đơn lẻ.
+                  </div>
+                  <div class="season-legend">
+                    <span><i class="high"></i>Cao ≥15% so Ȳ vòng (đỉnh mùa vụ)</span>
+                    <span><i class="low"></i>Thấp ≤15% so Ȳ vòng (đáy mùa vụ)</span>
+                    <span><i></i>Trong ngưỡng bình thường</span>
+                  </div>
                   <div class="audit-table-wrap">
                     <table class="audit-table insight-table season-table">
                       <thead>
@@ -269,7 +299,7 @@
                           <tr [class.season-flagged]="row.verdict !== '—'">
                             <td class="cycle-id">{{ row.position.toString().padStart(2, '0') }}</td>
                             @for (item of row.perRound; track $index) {
-                              <td [class]="'season-cell ' + item.tone">{{ format(item.value, 0) }} <i>/ {{ format(item.ratio, 2) }}</i></td>
+                              <td [class]="'season-cell ' + item.tone" [title]="seasonCellTooltip(item, row.position, $index)">{{ format(item.value, 0) }} <i>/ {{ format(item.ratio, 2) }}</i></td>
                             }
                             <td class="base-value">{{ format(row.sp, 2) }}</td>
                             <td>{{ format((row.verdict === 'LẶP THẤP' ? row.lowRepeat : row.highRepeat) * 100, 0) }}%</td>
@@ -550,11 +580,11 @@
       <details class="merged-context-panel" [open]="!contextCollapsed()" (toggle)="toggleMergedContext($event)">
         <summary class="merged-context-summary">
           <div class="sku-identity-mini">
-            <div class="product-mark">{{ selectedDefinition().id.slice(-2) }}</div>
+            <div class="product-mark">{{ selectedDefinition()?.id?.slice(-2) }}</div>
             <div class="sku-identity-info">
-              <span>{{ selectedDefinition().id }}</span>
-              <h3>{{ selectedDefinition().name }}</h3>
-              <p>{{ selectedDefinition().category }}</p>
+              <span>{{ selectedDefinition()?.id }}</span>
+              <h3>{{ selectedDefinition()?.name }}</h3>
+              <p>{{ selectedDefinition()?.category }}</p>
             </div>
           </div>
           <div class="context-summary-actions">
@@ -726,7 +756,7 @@
         <div class="stage-nav-actions">
           <button type="button" (click)="processCollapsed.set(true)" aria-label="Thu gọn process panel" title="Thu gọn process panel">«</button>
           <button type="button" aria-label="Chặng trước" (click)="store.goPrevious()" [disabled]="store.activeStage() === 1">←</button>
-          <button type="button" aria-label="Chặng tiếp theo" (click)="store.goNext()" [disabled]="store.activeStage() >= 19 || store.isRunning()">→</button>
+          <button type="button" aria-label="Chặng tiếp theo" (click)="store.goNext()" [disabled]="store.activeStage() >= 20 || store.isRunning()">→</button>
         </div>
       </div>
 
@@ -756,7 +786,7 @@
           <div class="trace-head">
             <span class="trace-glyph">Σ</span>
             <div>
-              <p class="eyebrow">MÔ PHỎNG &amp; KIỂM TOÁN · {{ selectedDefinition().id }}</p>
+              <p class="eyebrow">MÔ PHỎNG &amp; KIỂM TOÁN · {{ selectedDefinition()?.id }}</p>
               <h3>{{ trace.heading }}</h3>
               <p class="trace-context">{{ trace.context }}</p>
             </div>
@@ -849,4 +879,13 @@
       }
     </section>
   </main>
+
+  @if (metricTip(); as tip) {
+    <div class="metric-tooltip" [style.left.px]="tip.x" [style.top.px]="tip.y" role="tooltip">
+      <p>{{ tip.text }}</p>
+      @if (tip.formula) {
+        <app-math-formula class="metric-tooltip-formula" [expression]="tip.formula" label="Công thức tính" />
+      }
+    </div>
+  }
 </div>

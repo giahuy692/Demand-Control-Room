@@ -1,4 +1,5 @@
 import { fitBaseForecast, FORECAST_HORIZON } from '../../domain/forecast-models';
+import { DEFAULT_FORECAST_MODEL_REGISTRY } from '../../forecasting/forecast-model-registry.service';
 import { trailingLockedRun } from '../../domain/math';
 import { ExceptionTask, SimulationPolicy, StageSnapshot } from '../../domain/models';
 
@@ -13,7 +14,9 @@ export function runStage11(previous: StageSnapshot, policy: SimulationPolicy): S
     // hạn độ dài vì Holt-Winters cần ≥2 vòng mùa vụ).
     const run = trailingLockedRun(state.cycles);
     const values = run.map(cycle => cycle.baseDemand);
-    state.forecast = fitBaseForecast(values, state.classification.xyz, state.seasonality, state.trend).result;
+    // DEC-P11 — cửa sổ lịch sử riêng theo từng mô hình lấy từ policy hiện hành (không dùng mặc định
+    // cứng), để có thể backtest/điều chỉnh qua SimulationPolicy.forecastWindowCycles.
+    state.forecast = fitBaseForecast(values, state.classification.xyz, state.seasonality, state.trend, DEFAULT_FORECAST_MODEL_REGISTRY, policy.forecastWindowCycles).result;
     if (state.cycles.length > run.length) {
       // Có chu kỳ cũ hơn bị loại khỏi chuỗi học vì một khoảng đứt quãng — KHÔNG nén lại để dùng
       // chung; mô hình vẫn có thể chạy được trên phần đuôi liên tục còn lại (đúng ngưỡng riêng của

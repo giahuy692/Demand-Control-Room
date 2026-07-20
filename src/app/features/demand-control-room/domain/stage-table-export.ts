@@ -45,7 +45,7 @@ const CYCLE_COLUMNS = [
   'sku', 'cycleIndex', 'dateStart', 'dateEnd', 'days', 'baseDemand', 'locked',
   'status', 'emptyCycle', 'cleanDays', 'stockoutLiftedDays', 'promoNormalizedDays',
   'technicalFillDays', 'unresolvedDays', 'sourceRecordDays', 'fallbackDays',
-  'tier2Filled',
+  'tier2Filled', 'reviewRequired',
 ] as const;
 
 export function buildStageTableExport(
@@ -186,6 +186,7 @@ function cycleRow(sku: string, row: SkuPipelineState['cycles'][number]): StageEx
     stockoutLiftedDays: row.stockoutLiftedDays, promoNormalizedDays: row.promoNormalizedDays,
     technicalFillDays: row.technicalFillDays, unresolvedDays: row.unresolvedDays,
     sourceRecordDays: row.sourceRecordDays, fallbackDays: row.fallbackDays, tier2Filled: row.tier2Filled,
+    reviewRequired: row.reviewRequired,
   };
 }
 

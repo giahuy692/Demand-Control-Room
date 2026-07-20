@@ -33,3 +33,27 @@ describe('RULE-04-003 — BOUNDARY_REFERENCE tách biệt khỏi UNBALANCED_FIXE
     expect(qualified.reason).not.toContain('[BOUNDARY_REFERENCE]');
   });
 });
+
+describe('Tài liệu giải pháp §Chặng 3 mục 8 — chỉ cận DƯỚI khóa vĩnh viễn, cận TRÊN phải giữ TẠM · KIỂM TRA', () => {
+  it('ngày gần CUỐI mảng (phía sau bị cắt bởi rìa mảng — gần ngày hiện tại, tương lai còn phát sinh thêm ngày sạch) → giữ temporary, KHÔNG khóa fixed', () => {
+    const records = Array.from({ length: 30 }, (_, index) => record(index));
+    const targetIndex = 28; // chỉ còn 1 ngày sau (index 29) trước khi hết mảng.
+    const raw = selectReferences(records, targetIndex, targetIndex, DEFAULT_POLICY);
+    const qualified = qualifySelection(raw, records.length, targetIndex, targetIndex);
+
+    expect(qualified.status).toBe('temporary');
+    expect(qualified.reason).not.toContain('[BOUNDARY_REFERENCE]');
+    expect(qualified.reason).toContain('cận trên');
+  });
+
+  it('ngày gần ĐẦU mảng (phía trước bị cắt bởi rìa mảng — đầu lịch sử đã đóng) → khóa fixed KHÔNG CÂN BẰNG CỐ ĐỊNH', () => {
+    const records = Array.from({ length: 30 }, (_, index) => record(index));
+    const targetIndex = 1; // chỉ còn 1 ngày trước (index 0) trước khi hết mảng.
+    const raw = selectReferences(records, targetIndex, targetIndex, DEFAULT_POLICY);
+    const qualified = qualifySelection(raw, records.length, targetIndex, targetIndex);
+
+    expect(qualified.status).toBe('fixed');
+    expect(qualified.reason).toContain('[BOUNDARY_REFERENCE]');
+    expect(qualified.reason).toContain('cận dưới');
+  });
+});

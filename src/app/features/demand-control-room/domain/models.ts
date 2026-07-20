@@ -121,7 +121,7 @@ export interface SimulationPolicy {
 
   /** Chặng 18 §5 — MOQ dư vượt tỷ lệ này so với số đặt thì bắt buộc chuyển duyệt. CHƯA PHÊ DUYỆT. */
   moqSurplusApprovalThresholdRatio: number;
-  /** RULE-05-003 — DEC-P03/P04/P05 (ĐỀ XUẤT, chưa duyệt): bật lấp Tầng 2 mức đại diện chu kỳ theo ngưỡng 12-14/8-11 ngày nền. Mặc định false. */
+  /** RULE-05-003 — DEC-P03/P04/P05 (ĐÃ KHÓA 2026-07-20): bật lấp Tầng 2 mức đại diện chu kỳ theo ngưỡng 12-14/8-11 ngày nền. Mặc định true. */
   enableTier2CycleFallback: boolean;
   /**
    * 04 §14/DEC-W05 — nguồn ngân sách, MOQ, nhà cung cấp, ETA thật để kiểm thử Chặng 14–18 hiện
@@ -132,6 +132,24 @@ export interface SimulationPolicy {
   operationalDataStatus: 'NOT_APPLICABLE' | 'CONFIRMED';
   /** Chặng 18 §5 — số đặt vượt bội số này của nhu cầu bình quân các chu kỳ khóa gần nhất thì coi là bất thường, bắt buộc chuyển duyệt. CHƯA PHÊ DUYỆT. */
   abnormalOrderMultiplier: number;
+  /**
+   * DEC-P11 (ĐỀ XUẤT 2026-07-20) — Chặng 11 (dự báo nền) KHÔNG được nạp toàn bộ chuỗi chu kỳ khóa
+   * liên tục (có thể tới ~75 CK/3 năm) làm TRAIN/TEST như nhau cho mọi mô hình. Mỗi mô hình chỉ lấy
+   * đúng lượng lịch sử cần thiết, đếm NGƯỢC từ chu kỳ gần nhất: lịch sử thừa từng kéo lệch hệ số làm
+   * mượt α/β khỏi hành vi gần đây (rà soát thật 2026-07-20, SKU 33811/37918/46569 — CV² đo trên 24 CK
+   * gần nhất rất thấp nhưng WAPE Chặng 11 vẫn cao vì α tối ưu trên tới 60 CK TRAIN, phần lớn là dữ
+   * liệu 2-3 năm trước không còn phản ánh hành vi hiện tại).
+   * `min`/`minSeasons` = ngưỡng dưới còn CHẠY được — ít hơn vẫn chạy (không chặn SKU, đúng nguyên tắc
+   * bucket-(c)) nhưng gắn `reliability:'low'`; `reliable`/`reliableSeasons` = cỡ cửa sổ mục tiêu, CẮT
+   * BỚT nếu lịch sử dài hơn, KHÔNG kéo dài hơn nếu ngắn hơn. Holt-Winters tính theo bội số mùa
+   * (SEASON_LENGTH = 24 CK/mùa). Croston/Nhịp phát sinh dùng chung `croston` (cả hai đọc cùng chuỗi Z).
+   */
+  forecastWindowCycles: {
+    readonly ses: { readonly min: number; readonly reliable: number };
+    readonly holt: { readonly min: number; readonly reliable: number };
+    readonly holtWinters: { readonly minSeasons: number; readonly reliableSeasons: number };
+    readonly croston: { readonly min: number; readonly reliable: number };
+  };
 }
 
 /** Chặng 14 §8 — 5 mức độ tin cậy của một lô hàng đang về. */
@@ -313,6 +331,8 @@ export interface CycleRecord {
   fallbackDays: number;
   /** RULE-05-003 — true khi chu kỳ được lấp bằng mức đại diện Tầng 2 (median các ngày nền hợp lệ có sẵn trong chính chu kỳ), khác Tầng 1 (lấp từng ngày bằng ngày sạch lân cận). */
   tier2Filled: boolean;
+  /** RULE-05-003 — true khi chu kỳ được khóa nhờ lấp Tầng 2 (12–14 ngày nền có ngày ước lượng, hoặc 8–11 ngày nền) — bắt buộc con người rà soát dù đã khóa để tính. */
+  reviewRequired: boolean;
   status: CycleStatus;
   seasonRound: number;
   seasonPosition: number;
@@ -597,7 +617,7 @@ export interface FormulaBlock {
  * CYCLE_EXCEPTION — RULE-05-006 (cổng chất lượng chuỗi sau Chặng 5): một task GỘP theo chu kỳ (không phải theo
  * ngày) cho mỗi CK không khóa; mang `cycleIndexes/affectedDateFrom/affectedDateTo/resolutionOptions` bên dưới.
  */
-export type ExceptionCode = 'BASELINE_NOT_IDENTIFIABLE' | 'PROMO_TYPE_UNKNOWN' | 'STOCK_ANCHOR_MISSING' | 'ABC_SCOPE_INCOMPLETE' | 'D_BASELINE_UNRESOLVED' | 'POLICY_UNRESOLVED' | 'ABC_INPUT_BLOCKED' | 'CLASSIFICATION_BLOCKED' | 'FORECAST_INPUT_BLOCKED' | 'CYCLE_EXCEPTION';
+export type ExceptionCode = 'BASELINE_NOT_IDENTIFIABLE' | 'PROMO_TYPE_UNKNOWN' | 'STOCK_ANCHOR_MISSING' | 'ABC_SCOPE_INCOMPLETE' | 'D_BASELINE_UNRESOLVED' | 'POLICY_UNRESOLVED' | 'ABC_INPUT_BLOCKED' | 'CLASSIFICATION_BLOCKED' | 'FORECAST_INPUT_BLOCKED' | 'CYCLE_EXCEPTION' | 'CYCLE_TIER2_REVIEW_REQUIRED';
 /** 06-Quy-trinh-phe-duyet-va-xu-ly-ngoai-le.md §3 — trạng thái task xử lý ngoại lệ. */
 export type ExceptionTaskStatus = 'OPEN' | 'CANDIDATE_FOUND' | 'WAITING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'RESOLVED';
 

@@ -37,13 +37,12 @@ export const DEFAULT_POLICY: SimulationPolicy = {
   clearancePromotionCodes: [],
   unknownReviewPromotionCodes: [],
   /**
-   * RULE-05-003 — lấp Tầng 2 (mức đại diện chu kỳ) theo ngưỡng 12-14/8-11 ngày. DEC-P03/P04/P05
-   * đều còn "ĐỀ XUẤT", CHƯA phê duyệt chính thức → mặc định TẮT theo đúng protocol mâu thuẫn.
-   * LƯU Ý (rà soát 2026-07-17): thuật toán Tầng 2 CHƯA được cài đặt trong engine — cờ này hiện
-   * không có hiệu lực dù bật (fillAndBuildCycles bỏ qua tham số, tier2Filled luôn false); xem mục
-   * CHỜ DUYỆT trong 01-Danh-sach-quyet-dinh-nghiep-vu.md trước khi cài thật.
+   * RULE-05-003/004 — lấp Tầng 2 (mức đại diện chu kỳ, median các ngày nền hợp lệ trong chính chu
+   * kỳ) theo ngưỡng 12-14/8-11 ngày. DEC-P03/P04/P05 ĐÃ KHÓA 2026-07-20 (trước đó "ĐỀ XUẤT") sau khi
+   * xác nhận đây là nguyên nhân các chu kỳ PARTIAL_BASELINE/BLOCKED phá vỡ chuỗi liên tục cho Chặng
+   * 6–11 (vd SKU 341 CK7/8/10/11/12). Chu kỳ được lấp Tầng 2 luôn khóa `reviewRequired=true`.
    */
-  enableTier2CycleFallback: false,
+  enableTier2CycleFallback: true,
   operationalDataStatus: 'NOT_APPLICABLE',
   serviceLevelCandidates: [90, 92, 95, 97, 97.5, 99],
   minimumLeadTimeWindows: 4,
@@ -54,6 +53,15 @@ export const DEFAULT_POLICY: SimulationPolicy = {
   overBudgetProposalWindowCycles: 1,
   moqSurplusApprovalThresholdRatio: 0.2,
   abnormalOrderMultiplier: 2,
+  // DEC-P11 (ĐỀ XUẤT 2026-07-20) — xem chú thích đầy đủ tại SimulationPolicy.forecastWindowCycles.
+  // Chọn cận TRÊN của từng khoảng do người dùng cung cấp làm ngưỡng "đủ tin cậy" (ưu tiên an toàn dữ
+  // liệu hơn là chạy sớm với lượng lịch sử tối thiểu); Croston `min=24` lấy đúng giá trị đơn đã cho.
+  forecastWindowCycles: {
+    ses: { min: 12, reliable: 18 },
+    holt: { min: 15, reliable: 24 },
+    holtWinters: { minSeasons: 2, reliableSeasons: 3 },
+    croston: { min: 24, reliable: 48 },
+  },
 };
 
 export const STAGES: readonly StageDefinition[] = [

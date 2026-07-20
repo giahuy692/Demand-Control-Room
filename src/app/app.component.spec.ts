@@ -1,10 +1,13 @@
 import '@angular/compiler';
 import { describe, expect, it } from 'vitest';
-import { AppComponent } from './app.component';
+import { AppComponent, buildDemandStructureChart } from './app.component';
 import { SimulationEngine } from './features/demand-control-room/domain/simulation-engine';
 import { SimulationStore } from './features/demand-control-room/application/state/simulation.store';
 import { fileDatasetService } from './features/demand-control-room/data-access/testing/file-dataset.testing';
-import { SalesObservationStatus, StockoutStatus } from './features/demand-control-room/domain/models';
+import { createInitialState } from './features/demand-control-room/stages/stage-support';
+import {
+  BaseDemandSource, DailyRecord, PromotionClass, PromotionStatus, SalesObservationStatus, StockoutStatus, TechnicalFillStatus,
+} from './features/demand-control-room/domain/models';
 
 function createApp(): { app: AppComponent; store: SimulationStore } {
   const store = new SimulationStore(new SimulationEngine(), fileDatasetService());
@@ -51,7 +54,7 @@ describe('Demand Planning simulation shell', () => {
     expect(app.auditDate()).toBeNull();
   });
 
-  it('sắp xếp danh sách SKU theo tiêu chí của chặng', async () => {
+  it('sắp xếp danh sách SKU theo tiêu chí của chặng — Chặng 2-5 ít điểm méo trước, nhiều điểm méo sau', async () => {
     const { app, store } = createApp();
 
     // Default sorting (by ID ascending) when pipeline has not run
@@ -71,7 +74,7 @@ describe('Demand Planning simulation shell', () => {
       const bSO = bState?.daily?.filter(d => d.stockoutStatus !== StockoutStatus.NONE).length ?? 0;
 
       if (aSO !== bSO) {
-        expect(aSO).toBeGreaterThan(bSO);
+        expect(aSO).toBeLessThan(bSO);
       } else {
         expect(catalogStage2[i].id.localeCompare(catalogStage2[i+1].id)).toBeLessThan(0);
       }
@@ -137,8 +140,10 @@ describe('Demand Planning simulation shell', () => {
 
     await store.selectStage(3);
     const stage3Chart = app.demandStructureChart()!;
+    // Ngày stockout/CTKM chưa xử lý xong (baseDemand=null) vẫn phải hiện bằng sales gốc thay vì
+    // rơi về "missing" — value chỉ ===null khi CẢ baseDemand lẫn sales đều null (biểu đồ kết hợp).
     app.auditDailyRows().slice(-60).forEach((row, index) => {
-      expect(stage3Chart.bars[index].value).toBe(row.baseDemand);
+      expect(stage3Chart.bars[index].value).toBe(row.baseDemand ?? row.sales);
     });
 
     await store.selectStage(6);
@@ -198,6 +203,128 @@ describe('Demand Planning simulation shell', () => {
     expect(app.cycleStatusExplanation(noSource)).toContain('thiếu nguồn');
     expect(app.cycleStatusLabel(noBaseline)).toContain('CHẶN');
     expect(app.cycleDayIssue({ ...row, hasSalesRecord: false, salesObservationStatus: SalesObservationStatus.SOURCE_DATA_GAP, sales: null, baseDemand: null })).toContain('không phải 0');
+  });
+});
+
+function chartRow(overrides: Partial<DailyRecord> = {}): DailyRecord {
+  return {
+    sku: 'TEST', barcode: 'TEST', date: '2026-03-01', openStock: 10, closeStock: 10,
+    sales: 5, hasSalesRecord: true, salesObservationStatus: SalesObservationStatus.RECORDED_SALE,
+    isReferenceOnly: false, stockCalculationStatus: 'CALCULATED', stockSource: 'OBSERVED',
+    receiptHour: null, promoCode: null, promotionStatus: PromotionStatus.NONE, stockoutStatus: StockoutStatus.NONE,
+    baseDemand: null, baseDemandSource: BaseDemandSource.SOURCE_DATA_GAP, isCleanObservedReference: false,
+    technicalFillStatus: TechnicalFillStatus.NOT_APPLICABLE, referenceDates: [], referenceEvidence: [],
+    beforeReferenceDates: [], afterReferenceDates: [], referenceMedian: null, balanceStatus: null, selectionReason: '',
+    storeCode: 11, productCode: 1, promotionName: null, promotionStartDate: null, promotionEndDate: null,
+    promotionType: null, promotionMechanismType: null, promotionClass: 'NO_PROMOTION' as PromotionClass, stockStatus: 'CALCULATED',
+    ...overrides,
+  };
+}
+
+function chartOf(stage: 1 | 2 | 3 | 4 | 5, rows: DailyRecord[]) {
+  const state = createInitialState({} as never, rows);
+  return buildDemandStructureChart(stage, state)!;
+}
+
+describe('buildDemandStructureChart — combo màu theo trạng thái (Thực tế/Đã chỉnh/CTKM/Stockout/Thiếu dữ liệu/Dự báo)', () => {
+  it('Chặng 2: ngày stockout lên đúng màu "stockout" ngay cả khi chưa nâng nền (baseDemand chưa tồn tại ở Chặng 2)', () => {
+    const stockoutDay = chartRow({ stockoutStatus: StockoutStatus.LATE_RECEIPT_STOCKOUT, sales: 5, baseDemand: 99 });
+    const chart = chartOf(2, [stockoutDay]);
+
+    expect(chart.bars[0].kind).toBe('stockout');
+    // Chặng 2 không đọc trước baseDemand của Chặng 3 dù field đã có sẵn giá trị (99) trong fixture.
+    expect(chart.bars[0].value).toBe(5);
+    expect(chart.bars[0].rawValue).toBeNull();
+  });
+
+  it('Chặng 3: ngày stockout ĐÃ được nâng nền vẫn giữ màu "stockout" (không đổi sang "adjusted"), và vẽ vạch trước/sau', () => {
+    const liftedDay = chartRow({
+      stockoutStatus: StockoutStatus.LATE_RECEIPT_STOCKOUT, sales: 5,
+      baseDemand: 12, baseDemandSource: BaseDemandSource.STOCKOUT_BASELINE,
+    });
+    const chart = chartOf(3, [liftedDay]);
+
+    expect(chart.bars[0].kind).toBe('stockout');
+    expect(chart.bars[0].value).toBe(12);
+    expect(chart.bars[0].rawValue).toBe(5);
+  });
+
+  it('Chặng 3: ngày stockout CHƯA đủ căn cứ nâng nền vẫn hiện bằng sales gốc, không rơi về "missing", và không vẽ vạch giả (không có "sau" để so)', () => {
+    const unresolvedDay = chartRow({
+      stockoutStatus: StockoutStatus.LATE_RECEIPT_STOCKOUT, sales: 5,
+      baseDemand: null, baseDemandSource: BaseDemandSource.STOCKOUT_UNRESOLVED,
+    });
+    const chart = chartOf(3, [unresolvedDay]);
+
+    expect(chart.bars[0].kind).toBe('stockout');
+    expect(chart.bars[0].value).toBe(5);
+    expect(chart.bars[0].rawValue).toBeNull();
+  });
+
+  it('Chặng 3 (trước khi Chặng 4 chuẩn hóa): ngày CTKM lên màu "promo" dù baseDemand chưa có, hiện tạm bằng sales gốc', () => {
+    const pendingPromoDay = chartRow({
+      promotionClass: 'DEEP_PROMO' as PromotionClass, promotionStatus: PromotionStatus.PROMOTION,
+      sales: 7, baseDemand: null, baseDemandSource: BaseDemandSource.PROMOTION_UNRESOLVED,
+    });
+    const chart = chartOf(3, [pendingPromoDay]);
+
+    expect(chart.bars[0].kind).toBe('promo');
+    expect(chart.bars[0].value).toBe(7);
+  });
+
+  it('Chặng 4: ngày CTKM đã chuẩn hóa nền giữ màu "promo", vẽ vạch sales gốc trước xử lý', () => {
+    const normalizedPromoDay = chartRow({
+      promotionClass: 'DEEP_PROMO' as PromotionClass, promotionStatus: PromotionStatus.PROMOTION,
+      sales: 7, baseDemand: 20, baseDemandSource: BaseDemandSource.PROMOTION_BASELINE,
+    });
+    const chart = chartOf(4, [normalizedPromoDay]);
+
+    expect(chart.bars[0].kind).toBe('promo');
+    expect(chart.bars[0].value).toBe(20);
+    expect(chart.bars[0].rawValue).toBe(7);
+  });
+
+  it('Ưu tiên màu: ngày vừa stockout vừa thuộc CTKM sâu (DEEP_PROMO) lên màu "promo", không phải "stockout" — khớp quy ước SO/CTKM chồng ngày đã dùng ở audit table/legend', () => {
+    const overlapDay = chartRow({
+      stockoutStatus: StockoutStatus.LATE_RECEIPT_STOCKOUT, promotionClass: 'DEEP_PROMO' as PromotionClass,
+      promotionStatus: PromotionStatus.PROMOTION, sales: 3, baseDemand: 15, baseDemandSource: BaseDemandSource.PROMOTION_BASELINE,
+    });
+    const chart = chartOf(4, [overlapDay]);
+
+    expect(chart.bars[0].kind).toBe('promo');
+  });
+
+  it('Chặng 5: ngày lấp nền kỹ thuật (không stockout, không CTKM) lên màu "adjusted", vẽ vạch trước/sau', () => {
+    const technicalFillDay = chartRow({
+      sales: 2, baseDemand: 9, baseDemandSource: BaseDemandSource.TECHNICAL_FILL, technicalFillStatus: TechnicalFillStatus.FILLED,
+    });
+    const chart = chartOf(5, [technicalFillDay]);
+
+    expect(chart.bars[0].kind).toBe('adjusted');
+    expect(chart.bars[0].value).toBe(9);
+    expect(chart.bars[0].rawValue).toBe(2);
+  });
+
+  it('Ngày bán = 0 xác nhận qua watermark (CONFIRMED_ZERO) vẫn thuộc nhóm "Thực tế", không lên màu "adjusted" hay "missing"', () => {
+    const confirmedZeroDay = chartRow({
+      hasSalesRecord: false, sales: 0, salesObservationStatus: SalesObservationStatus.CONFIRMED_ZERO,
+      baseDemand: 0, baseDemandSource: BaseDemandSource.CLEAN_OBSERVED_ZERO, isCleanObservedReference: true,
+    });
+    const chart = chartOf(3, [confirmedZeroDay]);
+
+    expect(chart.bars[0].kind).toBe('inferred');
+    expect(chart.bars[0].rawValue).toBeNull();
+  });
+
+  it('Ngày thật sự không có căn cứ nào (sales=null VÀ baseDemand=null) mới lên "missing"', () => {
+    const gapDay = chartRow({
+      hasSalesRecord: false, sales: null, salesObservationStatus: SalesObservationStatus.SOURCE_DATA_GAP,
+      baseDemand: null, baseDemandSource: BaseDemandSource.SOURCE_DATA_GAP,
+    });
+    const chart = chartOf(3, [gapDay]);
+
+    expect(chart.bars[0].kind).toBe('missing');
+    expect(chart.bars[0].value).toBeNull();
   });
 });
 

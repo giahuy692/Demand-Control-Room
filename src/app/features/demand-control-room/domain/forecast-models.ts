@@ -1,5 +1,5 @@
 import { calculateBias, calculateTrend, calculateWape, detectPulse, detectShortCycle, mean, trailingLockedRun } from './math';
-import { ForecastResult, SkuPipelineState, XyzClass } from './models';
+import { ForecastResult, SimulationPolicy, SkuPipelineState, XyzClass } from './models';
 import { DEFAULT_FORECAST_MODEL_REGISTRY, ForecastModelRegistry } from '../forecasting/forecast-model-registry.service';
 import { ForecastEligibilityContext, ForecastInput, RegisteredForecastModel } from '../forecasting/forecast-model-strategy.interface';
 
@@ -19,6 +19,50 @@ import { ForecastEligibilityContext, ForecastInput, RegisteredForecastModel } fr
 export const FORECAST_HORIZON = 6;
 export const SEASON_LENGTH = 24;
 const TREND_CAP = 0.15; // C10 §6: giới hạn an toàn xu hướng khi dự phóng
+
+export type ForecastWindowPolicy = SimulationPolicy['forecastWindowCycles'];
+
+/** DEC-P11 — bản sao mặc định của SimulationPolicy.forecastWindowCycles, dùng khi caller không
+ * truyền policy riêng (test thuần, các nơi chỉ dựng lại diễn biến học để hiển thị). Cùng số với
+ * DEFAULT_POLICY trong policy.ts — xem chú thích đầy đủ tại models.ts SimulationPolicy.forecastWindowCycles. */
+export const DEFAULT_FORECAST_WINDOW_CYCLES: ForecastWindowPolicy = {
+  ses: { min: 12, reliable: 18 },
+  holt: { min: 15, reliable: 24 },
+  holtWinters: { minSeasons: 2, reliableSeasons: 3 },
+  croston: { min: 24, reliable: 48 },
+};
+
+export type ForecastWindowModel = 'SES' | 'Holt' | 'Holt-Winters' | 'Croston' | 'PulseRhythm';
+
+export interface ModelWindow {
+  readonly values: number[];
+  readonly trainSize: number;
+  readonly testSize: number;
+  readonly reliability: 'ok' | 'low';
+  readonly usedCycles: number;
+  readonly totalCycles: number;
+}
+
+/**
+ * DEC-P11 — cửa sổ lịch sử riêng cho từng mô hình, đếm NGƯỢC từ chu kỳ gần nhất:
+ * `usedCycles = min(totalCycles, reliable)` — cắt bớt nếu lịch sử dài hơn mức tin cậy, KHÔNG bao giờ
+ * kéo dài thêm nếu lịch sử ngắn hơn. Dưới `min` vẫn cho chạy (không chặn SKU chỉ vì thiếu lịch sử,
+ * đúng nguyên tắc bucket-(c)) nhưng gắn `reliability:'low'` để tầng hiển thị/quyết định biết không nên
+ * tự động khóa. SeasonalNaive (cửa chu kỳ ngắn 11XY-SN) KHÔNG dùng hàm này — nó vẫn so sánh trên đúng
+ * cửa sổ của mô hình đối chứng đang thắng, giữ nguyên cơ chế thắng/thua hiện có.
+ */
+export function windowForModel(model: ForecastWindowModel, fullValues: readonly number[], windowPolicy: ForecastWindowPolicy = DEFAULT_FORECAST_WINDOW_CYCLES): ModelWindow {
+  const totalCycles = fullValues.length;
+  const { min, reliable } = model === 'SES' ? windowPolicy.ses
+    : model === 'Holt' ? windowPolicy.holt
+    : model === 'Holt-Winters' ? { min: windowPolicy.holtWinters.minSeasons * SEASON_LENGTH, reliable: windowPolicy.holtWinters.reliableSeasons * SEASON_LENGTH }
+    : windowPolicy.croston; // Croston và PulseRhythm dùng chung cửa sổ Z.
+  const usedCycles = Math.min(totalCycles, reliable);
+  const values = fullValues.slice(-usedCycles);
+  const { trainSize, testSize } = splitSizes(values.length);
+  const reliability: 'ok' | 'low' = totalCycles >= min && testSize >= 3 ? 'ok' : 'low';
+  return { values, trainSize, testSize, reliability, usedCycles, totalCycles };
+}
 
 export type LearningPhase = 'init' | 'train' | 'test';
 
@@ -405,6 +449,7 @@ export function fitBaseForecast(
   seasonality: SkuPipelineState['seasonality'],
   trend: SkuPipelineState['trend'],
   registry: ForecastModelRegistry = DEFAULT_FORECAST_MODEL_REGISTRY,
+  windowPolicy: ForecastWindowPolicy = DEFAULT_FORECAST_WINDOW_CYCLES,
 ): ForecastFit {
   if (xyz === 'D' || xyz === null || !values.length) {
     // RULE-11-001 — xyz=null (CLASSIFICATION_BLOCKED/NO_POSITIVE_DEMAND_REVIEW ở Chặng 7) hoặc
@@ -423,86 +468,107 @@ export function fitBaseForecast(
       },
     };
   }
-  const { trainSize, testSize } = splitSizes(values.length);
-  const reliability: ForecastResult['reliability'] = testSize >= 3 ? 'ok' : 'low';
-  const context: ForecastEligibilityContext = {
-    xyz,
-    seasonality,
-    trend,
-    historyLength: values.length,
-    trainSize,
-    testSize,
-    seasonalPeriod: null,
-    seasonalCorrelation: null,
+
+  // DEC-P11 — mỗi mô hình (SES/Holt/Holt-Winters/Croston) chỉ nhận đúng cửa sổ lịch sử nó cần,
+  // đếm ngược từ chu kỳ gần nhất — KHÔNG dùng chung một cửa sổ toàn chuỗi như trước. Xem
+  // windowForModel() và SimulationPolicy.forecastWindowCycles. Bước 2 (chu kỳ ngắn 11XY-SN) CHƯA
+  // nằm trong DEC-P11 — cố tình giữ nguyên trên toàn chuỗi/TEST gốc để không đổi cơ chế so "thắng
+  // mô hình đối chứng" đã có [§8.10/§8.11].
+  const { trainSize: globalTrainSize, testSize: globalTestSize } = splitSizes(values.length);
+  const globalReliability: ForecastResult['reliability'] = globalTestSize >= 3 ? 'ok' : 'low';
+  const candidateWindowed = (model: RegisteredForecastModel): ModelLearning | null => {
+    const window = windowForModel(model as ForecastWindowModel, values, windowPolicy);
+    const context: ForecastEligibilityContext = {
+      xyz, seasonality, trend, historyLength: window.values.length,
+      trainSize: window.trainSize, testSize: window.testSize, seasonalPeriod: null, seasonalCorrelation: null,
+    };
+    const input: ForecastInput = { values: window.values, trainSize: window.trainSize, testSize: window.testSize, seasonalPeriod: null, seasonalCorrelation: null };
+    return registry.fit(model, context, input)?.learning ?? null;
   };
-  const input: ForecastInput = { values, trainSize, testSize, seasonalPeriod: null, seasonalCorrelation: null };
-  const candidate = (model: RegisteredForecastModel, candidateContext = context, candidateInput = input): ModelLearning | null =>
-    registry.fit(model, candidateContext, candidateInput)?.learning ?? null;
+  const candidate = (model: RegisteredForecastModel, explicitContext: ForecastEligibilityContext, explicitInput: ForecastInput): ModelLearning | null =>
+    registry.fit(model, explicitContext, explicitInput)?.learning ?? null;
+  const windowNote = (model: ForecastWindowModel): string => {
+    const w = windowForModel(model, values, windowPolicy);
+    if (w.usedCycles < w.totalCycles) return ` Cửa sổ ${model}: dùng ${w.usedCycles}/${w.totalCycles} CK gần nhất [DEC-P11].`;
+    if (w.reliability === 'low') return ` Cửa sổ ${model}: chỉ ${w.usedCycles} CK, dưới mức khuyến nghị DEC-P11 → ${LOW_CONFIDENCE_FLAG}.`;
+    return '';
+  };
 
   if (xyz === 'Z') {
-    const pulse = detectPulse(values);
+    // Croston và Nhịp phát sinh đọc CHUNG một cửa sổ Z [DEC-P11] — cả hai cùng ước lượng nhịp/quy mô
+    // phát sinh từ cùng một chuỗi gần nhất, không có lý do tách riêng.
+    const zWindow = windowForModel('Croston', values, windowPolicy);
+    const pulse = detectPulse(zWindow.values);
     if (pulse.ready) {
-      const learning = buildLearning('PulseRhythm', { D: pulse.interval!, Q: pulse.quantity! }, runPulse(values, pulse.interval!, pulse.quantity!, trainSize), trainSize, testSize, `Khoảng cách phát sinh đều D = ${pulse.interval}; quy mô Q = Median = ${pulse.quantity}.`);
-      return toFit(learning, 'Nhóm Z, nhịp phát sinh ổn định → mô hình nhịp [C11 §8.6].', { reliability });
+      const learning = buildLearning('PulseRhythm', { D: pulse.interval!, Q: pulse.quantity! }, runPulse(zWindow.values, pulse.interval!, pulse.quantity!, zWindow.trainSize), zWindow.trainSize, zWindow.testSize, `Khoảng cách phát sinh đều D = ${pulse.interval}; quy mô Q = Median = ${pulse.quantity}.`);
+      return toFit(learning, `Nhóm Z, nhịp phát sinh ổn định → mô hình nhịp [C11 §8.6].${windowNote('PulseRhythm')}`, { reliability: zWindow.reliability });
     }
-    const learning = candidate('Croston')!;
-    return toFit(learning, 'Nhóm Z, khoảng cách phát sinh không đều → Croston bình quân [C11 §8.5].', { reliability });
+    const learning = candidateWindowed('Croston')!;
+    return toFit(learning, `Nhóm Z, khoảng cách phát sinh không đều → Croston bình quân [C11 §8.5].${windowNote('Croston')}`, { reliability: zWindow.reliability });
   }
 
   // ── Bước 1: chọn mô hình đang thắng của nhánh X/Y theo mục 3 + quy tắc thắng §4.3-7/§4.5 ──
-  const sesLearning = candidate('SES')!;
+  const sesLearning = candidateWindowed('SES')!;
   const beats = (challenger: ModelLearning, incumbent: ModelLearning): boolean =>
     challenger.wape !== null && (incumbent.wape === null || challenger.wape < incumbent.wape);
 
   let incumbent = sesLearning;
-  let incumbentReason = xyz === 'X'
+  let incumbentReason = (xyz === 'X'
     ? 'Nhóm X không có xu hướng rõ → SES nền ổn định [C11 §3, nhánh 11X].'
-    : 'Nhóm Y không mùa vụ, không xu hướng → SES nền ổn định [C11 §3, nhánh 11Y-3].';
+    : 'Nhóm Y không mùa vụ, không xu hướng → SES nền ổn định [C11 §3, nhánh 11Y-3].') + windowNote('SES');
 
   if (xyz === 'Y' && seasonality === 'confirmed') {
     // Nhánh 11Y-1: Holt-Winters phải thắng Holt/SES trên TEST [C11 §4.3 bước 7]; thua/không chạy được → fallback Holt → SES [§4.5].
-    const holtLearning = candidate('Holt');
-    const hwLearning = candidate('Holt-Winters');
+    const holtLearning = candidateWindowed('Holt');
+    const hwLearning = candidateWindowed('Holt-Winters');
     if (hwLearning && (!holtLearning || beats(hwLearning, holtLearning)) && beats(hwLearning, sesLearning)) {
       incumbent = hwLearning;
-      incumbentReason = `Nhóm Y có mùa vụ đủ căn cứ (C9) và Holt-Winters (WAPE ${pct(hwLearning.wape)}) thắng Holt/SES trên TEST → Holt-Winters [C11 §7, §4.3 bước 7].`;
+      incumbentReason = `Nhóm Y có mùa vụ đủ căn cứ (C9) và Holt-Winters (WAPE ${pct(hwLearning.wape)}) thắng Holt/SES trên TEST → Holt-Winters [C11 §7, §4.3 bước 7].${windowNote('Holt-Winters')}`;
     } else if (holtLearning && beats(holtLearning, sesLearning)) {
       incumbent = holtLearning;
-      incumbentReason = hwLearning
+      incumbentReason = (hwLearning
         ? `Holt-Winters (WAPE ${pct(hwLearning.wape)}) không thắng đối chứng → fallback Holt (WAPE ${pct(holtLearning.wape)}) vì Holt thắng SES [C11 §4.5].`
-        : 'Chuỗi chưa đủ 2 vòng mùa cho Holt-Winters → fallback Holt vì Holt thắng SES trên TEST [C11 §4.5].';
+        : 'Chuỗi chưa đủ 2 vòng mùa cho Holt-Winters → fallback Holt vì Holt thắng SES trên TEST [C11 §4.5].') + windowNote('Holt');
     } else {
-      incumbentReason = hwLearning
+      incumbentReason = (hwLearning
         ? `Holt-Winters (WAPE ${pct(hwLearning.wape)}) và Holt không thắng SES (WAPE ${pct(sesLearning.wape)}) trên TEST → fallback SES [C11 §4.5].`
-        : 'Mùa vụ xác nhận nhưng chuỗi TRAIN chưa đủ m+2 và Holt không thắng SES → fallback SES [C11 §4.5].';
+        : 'Mùa vụ xác nhận nhưng chuỗi TRAIN chưa đủ m+2 và Holt không thắng SES → fallback SES [C11 §4.5].') + windowNote('SES');
     }
   } else if (xyz === 'Y' && (trend === 'up' || trend === 'down') && values.length >= 3) {
     // Nhánh 11Y-2: Holt phải thắng SES trên TEST; thua → dùng SES [C11 §4.3 bước 7, §4.5].
-    const holtLearning = candidate('Holt')!;
+    const holtLearning = candidateWindowed('Holt')!;
     if (beats(holtLearning, sesLearning)) {
       incumbent = holtLearning;
-      incumbentReason = `Nhóm Y có xu hướng ${trend === 'up' ? 'tăng' : 'giảm'} (C10) và Holt (WAPE ${pct(holtLearning.wape)}) thắng SES (WAPE ${pct(sesLearning.wape)}) trên TEST → Holt [C11 §6, §4.3 bước 7].`;
+      incumbentReason = `Nhóm Y có xu hướng ${trend === 'up' ? 'tăng' : 'giảm'} (C10) và Holt (WAPE ${pct(holtLearning.wape)}) thắng SES (WAPE ${pct(sesLearning.wape)}) trên TEST → Holt [C11 §6, §4.3 bước 7].${windowNote('Holt')}`;
     } else {
-      incumbentReason = `Nhóm Y có xu hướng ${trend === 'up' ? 'tăng' : 'giảm'} (C10) nhưng Holt (WAPE ${pct(holtLearning.wape)}) không thắng SES trên TEST → SES [C11 §4.5].`;
+      incumbentReason = `Nhóm Y có xu hướng ${trend === 'up' ? 'tăng' : 'giảm'} (C10) nhưng Holt (WAPE ${pct(holtLearning.wape)}) không thắng SES trên TEST → SES [C11 §4.5].${windowNote('SES')}`;
     }
   } else if (xyz === 'X' && values.length >= 3) {
     // Nhánh 11X: nhóm X không qua C10 nên dò xu hướng cục bộ; Holt chỉ thắng khi backtest tốt hơn SES [C11 §3].
     const localTrend = calculateTrend(values);
     if (localTrend.trend === 'up' || localTrend.trend === 'down') {
-      const holtLearning = candidate('Holt')!;
+      const holtLearning = candidateWindowed('Holt')!;
       holtLearning.note = `α = ${holtLearning.params['alpha']}, β = ${holtLearning.params['beta']}; Holt thắng SES khi WAPE backtest thấp hơn.`;
       if (beats(holtLearning, sesLearning)) {
         incumbent = holtLearning;
-        incumbentReason = `Nhóm X có xu hướng rõ và backtest Holt (WAPE ${pct(holtLearning.wape)}) tốt hơn SES → Holt [C11 §3, nhánh 11X].`;
+        incumbentReason = `Nhóm X có xu hướng rõ và backtest Holt (WAPE ${pct(holtLearning.wape)}) tốt hơn SES → Holt [C11 §3, nhánh 11X].${windowNote('Holt')}`;
       } else {
-        incumbentReason = 'Nhóm X có xu hướng nhưng Holt không tốt hơn SES trên TEST → SES [C11 §3, §4.5].';
+        incumbentReason = `Nhóm X có xu hướng nhưng Holt không tốt hơn SES trên TEST → SES [C11 §3, §4.5].${windowNote('SES')}`;
       }
     }
   }
 
   // ── Bước 2: cửa chu kỳ lặp ngắn 11XY-SN sau MỌI nhánh X/Y [sơ đồ mục 13, §8.3] ──
   // Dò p* CHỈ trên TRAIN bằng tương quan Pearson [§8.5, §8.8]; lưu toàn bộ r(p) làm bằng chứng [§8.12].
-  const shortCycle = detectShortCycle(values.slice(0, trainSize));
+  // Cố tình dùng values/globalTrainSize/globalTestSize (KHÔNG windowing riêng theo DEC-P11) để giữ
+  // nguyên cơ chế so "thắng mô hình đối chứng" trên cùng một tập TEST như đã đặc tả [§8.10/§8.11].
+  const shortCycle = detectShortCycle(values.slice(0, globalTrainSize));
+  const context: ForecastEligibilityContext = { xyz, seasonality, trend, historyLength: values.length, trainSize: globalTrainSize, testSize: globalTestSize, seasonalPeriod: null, seasonalCorrelation: null };
+  const input: ForecastInput = { values, trainSize: globalTrainSize, testSize: globalTestSize, seasonalPeriod: null, seasonalCorrelation: null };
+  // Độ tin cậy hiển thị = "và" của độ tin cậy TEST toàn cục (mục 12, cửa SN) VÀ độ tin cậy cửa sổ
+  // riêng của chính mô hình đang thắng [DEC-P11] — thấp ở vế nào cũng phải cảnh báo.
+  const incumbentWindowReliability = windowForModel(incumbent.model as ForecastWindowModel, values, windowPolicy).reliability;
+  const reliability: ForecastResult['reliability'] = globalReliability === 'ok' && incumbentWindowReliability === 'ok' ? 'ok' : 'low';
   const gate: FitExtras = {
     rpScan: shortCycle.scan,
     controlModel: incumbent.model,
@@ -513,9 +579,9 @@ export function fitBaseForecast(
     const seasonalContext = { ...context, seasonalPeriod: shortCycle.period!, seasonalCorrelation: shortCycle.correlation! };
     const seasonalInput = { ...input, seasonalPeriod: shortCycle.period!, seasonalCorrelation: shortCycle.correlation! };
     const naiveLearning = candidate('SeasonalNaive', seasonalContext, seasonalInput)!;
-    if (reliability === 'low') {
+    if (globalReliability === 'low') {
       // §8.10 + mục 12 + SN-04: TEST < 3 chu kỳ → SN chỉ được tính sai số tham khảo, không được tự thắng bằng so sánh.
-      return toFit(incumbent, `${incumbentReason} Có ứng viên chu kỳ ngắn p* = ${shortCycle.period} (r = ${shortCycle.correlation!.toFixed(2)}) nhưng tập TEST chỉ ${testSize} chu kỳ < 3 → ${LOW_CONFIDENCE_FLAG}; giữ mô hình đối chứng, WAPE seasonal-naïve ${pct(naiveLearning.wape)} chỉ để tham khảo [C11 §8.10, mục 12].`, { ...gate, pStar: shortCycle.period });
+      return toFit(incumbent, `${incumbentReason} Có ứng viên chu kỳ ngắn p* = ${shortCycle.period} (r = ${shortCycle.correlation!.toFixed(2)}) nhưng tập TEST chỉ ${globalTestSize} chu kỳ < 3 → ${LOW_CONFIDENCE_FLAG}; giữ mô hình đối chứng, WAPE seasonal-naïve ${pct(naiveLearning.wape)} chỉ để tham khảo [C11 §8.10, mục 12].`, { ...gate, pStar: shortCycle.period });
     }
     if (beats(naiveLearning, incumbent)) {
       return toFit(naiveLearning, `Chu kỳ lặp ngắn p* = ${shortCycle.period} (r = ${shortCycle.correlation!.toFixed(2)} ≥ 0,60) và backtest seasonal-naïve (WAPE ${pct(naiveLearning.wape)}) thắng mô hình đối chứng ${incumbent.model} (WAPE ${pct(incumbent.wape)}) trên TEST → Seasonal-naïve [C11 §8.10, nhánh 11XY-SN]. Ngưỡng sai số nhóm chưa ban hành nên trạng thái vẫn cần xem xét.`, {

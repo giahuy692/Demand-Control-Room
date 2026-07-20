@@ -34,9 +34,9 @@ function salesObservation(date: string, hasSalesRecord: boolean, sales: number |
   return { hasSalesRecord: false, sales: null, salesObservationStatus: SalesObservationStatus.SOURCE_DATA_GAP };
 }
 
-function promotionFor(date: string, intervals: readonly PromotionInterval[]): { code: string | null; promotionClass: PromotionClass | null } {
+function promotionFor(date: string, intervals: readonly PromotionInterval[]): { code: string | null; promotionClass: PromotionClass | null; name: string | null } {
   const active = intervals.filter(interval => interval.startDate <= date && date <= interval.endDate);
-  if (!active.length) return { code: null, promotionClass: null };
+  if (!active.length) return { code: null, promotionClass: null, name: null };
   const codes = [...new Set(active.map(interval => interval.code))];
   // Nhiều CTKM chồng ngày: chỉ cần MỘT chương trình kích cầu mạnh/chưa phân loại là ngày
   // đó không còn là mức bán tự nhiên — lấy class "mạnh nhất" theo thứ tự loại trừ baseline.
@@ -46,7 +46,10 @@ function promotionFor(date: string, intervals: readonly PromotionInterval[]): { 
     : classes.includes('PROMOTION_UNRESOLVED')
       ? 'PROMOTION_UNRESOLVED'
       : 'ALWAYS_ON';
-  return { code: codes.join('|'), promotionClass };
+  // Tên hiển thị đi theo chương trình quyết định promotionClass (tên chính), khớp quy ước
+  // "nguồn chỉ mang tên CTKM chính" đã áp dụng cho dòng nguồn có sẵn promoCode (quyết định 2026-07-17).
+  const primary = active.find(interval => interval.promotionClass === promotionClass) ?? active[0];
+  return { code: codes.join('|'), promotionClass, name: primary.name ?? null };
 }
 
 /** promotionStatus đi theo phân loại CTKM: chỉ DEEP_PROMO (mechanismType 2/7) mới loại ngày khỏi baseline (Chặng 3 → Chặng 4). */
@@ -54,7 +57,7 @@ function promotionStatusFor(promotionClass: PromotionClass): PromotionStatus {
   return isBaselineExcludedPromo(promotionClass) ? PromotionStatus.PROMOTION : PromotionStatus.NONE;
 }
 
-function scaffoldRecord(sku: string, barcode: string, date: string, isReferenceOnly: boolean, stock: number | null, metadata: ExtractMetadata, promoCode: string | null, promotionClass: PromotionClass): DailyRecord {
+function scaffoldRecord(sku: string, barcode: string, date: string, isReferenceOnly: boolean, stock: number | null, metadata: ExtractMetadata, promoCode: string | null, promotionClass: PromotionClass, promotionName: string | null): DailyRecord {
   return {
     sku, barcode, date, openStock: stock, closeStock: stock,
     ...salesObservation(date, false, null, metadata),
@@ -66,7 +69,7 @@ function scaffoldRecord(sku: string, barcode: string, date: string, isReferenceO
     balanceStatus: null, selectionReason: '',
     storeCode: 11,
     productCode: Number(sku.replace('SKU-', '')) || 1,
-    promotionName: null,
+    promotionName,
     promotionStartDate: null,
     promotionEndDate: null,
     promotionType: null,
@@ -94,7 +97,11 @@ export function buildCalendarScaffold(
   for (let date = startIso; date <= endIso; date = addDaysIso(date, 1)) {
     const existing = bySourceDate.get(date);
     const intervalPromo = promotionFor(date, promotionIntervals);
-    const promoCode = [existing?.promoCode, intervalPromo.code].filter(Boolean).join('|') || null;
+    // Chuẩn hóa: ngày có giao dịch thật (existing.promoCode) và ngày chỉ suy từ interval có thể
+    // ghép cùng một tập mã CTKM chồng lấn theo thứ tự/trùng lặp khác nhau (VD "27949|27903|27949"
+    // so với "27903|27949") — nếu không khử trùng + sắp xếp, buildPromoRegions (RULE-04-002) so
+    // chuỗi tuyệt đối sẽ coi đây là "khác mã" và cắt gãy giả một cụm CTKM liên tục thật.
+    const promoCode = [...new Set([existing?.promoCode, intervalPromo.code].filter(Boolean).flatMap(code => code!.split('|')))].sort().join('|') || null;
     if (existing) {
       const openStock = existing.openStock;
       const closeStock = existing.closeStock;
@@ -115,10 +122,13 @@ export function buildCalendarScaffold(
         stockSource: 'OBSERVED',
         stockCalculationStatus: classifyStockStatus(openStock, closeStock),
         promotionClass,
+        // Dòng nguồn có thể không tự mang tên (VD: bán không gắn mã KM) dù đã dính CTKM qua
+        // interval — không để "CTKM chưa có tên" hiện lên khi interval thật sự có tên chương trình.
+        promotionName: existing.promotionName?.trim() || intervalPromo.name,
       });
       previousClose = closeStock;
     } else {
-      result.push(scaffoldRecord(sku, barcode, date, isReferenceOnlyAt(date), previousClose, metadata, promoCode, intervalPromo.promotionClass ?? (promoCode ? 'DEEP_PROMO' : 'NO_PROMOTION')));
+      result.push(scaffoldRecord(sku, barcode, date, isReferenceOnlyAt(date), previousClose, metadata, promoCode, intervalPromo.promotionClass ?? (promoCode ? 'DEEP_PROMO' : 'NO_PROMOTION'), intervalPromo.name));
     }
   }
   return result;

@@ -1,7 +1,8 @@
 import { DailyRecord, ForecastResult, SimulationPolicy, SkuPipelineState, StageNumber } from './models';
 import { calculateTrend, mean, median, meetsSeasonRepeatThreshold, populationStdev, trailingLockedRun } from './math';
 import { buildPromoRegionSamples } from './promo-analysis';
-import { buildForecastLearning, ModelLearning, SEASON_LENGTH, fitSes, fitHolt, fitHoltWinters, runSeasonalNaive, splitSizes, testMetrics, lockedSeriesAll } from './forecast-models';
+import { DEFAULT_FORECAST_WINDOW_CYCLES, ModelLearning, SEASON_LENGTH, fitBaseForecast, fitSes, fitHolt, fitHoltWinters, runSeasonalNaive, splitSizes, testMetrics, lockedSeriesAll, windowForModel } from './forecast-models';
+import { DEFAULT_FORECAST_MODEL_REGISTRY } from '../forecasting/forecast-model-registry.service';
 import { STAGE_TRACE_CONTRACTS, StageTraceContract } from './stage-trace-contracts';
 export interface TraceValue { label: string; value: string }
 export interface TraceCheck { label: string; actual: string; passed: boolean }
@@ -1046,21 +1047,26 @@ function modelFormulaStep(forecast: ForecastResult, learning: ModelLearning | nu
   }
 }
 
-function stage11(state: Readonly<SkuPipelineState>): StageTrace {
+function stage11(state: Readonly<SkuPipelineState>, policy: SimulationPolicy): StageTrace {
   const forecast = state.forecast;
   if (!forecast) {
     return { heading: 'Chưa có dự báo nền', context: 'Chặng 11 chưa tạo kết quả cho SKU này.', steps: [] };
   }
   const values = lockedSeriesAll(state);
+  const windowPolicy = policy.forecastWindowCycles ?? DEFAULT_FORECAST_WINDOW_CYCLES;
 
   // ── Tính toán WAPE của các mô hình ứng viên để hiển thị so sánh chéo trực quan ──
+  // DEC-P11 — mỗi ứng viên SES/Holt/Holt-Winters dùng ĐÚNG cửa sổ lịch sử riêng (windowForModel),
+  // khớp tuyệt đối với cửa sổ mà fitBaseForecast() đã dùng để ra quyết định — nếu không, WAPE hiển
+  // thị ở đây sẽ lệch khỏi forecast.wape thật khi mô hình đó chính là mô hình đã khóa.
   const { trainSize: cTrain, testSize: cTest } = splitSizes(values.length);
   const candidatesList: { name: string; wape: number | null }[] = [];
-  
+
   if (state.classification.xyz === 'X' || state.classification.xyz === 'Y') {
     // 1. SES
     try {
-      const sesFit = fitSes(values, cTrain);
+      const sesWindow = windowForModel('SES', values, windowPolicy);
+      const sesFit = fitSes(sesWindow.values, sesWindow.trainSize);
       const sesW = testMetrics(sesFit.run.rows).wape;
       candidatesList.push({ name: 'San bằng mũ đơn (SES)', wape: sesW });
     } catch (e) {}
@@ -1068,7 +1074,8 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
     // 2. Holt
     if (values.length >= 3) {
       try {
-        const holtFit = fitHolt(values, cTrain);
+        const holtWindow = windowForModel('Holt', values, windowPolicy);
+        const holtFit = fitHolt(holtWindow.values, holtWindow.trainSize);
         const holtW = testMetrics(holtFit.run.rows).wape;
         candidatesList.push({ name: 'Holt (Có xu hướng)', wape: holtW });
       } catch (e) {}
@@ -1077,7 +1084,8 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
     // 3. Holt-Winters
     if (state.classification.xyz === 'Y' && state.seasonality === 'confirmed' && values.length >= SEASON_LENGTH + 2) {
       try {
-        const hwFit = fitHoltWinters(values, cTrain);
+        const hwWindow = windowForModel('Holt-Winters', values, windowPolicy);
+        const hwFit = fitHoltWinters(hwWindow.values, hwWindow.trainSize);
         if (hwFit) {
           const hwW = testMetrics(hwFit.run.rows).wape;
           candidatesList.push({ name: 'Holt-Winters (Có mùa vụ)', wape: hwW });
@@ -1085,7 +1093,8 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
       } catch (e) {}
     }
 
-    // 4. Seasonal Naive (nếu có pStar)
+    // 4. Seasonal Naive (nếu có pStar) — cửa chu kỳ ngắn 11XY-SN CHƯA nằm trong DEC-P11, vẫn dùng
+    // nguyên cửa sổ toàn chuỗi/TEST toàn cục để khớp đúng cơ chế so "thắng mô hình đối chứng" [§8.10].
     if (forecast.pStar !== null) {
       try {
         const naive = runSeasonalNaive(values, forecast.pStar, cTrain);
@@ -1145,24 +1154,32 @@ function stage11(state: Readonly<SkuPipelineState>): StageTrace {
       { title: 'Chuyển ngoại lệ, không tự phát hành dự báo', detail: forecast.reason, substitution: 'F_base = [] · lockStatus = EXCEPTION', tone: 'warn' },
     );
   } else {
-    const testSize = cTest;
-    const learning = buildForecastLearning(state).learning;
+    // DEC-P11 — dựng lại đúng bằng fitBaseForecast (cùng windowPolicy mà Chặng 11 thật đã dùng) thay
+    // vì buildForecastLearning() (dùng cửa sổ mặc định cứng) — bảo đảm "khớp số tuyệt đối" ngay cả
+    // khi policy.forecastWindowCycles khác mặc định.
+    const learning = fitBaseForecast(values, state.classification.xyz, state.seasonality, state.trend, DEFAULT_FORECAST_MODEL_REGISTRY, windowPolicy).learning;
+    // n/TRAIN/TEST hiển thị đúng cửa sổ mà MÔ HÌNH ĐÃ KHÓA thực sự dùng (learning.rows/trainSize/
+    // testSize) — không còn dùng cỡ chuỗi/tách 20% toàn cục (cTest) vì từ DEC-P11 mỗi mô hình có thể
+    // dùng cửa sổ khác nhau; Croston/PulseRhythm (nhóm Z) vẫn đọc đúng learning của chính mô hình đó.
+    const testSize = learning?.testSize ?? cTest;
+    const trainSize = learning?.trainSize ?? values.length - testSize;
+    const learningLength = learning?.rows.length ?? values.length;
     rawSteps.push({
       title: 'Chia TRAIN/TEST theo thời gian',
-      detail: '20% chu kỳ cuối chuỗi để làm TEST; tuyệt đối không trộn ngẫu nhiên vì sẽ làm lộ tương lai vào tập huấn luyện.',
-      substitution: `n = ${values.length} → TRAIN = ${values.length - testSize} CK đầu · TEST = ${testSize} CK cuối`,
+      detail: '20% chu kỳ cuối chuỗi để làm TEST; tuyệt đối không trộn ngẫu nhiên vì sẽ làm lộ tương lai vào tập huấn luyện. Cửa sổ n dưới đây là cửa sổ riêng của chính mô hình đã khóa [DEC-P11], có thể ngắn hơn tổng lịch sử đã khóa.',
+      substitution: `n = ${learningLength}/${values.length} CK (cửa sổ riêng của ${forecast.model}) → TRAIN = ${trainSize} CK đầu · TEST = ${testSize} CK cuối`,
     });
-    
+
     if (state.classification.xyz === 'X' || state.classification.xyz === 'Y') {
       rawSteps.push(shortCycleGateStep(forecast));
     }
-    
+
     rawSteps.push(
       modelFormulaStep(forecast, learning),
       {
         title: 'Dự báo các chu kỳ TEST bằng tham số đã chốt',
-        detail: 'Giữ nguyên tham số TRAIN, dự báo one-step-ahead; không dùng TEST để tinh chỉnh ngược tham số. Dưới đây là kết quả sai số WAPE đo lường thực tế của các mô hình ứng viên được thử nghiệm:',
-        substitution: `TEST = ${testSize} chu kỳ cuối`,
+        detail: 'Giữ nguyên tham số TRAIN, dự báo one-step-ahead; không dùng TEST để tinh chỉnh ngược tham số. Dưới đây là kết quả sai số WAPE đo lường thực tế của các mô hình ứng viên được thử nghiệm (mỗi ứng viên trên đúng cửa sổ riêng của nó):',
+        substitution: `TEST = ${testSize} chu kỳ cuối (cửa sổ của ${forecast.model})`,
         values: candidatesList.map(cand => ({
           label: `Mô hình: ${cand.name}`,
           value: cand.wape === null ? 'Không khả dụng' : `WAPE (TEST) = ${pct(cand.wape)}`
@@ -1629,7 +1646,7 @@ export function buildStageTrace(stage: StageNumber, state: Readonly<SkuPipelineS
     case 8: trace = stage8(state, policy); break;
     case 9: trace = stage9(state); break;
     case 10: trace = stage10(state); break;
-    case 11: trace = stage11(state); break;
+    case 11: trace = stage11(state, policy); break;
     case 12: trace = stage12(state, focus); break;
     case 13: trace = stage13(state, policy); break;
     case 14: trace = stage14(state); break;

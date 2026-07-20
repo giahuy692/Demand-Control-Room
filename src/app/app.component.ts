@@ -16,7 +16,7 @@ import { buildStageTableExport, encodeStageTableCsv } from './features/demand-co
 
 const AUDIT_ROW_LIMIT = 300;
 
-type DemandChartBarKind = 'observed' | 'adjusted' | 'missing' | 'forecast' | 'inferred' | 'stockout' | 'promo';
+type DemandChartBarKind = 'observed' | 'adjusted' | 'missing' | 'forecast' | 'inferred' | 'promo' | 'stockout';
 
 interface DemandChartBar {
   key: string;
@@ -25,6 +25,10 @@ interface DemandChartBar {
   height: number;
   kind: DemandChartBarKind;
   tooltip: string;
+  /** Giá trị trước xử lý (vd: sales gốc trước khi Chặng 3-5 nâng nền/chuẩn hóa/lấp) — null khi trùng giá trị đã xử lý hoặc chặng không có khái niệm "trước/sau". */
+  rawValue: number | null;
+  rawHeight: number | null;
+  rawTooltip: string | null;
 }
 
 interface DemandStructureChart {
@@ -38,14 +42,15 @@ interface DemandStructureChart {
 }
 
 function normalizeDemandBars(
-  bars: Omit<DemandChartBar, 'height'>[],
+  bars: Omit<DemandChartBar, 'height' | 'rawHeight'>[],
   subtitle: string,
   unit: string,
 ): DemandStructureChart {
-  const max = Math.max(1, ...bars.map(bar => bar.value ?? 0));
+  const max = Math.max(1, ...bars.map(bar => bar.value ?? 0), ...bars.map(bar => bar.rawValue ?? 0));
   const normalized = bars.map(bar => ({
     ...bar,
     height: bar.value === null ? 9 : bar.value === 0 ? 3 : Math.max(5, (bar.value / max) * 100),
+    rawHeight: bar.rawValue === null ? null : bar.rawValue === 0 ? 0 : (bar.rawValue / max) * 100,
   }));
   const missingCount = normalized.filter(bar => bar.kind === 'missing').length;
   return {
@@ -59,21 +64,51 @@ function normalizeDemandBars(
   };
 }
 
-function buildDemandStructureChart(stage: StageNumber, state: Readonly<SkuPipelineState>): DemandStructureChart | null {
+/** Cộng sales gốc (bucket-b, suy ra từ state.daily đã sắp xếp theo ngày) trong [startIso, endIso] — null nếu không ngày nào có bản ghi bán. */
+function sumRawSalesInRange(daily: readonly DailyRecord[], startIso: string, endIso: string): number | null {
+  let sum = 0;
+  let any = false;
+  for (const row of daily) {
+    if (row.date < startIso) continue;
+    if (row.date > endIso) break;
+    if (row.sales !== null) { sum += row.sales; any = true; }
+  }
+  return any ? sum : null;
+}
+
+export function buildDemandStructureChart(stage: StageNumber, state: Readonly<SkuPipelineState>): DemandStructureChart | null {
   // Chặng 1–2 hiển thị sales quan sát; Chặng 3–4 phải hiển thị baseDemand do chặng tạo ra.
   // Không fallback về sales ở Chặng 3–4 vì sẽ che khuất ngày chưa xử lý được.
   if (stage <= 5) {
     const bars = state.daily.slice(-60).map(row => {
-      const adjusted = row.baseDemand !== null && !['CLEAN_OBSERVED_SALE', 'CLEAN_OBSERVED_ZERO'].includes(row.baseDemandSource);
-      const value = stage <= 2 ? row.sales : row.baseDemand;
+      const rawSales = row.sales;
+      // Chặng 1-2 chưa từng tính baseDemand (Bₜ) — không đọc trước dữ liệu của chặng chưa chạy.
+      const processed = stage <= 2 ? null : row.baseDemand;
+      // Ngày stockout/CTKM phải LUÔN lên đúng màu trạng thái của nó (đỏ/vàng) ngay cả khi
+      // chặng tương ứng CHƯA xử lý xong (processed=null, vd CTKM ở Chặng 3 hay stockout ở
+      // Chặng 2) — hiện tạm bằng sales gốc thay vì rơi về "missing", để luôn thấy được NGÀY
+      // NÀO cần xử lý; một khi Bₜ khác sales gốc mới là cặp "trước/sau" đáng vẽ vạch so sánh.
+      const displayValue = processed ?? rawSales;
+      const wasAdjusted = processed !== null && rawSales !== null && processed !== rawSales;
+      const isStockout = row.stockoutStatus !== 'NONE' && row.promotionClass !== 'DEEP_PROMO';
+      const isPromo = row.promotionClass === 'DEEP_PROMO';
+      const kind: DemandChartBarKind = displayValue === null
+        ? 'missing'
+        : isPromo ? 'promo'
+        : isStockout ? 'stockout'
+        : wasAdjusted ? 'adjusted'
+        : row.salesObservationStatus === 'CONFIRMED_ZERO' ? 'inferred'
+        : 'observed';
       return {
         key: row.date,
         label: row.date.slice(5),
-        value,
-        kind: value === null ? 'missing' as const : row.promoCode ? 'promo' as const : row.stockoutStatus !== 'NONE' ? 'stockout' as const : adjusted ? 'adjusted' as const : row.salesObservationStatus === 'CONFIRMED_ZERO' ? 'inferred' as const : 'observed' as const,
-        tooltip: value !== null
-          ? `${row.date} · ${row.promoCode ? `CTKM (${row.promotionName?.trim() || 'chưa có tên'}): ` : row.stockoutStatus !== 'NONE' ? 'STOCKOUT: ' : adjusted ? `Nền đã chỉnh (${row.baseDemandSource}): ` : row.salesObservationStatus === 'CONFIRMED_ZERO' ? 'Bán xác nhận bằng 0: ' : 'Bán ghi nhận: '}${value.toLocaleString('vi-VN')}`
+        value: displayValue,
+        kind,
+        tooltip: displayValue !== null
+          ? `${row.date} · ${isPromo ? `CTKM (${row.promotionName?.trim() || 'chưa có tên'}): ` : isStockout ? 'STOCKOUT: ' : wasAdjusted ? `Nền đã chỉnh (${row.baseDemandSource}): ` : row.salesObservationStatus === 'CONFIRMED_ZERO' ? 'Bán xác nhận bằng 0: ' : 'Bán ghi nhận: '}${displayValue.toLocaleString('vi-VN')}${wasAdjusted ? ` (gốc trước xử lý: ${rawSales!.toLocaleString('vi-VN')})` : ''}`
           : `${row.date} · ${row.salesObservationStatus} · không được coi là bán 0`,
+        rawValue: wasAdjusted ? rawSales : null,
+        rawTooltip: wasAdjusted ? `${row.date} · Bán gốc trước xử lý: ${rawSales!.toLocaleString('vi-VN')}` : null,
       };
     });
     const observedCount = bars.filter(bar => bar.kind !== 'missing').length;
@@ -99,23 +134,33 @@ function buildDemandStructureChart(stage: StageNumber, state: Readonly<SkuPipeli
       ? (state.forecast?.baseForecast ?? []).slice(0, 6)
       : [];
   const historyLimit = stage === 10 ? 48 : stage === 11 ? 12 : 24;
-  const history = state.cycles.slice(-historyLimit).map(cycle => ({
-    key: `CK-${cycle.cycleIndex}`,
-    label: `CK${cycle.cycleIndex}`,
-    value: cycle.locked ? cycle.baseDemand : null,
-    kind: !cycle.locked
-      ? 'missing' as const
-      : cycle.status === 'LOCKED_OBSERVED'
-        ? 'observed' as const
-        : 'adjusted' as const,
-    tooltip: `CK ${cycle.cycleIndex} · ${cycle.dateStart} → ${cycle.dateEnd} · ${cycle.locked ? `Yⱼ=${cycle.baseDemand.toLocaleString('vi-VN')}` : cycle.status} · nguồn ${cycle.sourceRecordDays}/${cycle.days} ngày · chưa nền ${cycle.unresolvedDays}`,
-  }));
+  const history = state.cycles.slice(-historyLimit).map(cycle => {
+    const value = cycle.locked ? cycle.baseDemand : null;
+    // Chu kỳ không có trường "sức mua gốc" riêng — cộng lại sales gốc từng ngày trong khoảng
+    // chu kỳ để có Σ trước xử lý, nối tiếp đúng khái niệm "trước/sau" từ view theo ngày.
+    const rawSum = sumRawSalesInRange(state.daily, cycle.dateStart, cycle.dateEnd);
+    const showsRawMark = cycle.locked && rawSum !== null && rawSum !== value;
+    return {
+      key: `CK-${cycle.cycleIndex}`,
+      label: `CK${cycle.cycleIndex}`,
+      value,
+      kind: !cycle.locked
+        ? 'missing' as const
+        : cycle.status === 'LOCKED_OBSERVED'
+          ? 'observed' as const
+          : 'adjusted' as const,
+      tooltip: `CK ${cycle.cycleIndex} · ${cycle.dateStart} → ${cycle.dateEnd} · ${cycle.locked ? `Yⱼ=${cycle.baseDemand.toLocaleString('vi-VN')}` : cycle.status} · nguồn ${cycle.sourceRecordDays}/${cycle.days} ngày · chưa nền ${cycle.unresolvedDays}${showsRawMark ? ` (Σ bán gốc trước xử lý: ${rawSum!.toLocaleString('vi-VN')})` : ''}`,
+      rawValue: showsRawMark ? rawSum : null,
+      rawTooltip: showsRawMark ? `CK ${cycle.cycleIndex} · Σ bán gốc trước xử lý: ${rawSum!.toLocaleString('vi-VN')}` : null,
+    };
+  });
   const forecast = future.map((value, index) => ({
     key: `F-${index + 1}`,
     label: `F+${index + 1}`,
     value,
     kind: 'forecast' as const,
     tooltip: `Dự báo ${index + 1}/${future.length}: ${value.toLocaleString('vi-VN')} đơn vị/chu kỳ${stage >= 14 ? ' · sau điều chỉnh CTKM tương lai' : ' · dự báo nền'}`,
+    rawValue: null, rawTooltip: null,
   }));
   const forecastLabel = stage >= 14 ? 'dự báo cuối' : 'dự báo nền';
   const subtitle = future.length
@@ -193,7 +238,9 @@ export class AppComponent implements OnInit {
     });
   });
   readonly summaryEntries = computed(() => Object.entries(this.store.view().summary));
-  readonly selectedDefinition = computed(() => this.store.catalog.find(sku => sku.id === this.store.selectedSkuId())!);
+  // Không "!" ép kiểu: catalog/selectedSkuId khởi tạo rỗng trước khi dataset async nạp xong —
+  // tick đầu tiên find() thật sự trả undefined, template phải đọc qua "?." để không vỡ console.
+  readonly selectedDefinition = computed(() => this.store.catalog.find(sku => sku.id === this.store.selectedSkuId()));
   readonly currentStageStates = computed(() => this.store.currentSnapshot()?.states ?? null);
   readonly currentTableExport = computed(() => buildStageTableExport(this.store.currentSnapshot(), this.store.selectedSkuId(), this.store.policy()));
   readonly auditState = computed(() => this.store.view().state ?? this.store.inputState());
@@ -207,33 +254,56 @@ export class AppComponent implements OnInit {
   });
   readonly selectedAuditRow = computed(() => this.auditDailyRows().find(row => row.date === this.auditDate()) ?? null);
   readonly currentAnomalyIndex = signal<{ type: string; index: number }>({ type: '', index: -1 });
-  
+
+  /**
+   * Mỗi chặng 2-5 chỉ soi đúng một loại bất thường: Chặng 2/3 xử lý stockout, Chặng 4 xử lý
+   * CTKM, Chặng 5 xử lý ngày còn thiếu nền chung (lấp kỹ thuật/chưa đủ căn cứ — stage5FillDays).
+   * Chặng 1 (khung lịch) không có trọng tâm riêng nên KHÔNG highlight loại nào — tránh gây hiểu
+   * nhầm là chặng đang xử lý bất thường không liên quan.
+   */
+  readonly stageAnomalyFocus = computed<'stockout' | 'promo' | 'gap' | null>(() => {
+    const stage = this.store.activeStage();
+    if (stage === 2 || stage === 3) return 'stockout';
+    if (stage === 4) return 'promo';
+    if (stage === 5) return 'gap';
+    return null;
+  });
+
   readonly anomalyText = computed(() => {
+    const focus = this.stageAnomalyFocus();
     const stockouts = this.stockouts();
     const promos = this.promos();
+    const gaps = this.stage5FillDays();
     const current = this.currentAnomalyIndex();
-    
+
     let textParts = [];
-    if (stockouts.length > 0) {
+    if (focus === 'stockout' && stockouts.length > 0) {
       if (current.type === 'stockout' && current.index >= 0) {
         textParts.push(`Đang xem: SO ${current.index + 1}/${stockouts.length}`);
       } else {
         textParts.push(`${stockouts.length} SO`);
       }
     }
-    if (promos.length > 0) {
+    if (focus === 'promo' && promos.length > 0) {
       if (current.type === 'promo' && current.index >= 0) {
         textParts.push(`Đang xem: KM ${current.index + 1}/${promos.length}`);
       } else {
         textParts.push(`${promos.length} KM`);
       }
     }
+    if (focus === 'gap' && gaps.length > 0) {
+      if (current.type === 'gap' && current.index >= 0) {
+        textParts.push(`Đang xem: Thiếu nền ${current.index + 1}/${gaps.length}`);
+      } else {
+        textParts.push(`${gaps.length} thiếu nền`);
+      }
+    }
     return textParts.length ? textParts.join(' · ') : '0 điểm cần soi';
   });
 
-  readonly stockouts = computed(() => this.auditDailyRows().filter(row => row.stockoutStatus !== 'NONE'));
+  readonly stockouts = computed(() => this.auditDailyRows().filter(row => row.stockoutStatus !== 'NONE' && row.promotionClass !== 'DEEP_PROMO'));
   readonly temporaryBases = computed(() => this.auditDailyRows().filter(row => ['unbalanced', 'fixed', 'insufficient'].includes(row.balanceStatus!)));
-  readonly promos = computed(() => this.auditDailyRows().filter(row => !!row.promoCode));
+  readonly promos = computed(() => this.auditDailyRows().filter(row => row.promotionClass === 'DEEP_PROMO'));
   readonly unlockedCycles = computed(() => this.auditCycles().filter(c => !c.locked));
   /** Chặng 5 — ngày được lấp kỹ thuật hoặc vẫn chưa đủ căn cứ sau khi lấp. */
   readonly stage5FillDays = computed(() => this.auditDailyRows().filter(row => row.technicalFillStatus === 'FILLED' || row.technicalFillStatus === 'UNRESOLVED'));
@@ -305,8 +375,13 @@ export class AppComponent implements OnInit {
     return !!hover && hover.index === index && hover.column === column;
   }
 
-  /** Tooltip sai số dùng position:fixed render ở gốc app — không bị panel overflow:hidden che. */
-  readonly metricTip = signal<{ text: string; x: number; y: number } | null>(null);
+  /**
+   * Tooltip sai số dùng position:fixed render ở gốc app — không bị panel overflow:hidden che.
+   * Trước đây signal này được set khi hover nhưng KHÔNG có phần tử nào trong template đọc lại
+   * `metricTip()` — tooltip không bao giờ thật sự hiện. Nay render kèm cả công thức LaTeX
+   * (cùng nguồn với formula-registry.ts) khi metric đó có công thức xác định.
+   */
+  readonly metricTip = signal<{ text: string; formula: string | null; x: number; y: number } | null>(null);
   showMetricTip(event: Event, key: string): void {
     const text = this.metricTips[key];
     const host = event.currentTarget as HTMLElement | null;
@@ -314,18 +389,33 @@ export class AppComponent implements OnInit {
     const rect = host.getBoundingClientRect();
     const width = 264;
     const x = Math.max(8, Math.min(rect.left, window.innerWidth - width - 12));
-    this.metricTip.set({ text, x, y: rect.top - 8 });
+    this.metricTip.set({ text, formula: this.metricFormulas[key] ?? null, x, y: rect.top - 8 });
   }
   hideMetricTip(): void { this.metricTip.set(null); }
 
-  /** Ý nghĩa các chỉ tiêu sai số backtest C11 — hiện khi hover chân bảng. */
+  /**
+   * Ý nghĩa các chỉ tiêu sai số backtest C11 §11.3-11.7 — hiện khi hover chân bảng. Mỗi chỉ tiêu
+   * đo trên tập TEST của ĐÚNG SKU đang xem (không phải so sánh chéo SKU ngay tại UI này — nRMSE
+   * trước đây mô tả nhầm thành "so sánh SKU bán nhiều/bán ít" trong khi đây là view một SKU).
+   * Tài liệu §11.5 cấm dùng MỘT ngưỡng chung cho mọi SKU (ngưỡng phải backtest + duyệt theo từng
+   * nhóm ABC/XYZ) nên không có số cố định "tốt/xấu" để in cứng — thay vào đó mỗi dòng có hành
+   * động cụ thể người vận hành nên làm, lấy từ bảng quyết định C11 §12.
+   */
   readonly metricTips: Record<string, string> = {
-    rmse: 'Root Mean Squared Error — căn bậc hai của trung bình bình phương sai số trên pha TEST. Đơn vị trùng đơn vị bán; phạt rất nặng những cú trượt lớn. RMSE càng nhỏ mô hình càng bám sát.',
-    nrmse: 'RMSE chia cho sức mua thực trung bình của pha TEST — đưa về % để so sánh công bằng giữa SKU bán nhiều và SKU bán ít.',
-    wape: 'Weighted Absolute Percentage Error = Σ|Y − F| / ΣY trên pha TEST — trung bình mỗi 100 đơn vị bán thực thì dự báo lệch bao nhiêu đơn vị. Đây là thước đo chính để so hai mô hình.',
-    bias: 'Bias = (ΣF − ΣY) / ΣY trên pha TEST — đo độ lệch HỆ THỐNG. Dương: mô hình dự báo cao hơn thực (nguy cơ thừa hàng); âm: thấp hơn thực (nguy cơ thiếu hàng). Gần 0 là cân.',
-    lock: 'REVIEW: tài liệu chưa ban hành ngưỡng P25 chính thức nên không mô hình nào được tự khóa — kết quả cần người duyệt. EXCEPTION: không đo được sai số (thiếu TEST).',
+    rmse: 'RMSE — căn bậc hai trung bình bình phương lệch Yₜ−Fₜ trên tập TEST của SKU này; cùng đơn vị bán, phạt rất nặng những chu kỳ lệch đột biến. Hành động: nếu RMSE cao bất thường so với WAPE%, mở từng chu kỳ TEST xem có 1-2 cú lệch đơn lẻ làm méo số hay sai đều khắp.',
+    nrmse: 'nRMSE = RMSE chia cho sức mua trung bình của CHÍNH SKU này trong tập TEST — quy về % để dễ đọc hơn số tuyệt đối. Không phải phép so sánh với SKU khác ngay tại đây; % này chỉ có ý nghĩa so sánh khi đặt cạnh SKU có quy mô bán khác. Hành động: không kết luận một mình — luôn đọc cùng WAPE và Bias.',
+    wape: 'WAPE = Σ|Y − F| / ΣY trên TEST của SKU này — trung bình mỗi 100 đơn vị bán thực thì dự báo lệch bao nhiêu đơn vị. Là chỉ tiêu chính để chốt cách dự báo, nhưng ngưỡng đạt/không đạt do nhóm ABC/XYZ của SKU quyết định (backtest + phê duyệt riêng), không phải một số cố định cho mọi SKU. Hành động: WAPE thấp vẫn phải đối chiếu Bias trước khi chốt.',
+    bias: 'Bias = (ΣF − ΣY) / ΣY trên TEST — đo LỆCH MỘT CHIỀU có hệ thống, khác RMSE/WAPE (đo độ lớn sai số nói chung). Dương kéo dài: dự báo cao hơn thực nhiều kỳ liên tiếp → dễ chốt vốn vào tồn kho chậm quay vòng. Âm kéo dài: dự báo thấp hơn thực → dễ thiếu hàng trước khi lô nhập về. Hành động: dù RMSE/WAPE đạt, Bias lệch một chiều vẫn phải chuyển xem xét thủ công, không tự chốt.',
+    lock: 'REVIEW: tài liệu chưa ban hành ngưỡng sai số chính thức theo từng nhóm ABC/XYZ (phải backtest + phê duyệt riêng, không dùng một ngưỡng chung) nên không mô hình nào được tự khóa. EXCEPTION: không đủ chu kỳ TEST để đo sai số. Hành động: người vận hành đọc cả 4 chỉ tiêu — đặc biệt Bias — trước khi quyết định dùng tạm dự báo này hay chuyển ngoại lệ chờ duyệt.',
     future: 'Dự báo NỀN cho 6 chu kỳ tới, sinh từ trạng thái L/T/S cuối cùng (chưa áp hệ số khuyến mãi — việc đó thuộc Chặng 14). Xu hướng khi dự phóng bị chặn ±15%.',
+  };
+
+  /** Công thức LaTeX — cùng nguồn với METRICS trong formula-registry.ts (C11 §11.3). */
+  readonly metricFormulas: Record<string, string> = {
+    rmse: String.raw`\operatorname{RMSE}=\sqrt{\frac{1}{n}\sum_{t=1}^{n}(Y_t-F_t)^2}`,
+    nrmse: String.raw`\operatorname{nRMSE}=\frac{\operatorname{RMSE}}{\overline{Y}},\qquad \overline{Y}>0`,
+    wape: String.raw`\operatorname{WAPE}=\frac{\sum_{t=1}^{n}|Y_t-F_t|}{\sum_{t=1}^{n}Y_t}`,
+    bias: String.raw`\operatorname{Bias}=\frac{\sum_{t=1}^{n}(F_t-Y_t)}{\sum_{t=1}^{n}Y_t}`,
   };
   readonly promoAudit = computed(() => {
     const state = this.store.selectedState();
@@ -415,12 +505,23 @@ export class AppComponent implements OnInit {
 
 
   selectStage(stage: number): void {
+    const enteringStage2 = stage === 2 && this.store.activeStage() !== 2;
     this.auditDate.set(null);
     this.auditRowsExpanded.set(false);
     this.traceStepOverrides.set({});
     this.highlightedCycleIndex.set(null);
     this.currentAnomalyIndex.set({ type: '', index: -1 });
-    void this.store.selectStage(stage as StageNumber);
+    const navigation = this.store.selectStage(stage as StageNumber);
+    if (enteringStage2) {
+      // Chặng 1 chỉ khóa khung lịch, chưa có nội dung theo SKU — vào Chặng 2 luôn mở SKU đầu
+      // danh sách để người dùng không phải tự tìm, thay vì giữ lựa chọn rời rạc từ trước đó.
+      void navigation.then(() => {
+        const first = this.visibleCatalog()[0];
+        if (first) this.selectSku(first);
+      });
+    } else {
+      void navigation;
+    }
   }
   goPrevious(): void {
     if (this.store.activeStage() > 1) this.selectStage(this.store.activeStage() - 1);
@@ -506,7 +607,16 @@ export class AppComponent implements OnInit {
   formatCurrency(value: number): string { return `${viNumberFormat(0).format(value)} ₫`; }
   formatSeries(values: readonly number[]): string { return values.map(value => this.format(value, 1)).join(' · '); }
   selectAuditRow(row: DailyRecord): void {
-    if (!this.auditRowsExpanded() && !this.renderedAuditDailyRows().includes(row)) this.auditRowsExpanded.set(true);
+    // Nền trước xa nhất có thể vượt ra ngoài cửa sổ 300 ngày mặc định dù chính dòng bấm vẫn
+    // hiện — không mở rộng thì highlight "nền trước" biến mất trong im lặng, tưởng là lỗi.
+    if (!this.auditRowsExpanded()) {
+      const rendered = this.renderedAuditDailyRows();
+      const renderedStart = rendered[0]?.date;
+      const earliestReferenceNeeded = row.beforeReferenceDates.at(-1) ?? row.date;
+      if (!rendered.includes(row) || (renderedStart !== undefined && earliestReferenceNeeded < renderedStart)) {
+        this.auditRowsExpanded.set(true);
+      }
+    }
     this.auditDate.set(row.date);
     setTimeout(() => document.getElementById(`audit-${row.date}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }
@@ -558,8 +668,9 @@ export class AppComponent implements OnInit {
     return row.selectionReason || 'Chưa tìm được sức mua nền Bₜ cho ngày này.';
   }
 
-  jumpToAnomaly(type: 'stockout' | 'promo'): void {
-    const rows = this.auditDailyRows().filter(item => type === 'stockout' ? item.stockoutStatus !== 'NONE' : !!item.promoCode);
+  jumpToAnomaly(type: 'stockout' | 'promo' | 'gap'): void {
+    const rows = type === 'gap' ? this.stage5FillDays()
+      : this.auditDailyRows().filter(item => type === 'stockout' ? item.stockoutStatus !== 'NONE' && item.promotionClass !== 'DEEP_PROMO' : item.promotionClass === 'DEEP_PROMO');
     if (!rows.length) return;
     
     let current = this.currentAnomalyIndex();
@@ -583,6 +694,16 @@ export class AppComponent implements OnInit {
     const row = this.auditDailyRows().find(item => item.date === date);
     if (row) this.selectAuditRow(row);
     else this.auditDate.set(date);
+  }
+
+  // Chặng 2 chỉ đánh dấu stockout; nền bù (trước/sau) chỉ tồn tại từ Chặng 3 trở đi — không
+  // đọc trước dữ liệu của chặng chưa chạy, chỉ nói rõ lý do để không tưởng nhầm là lỗi.
+  auditContextNote(row: DailyRecord): string {
+    if (row.selectionReason) return row.selectionReason;
+    if (this.store.activeStage() === 2 && row.stockoutStatus !== 'NONE') {
+      return 'Chặng 2 chỉ đánh dấu stockout — nền bù (nền trước/sau) sẽ được tính ở Chặng 3.';
+    }
+    return 'Bản ghi đang được kiểm tra.';
   }
 
   private readonly beforeReferenceSet = computed(() => new Set(this.selectedAuditRow()?.beforeReferenceDates));
@@ -619,6 +740,23 @@ export class AppComponent implements OnInit {
     return chart.bars.some(bar => bar.kind === kind);
   }
 
+  // Chặng 10 — ô màu cam/xanh (season-cell) chỉ có legend chung ở đầu bảng, phải kéo mắt lên mới
+  // đối chiếu được; giờ mỗi ô tự giải thích đúng số liệu và ngưỡng của chính nó khi hover.
+  seasonCellTooltip(item: { value: number; ratio: number; tone: 'high' | 'low' | 'neutral' }, position: number, roundIndex: number): string {
+    const pct = (item.ratio - 1) * 100;
+    const sign = pct >= 0 ? '+' : '';
+    const verdict = item.tone === 'high'
+      ? 'ĐỈNH MÙA VỤ (Rᵣ,ₚ ≥ 1,15)'
+      : item.tone === 'low'
+        ? 'ĐÁY MÙA VỤ (Rᵣ,ₚ ≤ 0,85)'
+        : 'Trong ngưỡng bình thường (0,85 < Rᵣ,ₚ < 1,15)';
+    return `Vị trí ${position.toString().padStart(2, '0')} · Vòng ${roundIndex + 1}: Y=${this.format(item.value, 0)} · Rᵣ,ₚ=Y/Ȳ vòng=${this.format(item.ratio, 2)} (${sign}${this.format(pct, 0)}% so Ȳ vòng) → ${verdict}`;
+  }
+
+  hasRawMarks(chart: DemandStructureChart): boolean {
+    return chart.bars.some(bar => bar.rawHeight !== null);
+  }
+
   getSkuSortValueLabel(sku: SkuDefinition): string {
     return this.skuSortMeta().get(sku.id)?.label ?? '';
   }
@@ -629,6 +767,8 @@ export class AppComponent implements OnInit {
 function buildSkuSortMeta(state: Readonly<SkuPipelineState>, stage: StageNumber): { key: readonly [number, number]; label: string } {
   const format = (value: number | null | undefined, digits = 0): string =>
     value === null || value === undefined ? '—' : viNumberFormat(digits).format(value);
+  // visibleCatalog() sort key[0] descending mọi chặng — Chặng 2-5 âm hoá count điểm méo
+  // (SO/nâng nền/chuẩn hóa/chưa đủ nền) để danh sách ra đúng thứ tự ít méo trước, nhiều méo sau.
   if (stage === 5) {
     const unresolved = state.daily.filter(day => day.baseDemand === null).length;
     return { key: [-unresolved, 0], label: `${unresolved} ngày chưa đủ nền` };
@@ -640,15 +780,15 @@ function buildSkuSortMeta(state: Readonly<SkuPipelineState>, stage: StageNumber)
     }
     case 2: {
       const count = state.daily.filter(d => d.stockoutStatus !== 'NONE').length;
-      return { key: [count, 0], label: `${count} SO` };
+      return { key: [-count, 0], label: `${count} SO` };
     }
     case 3: {
       const count = state.daily.filter(d => d.baseDemandSource === 'STOCKOUT_BASELINE').length;
-      return { key: [count, 0], label: `${count} nâng nền` };
+      return { key: [-count, 0], label: `${count} nâng nền` };
     }
     case 4: {
       const count = state.daily.filter(d => d.baseDemandSource === 'PROMOTION_BASELINE').length;
-      return { key: [count, 0], label: `${count} chuẩn hóa` };
+      return { key: [-count, 0], label: `${count} chuẩn hóa` };
     }
     case 5: {
       const locked = state.cycles.filter(c => c.locked).length;

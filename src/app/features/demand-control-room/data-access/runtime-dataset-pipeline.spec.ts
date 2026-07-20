@@ -57,12 +57,12 @@ describe('runtime dataset → pipeline parity', () => {
     expect(Number(result.recordedSale) + Number(result.confirmedZero) + Number(result.sourceDataGap)).toBeGreaterThanOrEqual(sourceRows);
     expect(result).toMatchInlineSnapshot(`
       {
-        "blockedCycles": 430,
+        "blockedCycles": 419,
         "confirmedZero": 33726,
         "recordedSale": 20274,
         "sourceDataGap": 0,
         "sourceRowsInWindow": 54000,
-        "technicalFillDays": 155,
+        "technicalFillDays": 107,
       }
     `);
   }, 30_000);

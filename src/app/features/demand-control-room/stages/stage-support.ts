@@ -105,8 +105,12 @@ export function qualifySelection(selection: ReferenceSelection, recordCount: num
     const references = oneSided.slice(0, 14);
     return { ...selection, status: 'fixed', before: selection.before.length ? references : [], after: selection.after.length ? references : [], references, reason: 'Cụm CTKM sát cận dưới: khóa 14 ngày sạch một phía — KHÔNG CÂN BẰNG CỐ ĐỊNH.' };
   }
-  // RULE-04-003 — gắn cờ BOUNDARY_REFERENCE riêng biệt khỏi UNBALANCED_FIXED do thiếu dữ liệu thường (RULE-03-002): đây là do CHẠM biên lịch sử, không phải do thiếu ngày sạch.
-  if (nearLowerBoundary !== nearUpperBoundary) return { ...selection, status: 'fixed', reason: `${selection.reason} [BOUNDARY_REFERENCE] Biên lịch sử đã đóng nên khóa KHÔNG CÂN BẰNG CỐ ĐỊNH.` };
+  // Tài liệu giải pháp §Chặng 3 mục 8 — chỉ CẬN DƯỚI (đầu lịch sử đã đóng) mới khóa vĩnh viễn
+  // KHÔNG CÂN BẰNG CỐ ĐỊNH (không kiểm tra lại). CẬN TRÊN (gần ngày hiện tại) tương lai còn có
+  // thể phát sinh thêm ngày sạch để cân bằng lại nên PHẢI giữ TẠM · KIỂM TRA — không được khóa
+  // cứng như cận dưới (trước đây `nearLowerBoundary !== nearUpperBoundary` gộp nhầm cả hai hướng).
+  if (nearLowerBoundary) return { ...selection, status: 'fixed', reason: `${selection.reason} [BOUNDARY_REFERENCE] Biên lịch sử đã đóng (cận dưới) nên khóa KHÔNG CÂN BẰNG CỐ ĐỊNH.` };
+  if (nearUpperBoundary) return { ...selection, reason: `${selection.reason} Gần ngày hiện tại (cận trên) — kiểm tra lại khi phiên sau có thêm dữ liệu.` };
   return selection;
 }
 
@@ -147,10 +151,16 @@ export function buildPromoRegions(records: DailyRecord[], policy: SimulationPoli
       runs.push({ indexes, codes: [code], clustered: false });
       continue;
     }
+    // RULE-04-002 — hai cụm CTKM liền kề TUYỆT ĐỐI (không có ngày nào xen giữa, kể cả ngày sạch)
+    // luôn thuộc cùng một giai đoạn khuyến mãi liên tục dù đổi mã (VD chồng thêm CTKM mới) — gộp
+    // ngay. Không thể dùng selectReferences để "kiểm tra khả năng đứng riêng" cho ca này: dò tìm
+    // đó tự chặn (stopAtPromoBoundary) ngay tại ranh giới đang xét nên luôn thấy "0 ngày sạch"
+    // phía giáp cụm kia bất kể có bao nhiêu ngày sạch xa hơn — không phản ánh đúng khả năng thật.
+    const isImmediatelyAdjacent = previous.indexes.at(-1)! + 1 === indexes[0];
     const previousSelection = selectReferences(records, previous.indexes[0], previous.indexes.at(-1)!, policy, true);
     const currentSelection = selectReferences(records, indexes[0], indexes.at(-1)!, policy, true);
     const cannotBuildSeparateValidBaselines = previousSelection.status === 'insufficient' || currentSelection.status === 'insufficient';
-    if (cannotBuildSeparateValidBaselines) {
+    if (isImmediatelyAdjacent || cannotBuildSeparateValidBaselines) {
       previous.indexes.push(...indexes);
       previous.codes = [...new Set([...previous.codes, code])];
       previous.clustered = true;
@@ -325,14 +335,30 @@ export function fillMissingBaselines(records: DailyRecord[], cycleLength: number
   return filled;
 }
 
-export function aggregateCycles(records: DailyRecord[], cycleLength: number): CycleRecord[] {
+/** RULE-05-003/DEC-P04 — đếm số đoạn (trong 3 đoạn đầu-giữa-cuối bằng nhau của chu kỳ) có ít nhất một ngày nền hợp lệ. */
+function validSegmentSpread(records: readonly DailyRecord[], start: number, cycleLength: number): number {
+  const segmentSize = cycleLength / 3;
+  let segments = 0;
+  for (let segment = 0; segment < 3; segment++) {
+    const segmentStart = start + segment * segmentSize;
+    let hasValid = false;
+    for (let index = segmentStart; index < segmentStart + segmentSize; index++) {
+      if (records[index].baseDemand !== null) { hasValid = true; break; }
+    }
+    if (hasValid) segments++;
+  }
+  return segments;
+}
+
+export function aggregateCycles(records: DailyRecord[], cycleLength: number, enableTier2CycleFallback = false): CycleRecord[] {
   const cycles: CycleRecord[] = [];
   for (let start = 0; start + cycleLength <= records.length; start += cycleLength) {
     let baseDemand = 0, unresolvedDays = 0, cleanDays = 0, stockoutLiftedDays = 0, promoNormalizedDays = 0, technicalFillDays = 0, sourceRecordDays = 0, fallbackDays = 0;
+    const validValues: number[] = [];
     for (let index = start; index < start + cycleLength; index++) {
       const row = records[index];
       if (row.baseDemand === null) unresolvedDays++;
-      else baseDemand += row.baseDemand;
+      else { baseDemand += row.baseDemand; validValues.push(row.baseDemand); }
       if (row.salesObservationStatus !== SalesObservationStatus.SOURCE_DATA_GAP) sourceRecordDays++;
       if (row.selectionReason.includes('Cấp 3 · mùa vụ năm trước')) fallbackDays++;
       if (CLEAN_REFERENCE_SOURCES.has(row.baseDemandSource)) cleanDays++;
@@ -341,15 +367,27 @@ export function aggregateCycles(records: DailyRecord[], cycleLength: number): Cy
       else if (row.baseDemandSource === BaseDemandSource.TECHNICAL_FILL) technicalFillDays++;
     }
     const emptyCycle = unresolvedDays === cycleLength;
+    const validDayCount = cycleLength - unresolvedDays;
+    // RULE-05-003/004 — Tầng 2: 12–14 ngày nền hợp lệ được lấp không điều kiện; 8–11 ngày chỉ lấp
+    // khi trải ít nhất 2/3 đoạn đầu-giữa-cuối (DEC-P04); 0–7 ngày không bao giờ dùng chính chu kỳ
+    // làm nguồn duy nhất (DEC-P05) — không nhân một ngày cho cả chu kỳ.
+    let tier2Filled = false;
+    let reviewRequired = false;
+    if (!emptyCycle && unresolvedDays > 0 && enableTier2CycleFallback && validDayCount >= 8
+        && (validDayCount >= 12 || validSegmentSpread(records, start, cycleLength) >= 2)) {
+      baseDemand += median(validValues) * unresolvedDays;
+      tier2Filled = true;
+      reviewRequired = true;
+      unresolvedDays = 0;
+    }
     const locked = !emptyCycle && unresolvedDays === 0;
-    const tier2Filled = false;
     const cycleIndex = cycles.length + 1;
     cycles.push({
       cycleIndex, dateStart: records[start].date, dateEnd: records[start + cycleLength - 1].date, days: cycleLength,
       baseDemand: unresolvedDays ? 0 : baseDemand,
       locked, emptyCycle,
       cleanDays, stockoutLiftedDays, promoNormalizedDays, technicalFillDays,
-      unresolvedDays, sourceRecordDays, fallbackDays, tier2Filled,
+      unresolvedDays, sourceRecordDays, fallbackDays, tier2Filled, reviewRequired,
       status: cycleStatus(sourceRecordDays, locked, emptyCycle, cleanDays, fallbackDays, cycleLength),
       seasonRound: Math.floor((cycleIndex - 1) / 24) + 1, seasonPosition: ((cycleIndex - 1) % 24) + 1,
     });
@@ -357,9 +395,9 @@ export function aggregateCycles(records: DailyRecord[], cycleLength: number): Cy
   return cycles;
 }
 
-export function fillAndBuildCycles(records: DailyRecord[], cycleLength: number, minimumReferences: number, maxRadius: number, _enableTier2CycleFallback = false): { daily: DailyRecord[]; cycles: CycleRecord[] } {
+export function fillAndBuildCycles(records: DailyRecord[], cycleLength: number, minimumReferences: number, maxRadius: number, enableTier2CycleFallback = false): { daily: DailyRecord[]; cycles: CycleRecord[] } {
   const daily = fillMissingBaselines(records, cycleLength, minimumReferences, maxRadius);
-  return { daily, cycles: aggregateCycles(daily, cycleLength) };
+  return { daily, cycles: aggregateCycles(daily, cycleLength, enableTier2CycleFallback) };
 }
 
 /**
@@ -454,6 +492,19 @@ export function buildCycleException(skuId: string, cycle: CycleRecord, policy: S
     role: 'BA/Data', status: 'OPEN', decisionVersion: policy.version,
     cycleIndexes: [cycle.cycleIndex], affectedDateFrom: cycle.dateStart, affectedDateTo: cycle.dateEnd,
     blockingStages: CYCLE_EXCEPTION_BLOCKING_STAGES, resolutionOptions, simulationOnly: true,
+  };
+}
+
+/** RULE-05-003/004 — chu kỳ đã khóa nhờ lấp Tầng 2 vẫn cần con người rà soát; task KHÔNG chặn chặng nào (cycle đã locked, đã dùng được). */
+export function buildTier2ReviewException(skuId: string, cycle: CycleRecord, policy: SimulationPolicy): ExceptionTask {
+  return {
+    id: `${skuId}:5:CYCLE_TIER2_REVIEW_REQUIRED:${cycle.cycleIndex}`,
+    ruleId: 'RULE-05-003', code: 'CYCLE_TIER2_REVIEW_REQUIRED', stage: 5, skuId, date: cycle.dateStart,
+    evidence: `[${cycle.status}] CK${cycle.cycleIndex} (${cycle.dateStart} → ${cycle.dateEnd}) đã khóa nhờ lấp Tầng 2: cleanDays=${cycle.cleanDays}, stockoutAdjustedDays=${cycle.stockoutLiftedDays}, promoAdjustedDays=${cycle.promoNormalizedDays}, technicalFillDays=${cycle.technicalFillDays} — phần còn lại trong ${cycle.days} ngày được lấp bằng median các ngày nền hợp lệ trong chính chu kỳ.`,
+    suggestedAction: 'Rà soát chu kỳ đã lấp Tầng 2 trước khi dùng cho quyết định vận hành thật.',
+    role: 'BA/Data', status: 'OPEN', decisionVersion: policy.version,
+    cycleIndexes: [cycle.cycleIndex], affectedDateFrom: cycle.dateStart, affectedDateTo: cycle.dateEnd,
+    simulationOnly: true,
   };
 }
 
