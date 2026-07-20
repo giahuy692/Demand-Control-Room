@@ -29,24 +29,40 @@ describe('runtime dataset → pipeline parity', () => {
       snapshot = engine.run(number as StageNumber, snapshot, session.policy);
       summaries[number] = snapshot.summary;
     }
-    const sourceRows = Object.values(session.dataset.dailyBySku).reduce((sum, rows) => sum + rows.length, 0);
+    // Đếm dòng nguồn RƠI TRONG khung lịch sử của phiên (Chặng 1 §7 loại dữ liệu cũ hơn ngày đầu
+    // khoảng lịch sử) — so KHÔNG được đối chiếu với toàn bộ lịch sử thô không giới hạn, nếu không
+    // sẽ ngầm giả định cửa sổ luôn phủ hết dữ liệu, che mất lỗi cấu hình historyYears.
+    // Một (SKU, ngày) có thể có nhiều dòng nguồn thô (nhiều giao dịch/cửa hàng trong ngày) nhưng
+    // Chặng 1 chỉ tạo đúng một DailyRecord mỗi (SKU, ngày) — đếm theo cặp duy nhất để so đúng đối tượng.
+    // So với [fullCycleStart, historyEnd] (không phải historyStart): phần "dư" ở đầu khung lịch sử
+    // bị RULE-01-003 tách thành vùng đệm tham chiếu (isReferenceOnly), không vào `daily`/summary.
+    const windowEnd = String(summaries[1]['Kết thúc lịch sử']);
+    const fullCycleDays = Number(summaries[1]['Chu kỳ đầy đủ N']) * session.policy.cycleLength;
+    const fullCycleStartDate = new Date(`${windowEnd}T00:00:00Z`);
+    fullCycleStartDate.setUTCDate(fullCycleStartDate.getUTCDate() - fullCycleDays + 1);
+    const fullCycleStart = fullCycleStartDate.toISOString().slice(0, 10);
+    const uniqueDatesInWindow = new Set(
+      Object.entries(session.dataset.dailyBySku)
+        .flatMap(([sku, rows]) => rows.filter(row => row.date >= fullCycleStart && row.date <= windowEnd).map(row => `${sku}|${row.date}`)),
+    );
+    const sourceRows = uniqueDatesInWindow.size;
     const result = {
-      sourceRowsBeforeCalendar: sourceRows,
+      sourceRowsInWindow: sourceRows,
       recordedSale: summaries[1]['RECORDED_SALE'],
       confirmedZero: summaries[1]['CONFIRMED_ZERO'],
       sourceDataGap: summaries[1]['SOURCE_DATA_GAP'],
       technicalFillDays: summaries[5]['Ngày được bổ sung'],
       blockedCycles: summaries[6]['BLOCKED_NO_VALID_BASELINE'],
     };
-    expect(Number(result.recordedSale) + Number(result.confirmedZero) + Number(result.sourceDataGap)).toBeGreaterThan(sourceRows);
+    expect(Number(result.recordedSale) + Number(result.confirmedZero) + Number(result.sourceDataGap)).toBeGreaterThanOrEqual(sourceRows);
     expect(result).toMatchInlineSnapshot(`
       {
-        "blockedCycles": 423,
-        "confirmedZero": 45541,
-        "recordedSale": 27224,
+        "blockedCycles": 430,
+        "confirmedZero": 33726,
+        "recordedSale": 20274,
         "sourceDataGap": 0,
-        "sourceRowsBeforeCalendar": 72275,
-        "technicalFillDays": 79,
+        "sourceRowsInWindow": 54000,
+        "technicalFillDays": 155,
       }
     `);
   }, 30_000);

@@ -8,6 +8,12 @@ import { CONTRACT_VERSION, sha256File, validateDataset, writeDatasetAtomic } fro
 
 const [salesPath = 'Sql/sales-history.csv', outputPath = 'src/assets/demand-planning/datasets/real.dataset.json', runDate = '2026-02-01'] = process.argv.slice(2);
 
+// Tài liệu giải pháp §Chặng 1.3/4.2 — "Số năm lịch sử chuẩn" là THAM SỐ CHÍNH SÁCH của phiên
+// (giá trị khởi điểm đề xuất 3 năm), KHÔNG được suy diễn từ ngày sớm nhất của trích xuất nguồn.
+// Khung lịch sử của phiên phải cố định theo chính sách; dữ liệu thật của từng mã hàng (kể cả khi
+// ngắn/dài hơn khung) là chuyện khác, do Chặng 1 §7 xử lý riêng — không đảo ngược quan hệ này.
+const DEFAULT_HISTORY_YEARS = 3;
+
 const REQUIRED_COLUMNS = [
   'StoreCode', 'ProductCode', 'Barcode', 'ProductName', 'Date', 'HasSalesRecord',
   'Sales', 'Price', 'PromotionCode', 'PromotionName', 'PromotionStartDate', 'PromotionEndDate',
@@ -100,14 +106,12 @@ const dailyRecords = [];
 const skuMeta = new Map(); // sku -> { name, firstPrice, maxClose, lastClose, lastDate }
 let maxSalesDate = '';
 let maxStockDate = '';
-let minDate = '9999-99-99';
 let validationRows = 0;
 
 for (const entry of [...bySkuDate.values()].sort((a, b) => a.productCode - b.productCode || a.date.localeCompare(b.date))) {
   const sku = entry.productCode.toString();
   const date = entry.date;
   if (date > maxSalesDate) maxSalesDate = date;
-  if (date < minDate) minDate = date;
   const isValidationActual = date >= runDate;
   const stockNull = entry.openStock === null || entry.closeStock === null;
   if (stockNull && !isValidationActual && entry.stockStatus !== 'ANCHOR_MISSING') {
@@ -189,7 +193,7 @@ const products = [...skuMeta.entries()].sort(([a], [b]) => a.localeCompare(b)).m
   };
 });
 
-const historyYears = new Date(`${runDate}T00:00:00Z`).getUTCFullYear() - new Date(`${minDate}T00:00:00Z`).getUTCFullYear();
+const historyYears = DEFAULT_HISTORY_YEARS;
 
 const dataset = {
   contractVersion: CONTRACT_VERSION,
