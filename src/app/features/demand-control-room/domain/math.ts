@@ -108,13 +108,19 @@ export function classifyAbcRows(
   }));
 }
 
+/**
+ * Tài liệu giải pháp §Chặng 10 công thức: Sₚ = Rᵣ*,ₚ — tỷ lệ của VÒNG GẦN NHẤT đủ căn cứ tại vị
+ * trí p, KHÔNG lấy trung bình/trung vị các vòng. Nhiều vòng chỉ dùng để tính tỷ lệ LẶP tín hiệu
+ * (highRepeat/lowRepeat) — đó là hai việc khác nhau. `ratios` phải theo thứ tự vòng tăng dần theo
+ * thời gian (vòng cũ nhất trước) để phần tử cuối cùng đúng là vòng gần nhất.
+ */
 export function classifySeasonPosition(ratios: readonly number[]): 'LẶP CAO' | 'LẶP THẤP' | 'CHƯA RÕ' {
   if (!ratios.length) return 'CHƯA RÕ';
-  const average = mean(ratios);
+  const sp = ratios[ratios.length - 1];
   const highRepeat = ratios.filter(value => value >= 1.15).length / ratios.length;
   const lowRepeat = ratios.filter(value => value <= 0.85).length / ratios.length;
-  if (average >= 1.15 && meetsSeasonRepeatThreshold(highRepeat)) return 'LẶP CAO';
-  if (average <= 0.85 && meetsSeasonRepeatThreshold(lowRepeat)) return 'LẶP THẤP';
+  if (sp >= 1.15 && meetsSeasonRepeatThreshold(highRepeat)) return 'LẶP CAO';
+  if (sp <= 0.85 && meetsSeasonRepeatThreshold(lowRepeat)) return 'LẶP THẤP';
   return 'CHƯA RÕ';
 }
 

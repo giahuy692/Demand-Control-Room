@@ -91,6 +91,12 @@ describe('21 acceptance tests từ Developer Spec', () => {
     expect(classifySeasonPosition([1.13, 1.09, 1.1])).toBe('CHƯA RÕ');
   });
 
+  it('Tài liệu giải pháp §Chặng 10 công thức 6: Sₚ = Rᵣ*,ₚ (vòng gần nhất đủ căn cứ), KHÔNG lấy trung bình — vòng gần nhất ≥1,15 và lặp ≥67% ra LẶP CAO dù trung bình 3 vòng chỉ 1,10', () => {
+    // ratios theo thứ tự vòng cũ→mới; mean([0.9,1.2,1.2])=1,10 (không đạt 1,15 nếu lấy trung bình
+    // như công thức cũ) nhưng Sₚ đúng là vòng gần nhất =1,2 ≥1,15, lặp 2/3≈67% đạt ngưỡng.
+    expect(classifySeasonPosition([0.9, 1.2, 1.2])).toBe('LẶP CAO');
+  });
+
   it('T15 · Chặng 10: g1=7%, g2=30% tăng, cắt 15% và cần xem xét', () => {
     const result = calculateTrend([100, 100, 100, 100, 107, 107, 107, 107, 139.1, 139.1, 139.1, 139.1]);
     expect(result.trend).toBe('up');

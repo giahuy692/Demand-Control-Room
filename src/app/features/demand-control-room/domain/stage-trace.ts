@@ -771,15 +771,16 @@ function stage9(state: Readonly<SkuPipelineState>): StageTrace {
     };
   }
   const rounds = Array.from({ length: Math.floor(values.length / 24) }, (_, round) => values.slice(round * 24, round * 24 + 24));
+  // Tài liệu giải pháp §Chặng 10: Sₚ = Rᵣ*,ₚ (vòng GẦN NHẤT đủ căn cứ), không lấy trung bình các vòng.
   const positions = Array.from({ length: 24 }, (_, position) => {
     const ratios = rounds.map(round => mean(round) ? round[position] / mean(round) : 1);
-    const average = mean(ratios);
+    const sp = ratios[ratios.length - 1];
     const highRepeat = ratios.filter(value => value >= 1.15).length / ratios.length;
     const lowRepeat = ratios.filter(value => value <= 0.85).length / ratios.length;
-    return { position: position + 1, average, highRepeat, lowRepeat, high: average >= 1.15 && meetsSeasonRepeatThreshold(highRepeat), low: average <= 0.85 && meetsSeasonRepeatThreshold(lowRepeat) };
+    return { position: position + 1, sp, highRepeat, lowRepeat, high: sp >= 1.15 && meetsSeasonRepeatThreshold(highRepeat), low: sp <= 0.85 && meetsSeasonRepeatThreshold(lowRepeat) };
   });
   const flagged = positions.filter(item => item.high || item.low);
-  const strongest = [...positions].sort((a, b) => Math.abs(b.average - 1) - Math.abs(a.average - 1))[0];
+  const strongest = [...positions].sort((a, b) => Math.abs(b.sp - 1) - Math.abs(a.sp - 1))[0];
   return {
     heading: 'Thế số kiểm tra mùa vụ nhóm Y',
     context: 'Mùa vụ chỉ được xác nhận khi cùng một vị trí trong năm lặp tín hiệu ở ≥ 67% số vòng.',
@@ -806,8 +807,8 @@ function stage9(state: Readonly<SkuPipelineState>): StageTrace {
       },
       {
         title: 'B5 · Tính hệ số mùa vụ từng vị trí',
-        detail: 'S_p là trung bình các tỷ lệ R của cùng vị trí qua q vòng.',
-        substitution: `S_${strongest.position} = ${fmt(strongest.average, 3)}`,
+        detail: 'S_p là tỷ lệ R của VÒNG GẦN NHẤT đủ căn cứ tại cùng vị trí — không lấy trung bình hay trung vị các vòng.',
+        substitution: `S_${strongest.position} = R(vòng gần nhất, ${strongest.position}) = ${fmt(strongest.sp, 3)}`,
       },
       {
         title: 'B6 · Tính tỷ lệ lặp tín hiệu cao/thấp/trung tính',

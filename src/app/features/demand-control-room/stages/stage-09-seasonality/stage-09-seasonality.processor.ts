@@ -18,12 +18,14 @@ export function runStage9(previous: StageSnapshot, policy: SimulationPolicy): St
       continue;
     }
     const rounds = Array.from({ length: Math.floor(values.length / 24) }, (_, round) => values.slice(round * 24, round * 24 + 24));
+    // Tài liệu giải pháp §Chặng 10: Sₚ = Rᵣ*,ₚ (tỷ lệ vòng GẦN NHẤT đủ căn cứ), không phải trung
+    // bình các vòng — nhiều vòng chỉ dùng để tính tỷ lệ LẶP tín hiệu (highRepeat/lowRepeat).
     const repeatingPositions = Array.from({ length: 24 }, (_, position) => {
       const ratios = rounds.map(round => mean(round) ? round[position] / mean(round) : 1);
-      const average = mean(ratios);
+      const sp = ratios[ratios.length - 1];
       const highRepeat = ratios.filter(value => value >= 1.15).length / ratios.length;
       const lowRepeat = ratios.filter(value => value <= 0.85).length / ratios.length;
-      return (average >= 1.15 && meetsSeasonRepeatThreshold(highRepeat)) || (average <= 0.85 && meetsSeasonRepeatThreshold(lowRepeat));
+      return (sp >= 1.15 && meetsSeasonRepeatThreshold(highRepeat)) || (sp <= 0.85 && meetsSeasonRepeatThreshold(lowRepeat));
     });
     state.seasonality = repeatingPositions.some(Boolean) ? 'confirmed' : 'no-clear-season';
   }

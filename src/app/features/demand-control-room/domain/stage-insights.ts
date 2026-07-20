@@ -126,7 +126,8 @@ export function buildSeasonalityAudit(state: Readonly<SkuPipelineState>): Season
       return { value: round[position], ratio, tone: ratio >= 1.15 ? 'high' as const : ratio <= 0.85 ? 'low' as const : 'neutral' as const };
     });
     const ratios = perRound.map(item => item.ratio);
-    const sp = mean(ratios);
+    // Tài liệu giải pháp §Chặng 10: Sₚ = Rᵣ*,ₚ (vòng GẦN NHẤT đủ căn cứ), không lấy trung bình.
+    const sp = ratios[ratios.length - 1];
     const highRepeat = ratios.filter(value => value >= 1.15).length / ratios.length;
     const lowRepeat = ratios.filter(value => value <= 0.85).length / ratios.length;
     const verdict = sp >= 1.15 && meetsSeasonRepeatThreshold(highRepeat) ? 'LẶP CAO' as const : sp <= 0.85 && meetsSeasonRepeatThreshold(lowRepeat) ? 'LẶP THẤP' as const : '—' as const;
